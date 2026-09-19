@@ -22,11 +22,17 @@ present, the client prefers that provider's route; otherwise it prefers
 explicitly to override this behavior, or to `false` to leave routing entirely
 to the runtime.
 
-OpenAI API access can be supplied directly in the environment:
+API-key routes can be supplied directly in the environment:
 
 ```sh
 OPENAI_API_KEY=... nvim
+# or
+OPENCODE_API_KEY=... nvim
 ```
+
+The automatic route follows the configured credential: OpenAI selects
+`router.openai-api`; OpenCode selects `router.opencode-go`. If neither is
+present, ChatGPT OAuth remains the preferred route.
 
 or only to the Phenix child process:
 
