@@ -30,6 +30,10 @@ assert(vim.wait(10000, function()
 end, 10), "routing selection discovery timed out")
 assert(selection_error == nil, vim.inspect(selection_error))
 assert(type(selections.available) == "table" and #selections.available > 0, "no routing selections exposed")
+assert(
+  selections.selected == "router.chatgpt-plus",
+  "new Neovim sessions must prefer ChatGPT OAuth when no API-key environment is configured"
+)
 
 local function presentation_kind(item)
   local presentation = item.presentation
