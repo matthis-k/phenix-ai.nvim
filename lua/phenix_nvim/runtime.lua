@@ -8,6 +8,7 @@ local uv = vim.uv or vim.loop
 
 local state = {
   config = nil,
+  preferred_selection = nil,
   client = nil,
   sessions = nil,
   active_session = nil,
@@ -180,6 +181,7 @@ end
 
 function M.configure(config)
   state.config = vim.deepcopy(config)
+  state.preferred_selection = config_api.preferred_selection(state.config)
 end
 
 function M.on_event(listener)
@@ -239,6 +241,9 @@ function M.connect(callback)
 
   local config = state.config or require("phenix_nvim.config").get()
   state.config = config
+  if state.preferred_selection == nil then
+    state.preferred_selection = config_api.preferred_selection(config)
+  end
   state.connection = "connecting"
   state.error = nil
 
@@ -310,6 +315,49 @@ local function require_ready(callback)
   return true
 end
 
+local function apply_preferred_selection(session, callback)
+  local selection = state.preferred_selection
+  if selection == nil then
+    util.safe_call(callback, session, nil)
+    return
+  end
+  local features = state.client and state.client:features() or {}
+  if not features.selection then
+    util.safe_call(callback, session, nil)
+    return
+  end
+  local ok, request = pcall(session.selections, session)
+  if not ok then
+    util.safe_call(callback, nil, { message = tostring(request) })
+    return
+  end
+  M.track(request, function(result, error)
+    if error ~= nil then
+      util.safe_call(callback, nil, error)
+      return
+    end
+    local found = false
+    for _, item in ipairs(result and result.available or {}) do
+      if item.id == selection then
+        found = true
+        break
+      end
+    end
+    if not found or (result and result.selected == selection) then
+      util.safe_call(callback, session, nil)
+      return
+    end
+    local select_ok, select_request = pcall(session.select, session, selection)
+    if not select_ok then
+      util.safe_call(callback, nil, { message = tostring(select_request) })
+      return
+    end
+    M.track(select_request, function(_, select_error)
+      util.safe_call(callback, select_error == nil and session or nil, select_error)
+    end)
+  end)
+end
+
 function M.new_session(callback)
   if not require_ready(callback) then
     return
@@ -328,7 +376,13 @@ function M.new_session(callback)
       return
     end
     set_active(session)
-    util.safe_call(callback, session:info(), nil)
+    apply_preferred_selection(session, function(_, selection_error)
+      if selection_error ~= nil then
+        util.safe_call(callback, nil, selection_error)
+        return
+      end
+      util.safe_call(callback, session:info(), nil)
+    end)
   end)
 end
 
@@ -478,6 +532,65 @@ local function client_request(method, callback, ...)
       emit("status", M.status())
     end
     util.safe_call(callback, result, error)
+  end)
+end
+
+function M.has_environment(name)
+  if type(name) ~= "string" or name == "" then
+    return false
+  end
+  local configured = state.config and state.config.env and state.config.env[name]
+  if type(configured) == "string" and configured ~= "" then
+    return true
+  end
+  local inherited = vim.env[name]
+  return type(inherited) == "string" and inherited ~= ""
+end
+
+function M.set_preferred_selection(selection_id)
+  state.preferred_selection = selection_id
+end
+
+function M.reconnect_with_env(name, value, selection_id, callback)
+  if type(name) ~= "string" or name == "" then
+    util.safe_call(callback, nil, { message = "environment variable name must not be empty" })
+    return
+  end
+  if type(value) ~= "string" or value == "" then
+    util.safe_call(callback, nil, { message = "API key must not be empty" })
+    return
+  end
+  local session_id = active_id()
+  state.config = state.config or config_api.get()
+  state.config.env = state.config.env or {}
+  state.config.env[name] = value
+  if selection_id ~= nil then
+    state.preferred_selection = selection_id
+  end
+
+  M.disconnect()
+  M.connect(function(_, connect_error)
+    if connect_error ~= nil then
+      util.safe_call(callback, nil, connect_error)
+      return
+    end
+    if session_id == nil then
+      util.safe_call(callback, { selection = state.preferred_selection }, nil)
+      return
+    end
+    M.resume_session(session_id, function(result, resume_error)
+      if resume_error ~= nil then
+        util.safe_call(callback, nil, resume_error)
+        return
+      end
+      if selection_id == nil then
+        util.safe_call(callback, result, nil)
+        return
+      end
+      M.select(selection_id, function(selected, select_error)
+        util.safe_call(callback, select_error == nil and selected or nil, select_error)
+      end)
+    end)
   end)
 end
 
