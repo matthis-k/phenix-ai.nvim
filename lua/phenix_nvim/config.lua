@@ -13,6 +13,13 @@ local defaults = {
       env = "OPENAI_API_KEY",
       selection = "router.openai-api",
     },
+    {
+      id = "opencode-go",
+      name = "OpenCode Go API key",
+      description = "Use the OpenCode Go provider",
+      env = "OPENCODE_API_KEY",
+      selection = "router.opencode-go",
+    },
   },
   log_directory = vim.fn.stdpath("state") .. "/phenix",
   log_depth = "reference",
