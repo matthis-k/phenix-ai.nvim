@@ -17,6 +17,15 @@ assert(
   "OPENAI_API_KEY must select the OpenAI API route"
 )
 vim.env.OPENAI_API_KEY = inherited_openai_api_key
+local inherited_opencode_api_key = vim.env.OPENCODE_API_KEY
+vim.env.OPENAI_API_KEY = nil
+vim.env.OPENCODE_API_KEY = "test-opencode-key"
+assert(
+  config.preferred_selection({ selection = "auto", env = {} }) == "router.opencode-go",
+  "OPENCODE_API_KEY must select the OpenCode Go route"
+)
+vim.env.OPENCODE_API_KEY = inherited_opencode_api_key
+vim.env.OPENAI_API_KEY = inherited_openai_api_key
 assert(
   config.preferred_selection({ selection = "router.mixed" }) == "router.mixed",
   "explicit routing selection must override automatic credential routing"
