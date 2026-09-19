@@ -3,6 +3,52 @@ assert(native.interface_id == "phenix.application@1")
 
 local frontend = require("phenix_nvim")
 frontend.setup({ auto_connect = false })
+local config = require("phenix_nvim.config")
+local configured = config.get()
+assert(
+  configured.log_directory == vim.fn.stdpath("state") .. "/phenix",
+  "default Phenix log directory must live under Neovim state"
+)
+local default_env = config.runtime_env(configured)
+assert(
+  default_env.PHENIX_LOG == "dir:" .. configured.log_directory,
+  "runtime environment must pass the canonical log directory"
+)
+assert(configured.log_depth == "reference", "default log depth must be reference")
+assert(default_env.PHENIX_LOG_DEPTH == "reference", "runtime must default to reference-depth logging")
+local explicit_env = config.runtime_env({
+  env = { PHENIX_LOG = "stderr", KEEP = "value" },
+  log_directory = "/tmp/ignored",
+})
+assert(explicit_env.PHENIX_LOG == "stderr", "explicit PHENIX_LOG must override log_directory")
+assert(explicit_env.PHENIX_LOG_DEPTH == "reference", "default reference depth must remain explicit")
+assert(explicit_env.KEEP == "value", "runtime logging must preserve caller environment")
+local legacy_env = config.runtime_env({
+  env = { PHENIX_DEBUG_LOG = "/tmp/legacy.jsonl" },
+  log_directory = "/tmp/ignored",
+})
+assert(legacy_env.PHENIX_LOG == nil, "legacy explicit debug log must not be shadowed")
+assert(legacy_env.PHENIX_DEBUG_LOG == "/tmp/legacy.jsonl")
+local disabled_env = config.runtime_env({ env = {}, log_directory = false })
+assert(disabled_env.PHENIX_LOG == nil, "log_directory=false must disable default sink injection")
+local inherited_log = vim.env.PHENIX_LOG
+vim.env.PHENIX_LOG = "stdout"
+local inherited_env = config.runtime_env({ env = {}, log_directory = "/tmp/ignored" })
+assert(inherited_env.PHENIX_LOG == nil, "inherited PHENIX_LOG must not be shadowed")
+vim.env.PHENIX_LOG = inherited_log
+local explicit_depth = config.runtime_env({
+  env = { PHENIX_LOG_DEPTH = "summary" },
+  log_directory = "/tmp/phenix",
+  log_depth = "reference",
+})
+assert(explicit_depth.PHENIX_LOG_DEPTH == "summary", "explicit PHENIX_LOG_DEPTH must win")
+local disabled_depth = config.runtime_env({ env = {}, log_directory = "/tmp/phenix", log_depth = false })
+assert(disabled_depth.PHENIX_LOG_DEPTH == nil, "log_depth=false must disable default depth injection")
+local inherited_depth = vim.env.PHENIX_LOG_DEPTH
+vim.env.PHENIX_LOG_DEPTH = "inline"
+local inherited_depth_env = config.runtime_env({ env = {}, log_directory = "/tmp/phenix", log_depth = "reference" })
+assert(inherited_depth_env.PHENIX_LOG_DEPTH == nil, "inherited PHENIX_LOG_DEPTH must not be shadowed")
+vim.env.PHENIX_LOG_DEPTH = inherited_depth
 vim.cmd.runtime("plugin/phenix.lua")
 assert(type(frontend.reference) == "function")
 assert(type(frontend.reference_at) == "function")

@@ -103,6 +103,12 @@
                 ];
               }
               ''
+                export HOME="$TMPDIR/home"
+                export XDG_STATE_HOME="$TMPDIR/state"
+                export XDG_CACHE_HOME="$TMPDIR/cache"
+                export XDG_CONFIG_HOME="$TMPDIR/config"
+                mkdir -p "$HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME" "$XDG_CONFIG_HOME"
+
                 test "$(grep -R -l 'require(\"phenix\")' ${source}/lua | wc -l)" -eq 1
                 if grep -R '_phenix/' ${source}/lua; then
                   echo "frontend Lua must not contain raw Phenix wire method ids" >&2
@@ -149,10 +155,14 @@
 
                 export PHENIX_STATE_DB="$TMPDIR/phenix-ai-nvim-fixture.sqlite"
                 export PHENIX_FIXTURE_ACP="${phenixAcpFixture}/bin/phenix-acp-fixture"
+                export PHENIX_NVIM_LOG_DIRECTORY="$TMPDIR/phenix-ai-nvim-log"
+                rm -rf "$PHENIX_NVIM_LOG_DIRECTORY"
                 nvim --headless -u NONE \
                   --cmd ${pkgs.lib.escapeShellArg "set rtp^=${plugin}"} \
                   -c ${pkgs.lib.escapeShellArg "lua dofile('${source}/tests/runtime_model_e2e.lua')"} \
                   -c qa
+                test -s "$PHENIX_NVIM_LOG_DIRECTORY/phenix.log"
+                test -d "$PHENIX_NVIM_LOG_DIRECTORY/objects"
 
                 touch "$out"
               '';
