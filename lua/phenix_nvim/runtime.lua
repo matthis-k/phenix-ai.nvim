@@ -347,6 +347,10 @@ local function apply_preferred_selection(session, callback)
       util.safe_call(callback, session, nil)
       return
     end
+    if result and result.selected ~= nil and result.selected ~= "default" then
+      util.safe_call(callback, session, nil)
+      return
+    end
     local select_ok, select_request = pcall(session.select, session, selection)
     if not select_ok then
       util.safe_call(callback, nil, { message = tostring(select_request) })
@@ -401,7 +405,13 @@ function M.resume_session(session_id, callback)
       return
     end
     set_active(session)
-    util.safe_call(callback, session:projection() or session:info(), nil)
+    apply_preferred_selection(session, function(_, selection_error)
+      if selection_error ~= nil then
+        util.safe_call(callback, nil, selection_error)
+        return
+      end
+      util.safe_call(callback, session:projection() or session:info(), nil)
+    end)
   end)
 end
 
