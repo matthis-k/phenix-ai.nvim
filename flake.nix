@@ -103,6 +103,12 @@
                 ];
               }
               ''
+                export HOME="$TMPDIR/home"
+                export XDG_STATE_HOME="$TMPDIR/state"
+                export XDG_CACHE_HOME="$TMPDIR/cache"
+                export XDG_CONFIG_HOME="$TMPDIR/config"
+                mkdir -p "$HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME" "$XDG_CONFIG_HOME"
+
                 test "$(grep -R -l 'require(\"phenix\")' ${source}/lua | wc -l)" -eq 1
                 if grep -R '_phenix/' ${source}/lua; then
                   echo "frontend Lua must not contain raw Phenix wire method ids" >&2
