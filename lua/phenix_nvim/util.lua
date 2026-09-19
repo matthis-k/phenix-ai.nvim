@@ -8,6 +8,15 @@ function M.notify(message, level)
   vim.notify(message, level or vim.log.levels.INFO, { title = "Phenix" })
 end
 
+function M.input_secret(prompt, callback)
+  local ok, value = pcall(vim.fn.inputsecret, prompt)
+  if not ok then
+    M.safe_call(callback, nil, { message = tostring(value) })
+    return
+  end
+  M.safe_call(callback, value, nil)
+end
+
 function M.request_poll(request)
   local result = M.pack(request:poll())
 

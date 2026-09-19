@@ -1,0 +1,11 @@
+{
+  "dependsOn": [
+    "phenix-ai"
+  ],
+  "updateInputs": [
+    "phenix-ai"
+  ],
+  "checks": [
+    "nix flake check"
+  ]
+}

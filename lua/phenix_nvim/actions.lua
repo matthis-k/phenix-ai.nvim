@@ -1,5 +1,6 @@
 local compose = require("phenix_nvim.compose.buffer")
 local compose_model = require("phenix_nvim.compose.model")
+local config_api = require("phenix_nvim.config")
 local context = require("phenix_nvim.context")
 local image = require("phenix_nvim.image")
 local runtime = require("phenix_nvim.runtime")
@@ -222,6 +223,75 @@ local function poll_authentication(method_id, generation, attempt)
   end)
 end
 
+local function api_key_authentication_methods()
+  local methods = {}
+  for _, provider in ipairs(config_api.api_key_providers()) do
+    if type(provider) == "table"
+      and type(provider.id) == "string"
+      and provider.id ~= ""
+      and type(provider.env) == "string"
+      and provider.env ~= ""
+    then
+      local description = provider.description
+      if description == nil or description == "" then
+        description = "Configure through $" .. provider.env
+      else
+        description = description .. " · $" .. provider.env
+      end
+      table.insert(methods, {
+        id = "frontend.api-key:" .. provider.id,
+        name = provider.name or provider.id,
+        description = description,
+        _phenix_api_key = provider,
+      })
+    end
+  end
+  return methods
+end
+
+local function use_api_key(provider)
+  local selection = provider.selection
+  if selection ~= nil then
+    runtime.set_preferred_selection(selection)
+  end
+
+  if runtime.has_environment(provider.env) then
+    if runtime.active_session() ~= nil and selection ~= nil then
+      runtime.select(selection, function(_, error)
+        if error ~= nil then
+          util.notify(vim.inspect(error), vim.log.levels.ERROR)
+          return
+        end
+        util.notify((provider.name or provider.id) .. " selected", vim.log.levels.INFO)
+      end)
+    else
+      util.notify((provider.name or provider.id) .. " is configured through $" .. provider.env, vim.log.levels.INFO)
+    end
+    return
+  end
+
+  util.input_secret((provider.name or provider.id) .. ": ", function(secret, input_error)
+    if input_error ~= nil then
+      util.notify(vim.inspect(input_error), vim.log.levels.ERROR)
+      return
+    end
+    if secret == nil then
+      return
+    end
+    if type(secret) ~= "string" or secret:match("%S") == nil then
+      util.notify("API key must not be empty", vim.log.levels.ERROR)
+      return
+    end
+    runtime.reconnect_with_env(provider.env, secret, selection, function(_, error)
+      if error ~= nil then
+        util.notify(vim.inspect(error), vim.log.levels.ERROR)
+        return
+      end
+      util.notify((provider.name or provider.id) .. " configured", vim.log.levels.INFO)
+    end)
+  end)
+end
+
 function M.authenticate()
   if type(runtime.list_authentication_methods) ~= "function" or type(runtime.authenticate) ~= "function" then
     util.notify("The installed Phenix runtime does not expose application authentication yet", vim.log.levels.WARN)
@@ -232,7 +302,8 @@ function M.authenticate()
       util.notify(vim.inspect(error), vim.log.levels.ERROR)
       return
     end
-    local methods = result and result.methods or {}
+    local methods = vim.deepcopy(result and result.methods or {})
+    vim.list_extend(methods, api_key_authentication_methods())
     if #methods == 0 then
       util.notify("No Phenix authentication methods are available", vim.log.levels.WARN)
       return
@@ -248,6 +319,10 @@ function M.authenticate()
       end,
     }, function(method)
       if method == nil then
+        return
+      end
+      if method._phenix_api_key ~= nil then
+        use_api_key(method._phenix_api_key)
         return
       end
       auth_generation = auth_generation + 1

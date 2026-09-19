@@ -5,6 +5,31 @@ local frontend = require("phenix_nvim")
 frontend.setup({ auto_connect = false })
 local config = require("phenix_nvim.config")
 local configured = config.get()
+local inherited_openai_api_key = vim.env.OPENAI_API_KEY
+vim.env.OPENAI_API_KEY = nil
+assert(
+  config.preferred_selection({ selection = "auto", env = {} }) == "router.chatgpt-plus",
+  "ChatGPT OAuth must be the automatic route when no API key is configured"
+)
+vim.env.OPENAI_API_KEY = "test-api-key"
+assert(
+  config.preferred_selection({ selection = "auto", env = {} }) == "router.openai-api",
+  "OPENAI_API_KEY must select the OpenAI API route"
+)
+vim.env.OPENAI_API_KEY = inherited_openai_api_key
+local inherited_opencode_api_key = vim.env.OPENCODE_API_KEY
+vim.env.OPENAI_API_KEY = nil
+vim.env.OPENCODE_API_KEY = "test-opencode-key"
+assert(
+  config.preferred_selection({ selection = "auto", env = {} }) == "router.opencode-go",
+  "OPENCODE_API_KEY must select the OpenCode Go route"
+)
+vim.env.OPENCODE_API_KEY = inherited_opencode_api_key
+vim.env.OPENAI_API_KEY = inherited_openai_api_key
+assert(
+  config.preferred_selection({ selection = "router.mixed" }) == "router.mixed",
+  "explicit routing selection must override automatic credential routing"
+)
 assert(
   configured.log_directory == vim.fn.stdpath("state") .. "/phenix",
   "default Phenix log directory must live under Neovim state"
@@ -60,6 +85,58 @@ assert(frontend.choose_routing_profile == nil)
 assert(vim.fn.exists(":PhenixSelect") == 2)
 assert(vim.fn.exists(":PhenixModel") == 0)
 assert(vim.fn.exists(":PhenixRoute") == 0)
+
+local runtime = require("phenix_nvim.runtime")
+local actions = require("phenix_nvim.actions")
+local original_auth_methods = runtime.list_authentication_methods
+local original_has_environment = runtime.has_environment
+local original_reconnect_with_env = runtime.reconnect_with_env
+local original_select_ui = vim.ui.select
+local util = require("phenix_nvim.util")
+local original_input_secret = util.input_secret
+local original_notify = vim.notify
+local api_key_call = nil
+
+runtime.list_authentication_methods = function(callback)
+  callback({ methods = {} }, nil)
+end
+runtime.has_environment = function(_name)
+  return false
+end
+runtime.reconnect_with_env = function(name, value, selection, callback)
+  api_key_call = { name = name, value = value, selection = selection }
+  callback({}, nil)
+end
+vim.ui.select = function(items, options, callback)
+  assert(options.prompt == "Phenix authentication")
+  local selected = nil
+  for _, item in ipairs(items) do
+    if item._phenix_api_key ~= nil then
+      selected = item
+      break
+    end
+  end
+  assert(selected ~= nil, "PhenixAuth must offer configured API-key providers")
+  callback(selected)
+end
+util.input_secret = function(prompt, callback)
+  assert(prompt == "OpenAI API key: ", "API-key input must use the provider label")
+  callback("entered-api-key", nil)
+end
+vim.notify = function() end
+
+actions.authenticate()
+assert(api_key_call ~= nil, "API-key authentication must reconfigure the runtime")
+assert(api_key_call.name == "OPENAI_API_KEY")
+assert(api_key_call.value == "entered-api-key")
+assert(api_key_call.selection == "router.openai-api")
+
+runtime.list_authentication_methods = original_auth_methods
+runtime.has_environment = original_has_environment
+runtime.reconnect_with_env = original_reconnect_with_env
+vim.ui.select = original_select_ui
+util.input_secret = original_input_secret
+vim.notify = original_notify
 
 local context = require("phenix_nvim.context")
 local direct = assert(context.typed_reference("file:///tmp/reference.txt"))
