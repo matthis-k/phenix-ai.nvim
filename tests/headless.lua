@@ -83,7 +83,8 @@ local original_auth_methods = runtime.list_authentication_methods
 local original_has_environment = runtime.has_environment
 local original_reconnect_with_env = runtime.reconnect_with_env
 local original_select_ui = vim.ui.select
-local original_input_ui = vim.ui.input
+local util = require("phenix_nvim.util")
+local original_input_secret = util.input_secret
 local original_notify = vim.notify
 local api_key_call = nil
 
@@ -109,9 +110,9 @@ vim.ui.select = function(items, options, callback)
   assert(selected ~= nil, "PhenixAuth must offer configured API-key providers")
   callback(selected)
 end
-vim.ui.input = function(options, callback)
-  assert(options.secret == true, "API-key input must request a secret field")
-  callback("entered-api-key")
+util.input_secret = function(prompt, callback)
+  assert(prompt == "OpenAI API key: ", "API-key input must use the provider label")
+  callback("entered-api-key", nil)
 end
 vim.notify = function() end
 
@@ -125,7 +126,7 @@ runtime.list_authentication_methods = original_auth_methods
 runtime.has_environment = original_has_environment
 runtime.reconnect_with_env = original_reconnect_with_env
 vim.ui.select = original_select_ui
-vim.ui.input = original_input_ui
+util.input_secret = original_input_secret
 vim.notify = original_notify
 
 local context = require("phenix_nvim.context")
