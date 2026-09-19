@@ -270,10 +270,11 @@ local function use_api_key(provider)
     return
   end
 
-  vim.ui.input({
-    prompt = (provider.name or provider.id) .. ": ",
-    secret = true,
-  }, function(secret)
+  util.input_secret((provider.name or provider.id) .. ": ", function(secret, input_error)
+    if input_error ~= nil then
+      util.notify(vim.inspect(input_error), vim.log.levels.ERROR)
+      return
+    end
     if secret == nil then
       return
     end
