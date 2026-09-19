@@ -149,10 +149,14 @@
 
                 export PHENIX_STATE_DB="$TMPDIR/phenix-ai-nvim-fixture.sqlite"
                 export PHENIX_FIXTURE_ACP="${phenixAcpFixture}/bin/phenix-acp-fixture"
+                export PHENIX_NVIM_LOG_DIRECTORY="$TMPDIR/phenix-ai-nvim-log"
+                rm -rf "$PHENIX_NVIM_LOG_DIRECTORY"
                 nvim --headless -u NONE \
                   --cmd ${pkgs.lib.escapeShellArg "set rtp^=${plugin}"} \
                   -c ${pkgs.lib.escapeShellArg "lua dofile('${source}/tests/runtime_model_e2e.lua')"} \
                   -c qa
+                test -s "$PHENIX_NVIM_LOG_DIRECTORY/phenix.log"
+                test -d "$PHENIX_NVIM_LOG_DIRECTORY/objects"
 
                 touch "$out"
               '';

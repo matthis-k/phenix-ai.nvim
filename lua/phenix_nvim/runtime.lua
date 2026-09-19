@@ -1,4 +1,5 @@
 local native = require("phenix")
+local config_api = require("phenix_nvim.config")
 local interaction = require("phenix_nvim.interaction")
 local util = require("phenix_nvim.util")
 
@@ -250,7 +251,7 @@ function M.connect(callback)
   local ok, client = pcall(facade, {
     command = config.command,
     args = config.args,
-    env = config.env,
+    env = config_api.runtime_env(config),
     interactions = {
       permission = function(request, reply)
         vim.schedule(function()
