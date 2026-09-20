@@ -24,14 +24,22 @@ vim.cmd.runtime("plugin/phenix.lua")
 
 local connected = false
 local connection_error = nil
+local created_session = nil
+local create_error = nil
 frontend.connect(function(_, err)
   connection_error = err
   connected = true
 end)
+frontend.new_session(function(result, err)
+  created_session = result
+  create_error = err
+end)
 assert(vim.wait(10000, function()
-  return connected
-end, 10), "deterministic fixture connection timed out")
+  return connected and (created_session ~= nil or create_error ~= nil)
+end, 10), "deterministic fixture connection/session bootstrap timed out")
 assert(connection_error == nil, vim.inspect(connection_error))
+assert(create_error == nil, vim.inspect(create_error))
+assert(created_session ~= nil, "session request issued while connecting was dropped")
 assert(vim.wait(10000, function()
   return vim.fn.filereadable(log_file) == 1 and vim.fn.getfsize(log_file) > 0
 end, 10), "Neovim-configured Phenix root log was not created")
@@ -39,10 +47,6 @@ local initial_log = table.concat(vim.fn.readfile(log_file), "\n")
 assert(initial_log:find('"kind":"debug_started"', 1, true) ~= nil, "runtime startup was not logged")
 local initial_log_lines = #vim.fn.readfile(log_file)
 
-frontend.new_session()
-assert(vim.wait(10000, function()
-  return runtime.active_session() ~= nil
-end, 10), "deterministic fixture session creation timed out")
 local session_id = assert(runtime.active_session())
 
 local selections = nil
