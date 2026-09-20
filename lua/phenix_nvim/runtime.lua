@@ -307,12 +307,30 @@ function M.disconnect()
   emit("status", M.status())
 end
 
-local function require_ready(callback)
-  if state.client == nil or state.sessions == nil or state.connection ~= "ready" then
-    util.safe_call(callback, nil, { message = "Phenix is not ready" })
-    return false
+local function is_ready()
+  return state.client ~= nil and state.sessions ~= nil and state.connection == "ready"
+end
+
+local function ensure_ready(callback, continuation)
+  if is_ready() then
+    continuation()
+    return
   end
-  return true
+  if state.connection == "failed" then
+    util.safe_call(callback, nil, state.error or { message = "Phenix connection failed" })
+    return
+  end
+  M.connect(function(_, error)
+    if error ~= nil then
+      util.safe_call(callback, nil, error)
+      return
+    end
+    if not is_ready() then
+      util.safe_call(callback, nil, { message = "Phenix connection did not become ready" })
+      return
+    end
+    continuation()
+  end)
 end
 
 local function selection_presentation(item)
@@ -405,91 +423,87 @@ local function apply_preferred_selection(session, callback)
 end
 
 function M.new_session(callback)
-  if not require_ready(callback) then
-    return
-  end
-  local ok, request = pcall(state.sessions.create, state.sessions, {
-    working_directory = vim.fn.getcwd(),
-    title = nil,
-  })
-  if not ok then
-    util.safe_call(callback, nil, { message = tostring(request) })
-    return
-  end
-  M.track(request, function(session, error)
-    if error ~= nil then
-      util.safe_call(callback, nil, error)
+  ensure_ready(callback, function()
+    local ok, request = pcall(state.sessions.create, state.sessions, {
+      working_directory = vim.fn.getcwd(),
+      title = nil,
+    })
+    if not ok then
+      util.safe_call(callback, nil, { message = tostring(request) })
       return
     end
-    set_active(session)
-    apply_preferred_selection(session, function(_, selection_error)
-      if selection_error ~= nil then
-        util.safe_call(callback, nil, selection_error)
+    M.track(request, function(session, error)
+      if error ~= nil then
+        util.safe_call(callback, nil, error)
         return
       end
-      util.safe_call(callback, session:info(), nil)
+      set_active(session)
+      apply_preferred_selection(session, function(_, selection_error)
+        if selection_error ~= nil then
+          util.safe_call(callback, nil, selection_error)
+          return
+        end
+        util.safe_call(callback, session:info(), nil)
+      end)
     end)
   end)
 end
 
 function M.resume_session(session_id, callback)
-  if not require_ready(callback) then
-    return
-  end
-  local ok, request = pcall(state.sessions.resume, state.sessions, session_id)
-  if not ok then
-    util.safe_call(callback, nil, { message = tostring(request) })
-    return
-  end
-  M.track(request, function(session, error)
-    if error ~= nil then
-      util.safe_call(callback, nil, error)
+  ensure_ready(callback, function()
+    local ok, request = pcall(state.sessions.resume, state.sessions, session_id)
+    if not ok then
+      util.safe_call(callback, nil, { message = tostring(request) })
       return
     end
-    set_active(session)
-    apply_preferred_selection(session, function(_, selection_error)
-      if selection_error ~= nil then
-        util.safe_call(callback, nil, selection_error)
+    M.track(request, function(session, error)
+      if error ~= nil then
+        util.safe_call(callback, nil, error)
         return
       end
-      util.safe_call(callback, session:projection() or session:info(), nil)
+      set_active(session)
+      apply_preferred_selection(session, function(_, selection_error)
+        if selection_error ~= nil then
+          util.safe_call(callback, nil, selection_error)
+          return
+        end
+        util.safe_call(callback, session:projection() or session:info(), nil)
+      end)
     end)
   end)
 end
 
 function M.list_sessions(callback)
-  if not require_ready(callback) then
-    return
-  end
-  local ok, request = pcall(state.sessions.list, state.sessions, {})
-  if not ok then
-    util.safe_call(callback, nil, { message = tostring(request) })
-    return
-  end
-  M.track(request, callback)
+  ensure_ready(callback, function()
+    local ok, request = pcall(state.sessions.list, state.sessions, {})
+    if not ok then
+      util.safe_call(callback, nil, { message = tostring(request) })
+      return
+    end
+    M.track(request, callback)
+  end)
 end
 
 function M.close_session(session_id, callback)
-  if not require_ready(callback) then
-    return
-  end
-  local session = state.sessions:cached(session_id)
-  if session == nil then
-    util.safe_call(callback, nil, { message = "unknown Phenix session " .. tostring(session_id) })
-    return
-  end
-  local request = session:close()
-  M.track(request, function(result, error)
-    if error == nil then
-      state.session_state.sessions[session_id] = nil
-      if active_id() == session_id then
-        state.active_session = nil
-        state.context_generation = state.context_generation + 1
-      end
-      emit("sessions", state.session_state)
-      emit("status", M.status())
+  ensure_ready(callback, function()
+    local session = state.sessions:cached(session_id)
+    if session == nil then
+      util.safe_call(callback, nil, { message = "unknown Phenix session " .. tostring(session_id) })
+      return
     end
-    util.safe_call(callback, result, error)
+    local request = session:close()
+    M.track(request, function(result, error)
+      if error == nil then
+        state.session_state.sessions[session_id] = nil
+        if active_id() == session_id then
+          state.active_session = nil
+          state.context_generation = state.context_generation + 1
+        end
+        emit("sessions", state.session_state)
+        emit("status", M.status())
+      end
+      util.safe_call(callback, result, error)
+    end)
   end)
 end
 
@@ -502,88 +516,89 @@ function M.active_session_object()
 end
 
 function M.prompt(session_id, segments, callback)
-  if not require_ready(callback) then
-    return
-  end
-  local session = state.sessions:cached(session_id)
-  if session == nil then
-    util.safe_call(callback, nil, { message = "unknown Phenix session " .. tostring(session_id) })
-    return
-  end
-  local content, content_error = application_content(segments)
-  if content == nil then
-    util.safe_call(callback, nil, { message = content_error })
-    return
-  end
-  local ok, request = pcall(session.prompt, session, content)
-  if not ok then
-    util.safe_call(callback, nil, { message = tostring(request) })
-    return
-  end
-  M.track(request, function(result, error)
-    if error == nil then
-      refresh_projection(session_id)
-      local features = state.client:features()
-      if features.provenance and result and result.execution_id then
-        local provenance_ok, provenance = pcall(session.provenance, session, result.execution_id)
-        if provenance_ok then
-          M.track(provenance, function()
-            emit("status", M.status())
-          end)
+  ensure_ready(callback, function()
+    local session = state.sessions:cached(session_id)
+    if session == nil then
+      util.safe_call(callback, nil, { message = "unknown Phenix session " .. tostring(session_id) })
+      return
+    end
+    local content, content_error = application_content(segments)
+    if content == nil then
+      util.safe_call(callback, nil, { message = content_error })
+      return
+    end
+    local ok, request = pcall(session.prompt, session, content)
+    if not ok then
+      util.safe_call(callback, nil, { message = tostring(request) })
+      return
+    end
+    M.track(request, function(result, error)
+      if error == nil then
+        refresh_projection(session_id)
+        local features = state.client:features()
+        if features.provenance and result and result.execution_id then
+          local provenance_ok, provenance = pcall(session.provenance, session, result.execution_id)
+          if provenance_ok then
+            M.track(provenance, function()
+              emit("status", M.status())
+            end)
+          end
         end
       end
-    end
-    util.safe_call(callback, result, error)
+      util.safe_call(callback, result, error)
+    end)
   end)
 end
 
+local unpack_args = table.unpack or unpack
+
 local function active_session_request(method, callback, ...)
-  if not require_ready(callback) then
-    return
-  end
-  local session = state.active_session
-  if session == nil then
-    util.safe_call(callback, nil, { message = "no active Phenix session" })
-    return
-  end
-  local callable = session[method]
-  if type(callable) ~= "function" then
-    util.safe_call(callback, nil, { message = "Phenix session does not support " .. method })
-    return
-  end
-  local ok, request = pcall(callable, session, ...)
-  if not ok then
-    util.safe_call(callback, nil, { message = tostring(request) })
-    return
-  end
-  M.track(request, function(result, error)
-    if error == nil then
-      emit("status", M.status())
+  local args = { n = select("#", ...), ... }
+  ensure_ready(callback, function()
+    local session = state.active_session
+    if session == nil then
+      util.safe_call(callback, nil, { message = "no active Phenix session" })
+      return
     end
-    util.safe_call(callback, result, error)
+    local callable = session[method]
+    if type(callable) ~= "function" then
+      util.safe_call(callback, nil, { message = "Phenix session does not support " .. method })
+      return
+    end
+    local ok, request = pcall(callable, session, unpack_args(args, 1, args.n))
+    if not ok then
+      util.safe_call(callback, nil, { message = tostring(request) })
+      return
+    end
+    M.track(request, function(result, error)
+      if error == nil then
+        emit("status", M.status())
+      end
+      util.safe_call(callback, result, error)
+    end)
   end)
 end
 
 local function client_request(method, callback, ...)
-  if not require_ready(callback) then
-    return
-  end
-  local callable = state.client[method]
-  if type(callable) ~= "function" then
-    util.safe_call(callback, nil, { message = "Phenix client does not support " .. method })
-    return
-  end
-  local ok, request = pcall(callable, state.client, ...)
-  if not ok then
-    util.safe_call(callback, nil, { message = tostring(request) })
-    return
-  end
-  M.track(request, function(result, error)
-    if error == nil then
-      refresh_active_context()
-      emit("status", M.status())
+  local args = { n = select("#", ...), ... }
+  ensure_ready(callback, function()
+    local callable = state.client[method]
+    if type(callable) ~= "function" then
+      util.safe_call(callback, nil, { message = "Phenix client does not support " .. method })
+      return
     end
-    util.safe_call(callback, result, error)
+    local ok, request = pcall(callable, state.client, unpack_args(args, 1, args.n))
+    if not ok then
+      util.safe_call(callback, nil, { message = tostring(request) })
+      return
+    end
+    M.track(request, function(result, error)
+      if error == nil then
+        refresh_active_context()
+        emit("status", M.status())
+      end
+      util.safe_call(callback, result, error)
+    end)
   end)
 end
 
@@ -680,17 +695,15 @@ function M.cancel_active()
 end
 
 function M.decide_review(review, decision, callback)
-  if state.client == nil or state.connection ~= "ready" then
-    util.safe_call(callback, nil, { message = "Phenix is not ready" })
-    return
-  end
-  local normalized = string.lower(decision or "")
-  local ok, request = pcall(state.client.decide_review, state.client, review, normalized)
-  if not ok then
-    util.safe_call(callback, nil, { message = tostring(request) })
-    return
-  end
-  M.track(request, callback)
+  ensure_ready(callback, function()
+    local normalized = string.lower(decision or "")
+    local ok, request = pcall(state.client.decide_review, state.client, review, normalized)
+    if not ok then
+      util.safe_call(callback, nil, { message = tostring(request) })
+      return
+    end
+    M.track(request, callback)
+  end)
 end
 
 function M.refresh_session_state(callback)
