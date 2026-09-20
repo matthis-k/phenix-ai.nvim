@@ -315,6 +315,25 @@ local function require_ready(callback)
   return true
 end
 
+local function selection_presentation(item)
+  local presentation = item and item.presentation
+  if type(presentation) == "table" then
+    return string.lower(tostring(presentation.kind or ""))
+  end
+  return string.lower(tostring(presentation or ""))
+end
+
+local function selection_provider(item)
+  if type(item) ~= "table" or type(item.description) ~= "string" then
+    return nil
+  end
+  local provider = item.description:match("^%s*([^%s]+)")
+  if provider == nil or provider == "" then
+    return nil
+  end
+  return provider
+end
+
 local function apply_preferred_selection(session, callback)
   local selection = state.preferred_selection
   if selection == nil then
@@ -336,21 +355,44 @@ local function apply_preferred_selection(session, callback)
       util.safe_call(callback, nil, error)
       return
     end
-    local found = false
+
+    local preferred = nil
+    local selected = nil
     for _, item in ipairs(result and result.available or {}) do
       if item.id == selection then
-        found = true
-        break
+        preferred = item
+      end
+      if result and item.id == result.selected then
+        selected = item
       end
     end
-    if not found or (result and result.selected == selection) then
+
+    if preferred == nil or (result and result.selected == selection) then
       util.safe_call(callback, session, nil)
       return
     end
-    if result and result.selected ~= nil and result.selected ~= "default" then
+
+    local should_reconcile = result == nil
+      or result.selected == nil
+      or result.selected == "default"
+      or selected == nil
+
+    if not should_reconcile
+      and selection_presentation(selected) == "model"
+      and selection_presentation(preferred) == "router"
+    then
+      local selected_provider = selection_provider(selected)
+      local preferred_provider = selection_provider(preferred)
+      should_reconcile = selected_provider ~= nil
+        and preferred_provider ~= nil
+        and selected_provider ~= preferred_provider
+    end
+
+    if not should_reconcile then
       util.safe_call(callback, session, nil)
       return
     end
+
     local select_ok, select_request = pcall(session.select, session, selection)
     if not select_ok then
       util.safe_call(callback, nil, { message = tostring(select_request) })
