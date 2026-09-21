@@ -407,17 +407,6 @@ local function selection_presentation(item)
   return string.lower(tostring(presentation or ""))
 end
 
-local function selection_provider(item)
-  if type(item) ~= "table" or type(item.description) ~= "string" then
-    return nil
-  end
-  local provider = item.description:match("^%s*([^%s]+)")
-  if provider == nil or provider == "" then
-    return nil
-  end
-  return provider
-end
-
 local function apply_preferred_selection(session, callback)
   local selection = state.preferred_selection
   if selection == nil then
@@ -469,8 +458,8 @@ local function apply_preferred_selection(session, callback)
       and selection_presentation(selected) == "model"
       and selection_presentation(preferred) == "router"
     then
-      local selected_provider = selection_provider(selected)
-      local preferred_provider = selection_provider(preferred)
+      local selected_provider = selected.provider
+      local preferred_provider = preferred.provider
       should_reconcile = selected_provider ~= nil
         and preferred_provider ~= nil
         and selected_provider ~= preferred_provider

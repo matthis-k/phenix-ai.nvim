@@ -228,6 +228,35 @@ assert(missing.calls == 1 and missing.error.message:find("unavailable"))
 assert(runtime.active_session() == nil and next_client.session_closes == 1)
 runtime.disconnect()
 -- Advance a monotonic clock without sleeping or relying on test-runner limits.
+-- Provider identity comes from typed metadata even when descriptions contradict it.
+for _, same_provider in ipairs({ false, true }) do
+  next_client = client()
+  next_client.features_value = { selection = true }
+  local selected_count = 0
+  next_client.session.selections = function()
+    return completed({ selected = "fixed", available = {
+      { id = "fixed", presentation = "model", provider = same_provider and "codex" or "api", description = "codex misleading display text" },
+      { id = "router.test", presentation = "router", provider = "codex", description = "api other display text" },
+    } })
+  end
+  next_client.session.select = function()
+    selected_count = selected_count + 1
+    return completed({})
+  end
+  runtime.set_preferred_selection("router.test")
+  runtime.connect()
+  next_client:status_event("ready")
+  runtime.tick()
+  local routed = result()
+  runtime.new_session(routed.callback)
+  runtime.tick()
+  runtime.tick()
+  runtime.tick()
+  assert(routed.calls == 1 and routed.error == nil)
+  assert(selected_count == (same_provider and 0 or 1))
+  runtime.disconnect()
+end
+
 local uv = vim.uv or vim.loop
 local original_hrtime = uv.hrtime
 local clock = 0

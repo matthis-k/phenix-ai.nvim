@@ -26,7 +26,8 @@ Routing defaults to `auto`: when a configured API-key environment variable is
 present, the client prefers that provider's route; otherwise it prefers
 `router.chatgpt-plus` and the existing ChatGPT OAuth flow. Set `selection`
 explicitly to override this behavior, or to `false` to leave routing entirely
-to the runtime.
+to the runtime. Resume reconciliation uses typed provider metadata from the
+runtime, so changes to route descriptions do not change routing behavior.
 
 API-key routes can be supplied directly in the environment:
 
