@@ -48,10 +48,11 @@ local api_model = nil
 local router = nil
 for _, item in ipairs(selections.available) do
   local kind = presentation_kind(item)
-  if kind == "model" and type(item.description) == "string" then
-    if item.description:find("openai%-codex", 1, false) and codex_model == nil then
+  assert(type(item.provider) == "string" and item.provider ~= "", "routing provider metadata missing")
+  if kind == "model" then
+    if item.provider == "openai-codex" and codex_model == nil then
       codex_model = item
-    elseif item.description:find("openai%-api", 1, false) and api_model == nil then
+    elseif item.provider == "openai-api" and api_model == nil then
       api_model = item
     end
   elseif kind == "router" and router == nil then

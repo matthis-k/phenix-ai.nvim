@@ -227,4 +227,88 @@ runtime.tick()
 assert(missing.calls == 1 and missing.error.message:find("unavailable"))
 assert(runtime.active_session() == nil and next_client.session_closes == 1)
 runtime.disconnect()
+-- Advance a monotonic clock without sleeping or relying on test-runner limits.
+-- Provider identity comes from typed metadata even when descriptions contradict it.
+for _, same_provider in ipairs({ false, true }) do
+  next_client = client()
+  next_client.features_value = { selection = true }
+  local selected_count = 0
+  next_client.session.selections = function()
+    return completed({ selected = "fixed", available = {
+      { id = "fixed", presentation = "model", provider = same_provider and "codex" or "api", description = "codex misleading display text" },
+      { id = "router.test", presentation = "router", provider = "codex", description = "api other display text" },
+    } })
+  end
+  next_client.session.select = function()
+    selected_count = selected_count + 1
+    return completed({})
+  end
+  runtime.set_preferred_selection("router.test")
+  runtime.connect()
+  next_client:status_event("ready")
+  runtime.tick()
+  local routed = result()
+  runtime.new_session(routed.callback)
+  runtime.tick()
+  runtime.tick()
+  runtime.tick()
+  assert(routed.calls == 1 and routed.error == nil)
+  assert(selected_count == (same_provider and 0 or 1))
+  runtime.disconnect()
+end
+
+local uv = vim.uv or vim.loop
+local original_hrtime = uv.hrtime
+local clock = 0
+uv.hrtime = function() return clock * 1000000 end
+runtime.configure(config.setup({ selection = false, poll_interval_ms = 60000,
+  connect_timeout_ms = 100, request_timeout_ms = 200, prompt_timeout_ms = 1000 }))
+next_client = client()
+local timed_connect, timed_create = result(), result()
+runtime.connect(timed_connect.callback)
+runtime.new_session(timed_create.callback)
+clock = 100
+runtime.tick()
+assert(timed_connect.calls == 1 and timed_connect.error.kind == "timeout")
+assert(timed_create.calls == 1 and timed_create.error == timed_connect.error)
+assert(next_client.closed == 1 and runtime.status().connection == "failed")
+next_client:status_event("ready")
+runtime.tick()
+assert(timed_connect.calls == 1 and runtime.status().connection == "failed")
+
+next_client = client()
+runtime.connect()
+next_client:status_event("ready")
+runtime.tick()
+local timed_request = result()
+runtime.list_sessions(timed_request.callback)
+clock = 299
+runtime.tick()
+assert(timed_request.calls == 0)
+clock = 300
+runtime.tick()
+assert(timed_request.calls == 1 and timed_request.error.code == "timeout")
+assert(next_client.closed == 1)
+runtime.tick()
+assert(timed_request.calls == 1)
+
+-- A fresh connection gets fresh deadlines; prompts have a separate longer limit.
+next_client = client()
+next_client.session.prompt = pending
+runtime.connect()
+next_client:status_event("ready")
+runtime.tick()
+local timed_prompt = result()
+runtime.prompt("session.test", { { kind = "text", text = "test" } }, timed_prompt.callback)
+clock = 501
+runtime.tick()
+assert(timed_prompt.calls == 0 and next_client.closed == 0)
+clock = 1300
+runtime.tick()
+assert(timed_prompt.calls == 1 and timed_prompt.error.kind == "timeout")
+runtime.disconnect()
+uv.hrtime = original_hrtime
+for _, value in ipairs({ 0, -1, math.huge, "100" }) do
+  assert(not pcall(config.setup, { request_timeout_ms = value }))
+end
 print("runtime lifecycle regressions passed")
