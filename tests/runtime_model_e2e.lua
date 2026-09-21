@@ -13,6 +13,7 @@ local expected = "PHENIX_NVIM_E2E_RESPONSE"
 frontend.setup({
   auto_connect = false,
   command = command,
+  selection = "fixture.deterministic",
   log_directory = log_directory,
   env = {
     PHENIX_STATE_DB = assert(vim.env.PHENIX_STATE_DB, "PHENIX_STATE_DB is required"),

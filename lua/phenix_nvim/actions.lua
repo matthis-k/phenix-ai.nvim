@@ -117,9 +117,11 @@ function M.cancel()
   runtime.cancel_active()
 end
 
-function M.new_session()
-  sessions.new(function(_, error)
-    if error ~= nil then
+function M.new_session(callback)
+  sessions.new(function(value, error)
+    if callback ~= nil then
+      util.safe_call(callback, value, error)
+    elseif error ~= nil then
       util.notify(vim.inspect(error), vim.log.levels.ERROR)
     end
   end)
@@ -185,6 +187,11 @@ local function open_external_auth(result)
 end
 
 local auth_generation = 0
+runtime.on_event(function(kind, status)
+  if kind == "status" and status.connection ~= "ready" then
+    auth_generation = auth_generation + 1
+  end
+end)
 local AUTH_POLL_INTERVAL_MS = 1000
 local AUTH_POLL_ATTEMPTS = 600
 
@@ -308,6 +315,7 @@ function M.authenticate()
       util.notify("No Phenix authentication methods are available", vim.log.levels.WARN)
       return
     end
+    local picker_generation = auth_generation
     vim.ui.select(methods, {
       prompt = "Phenix authentication",
       format_item = function(method)
@@ -318,6 +326,9 @@ function M.authenticate()
         return label
       end,
     }, function(method)
+      if picker_generation ~= auth_generation then
+        return
+      end
       if method == nil then
         return
       end
@@ -357,7 +368,11 @@ function M.authenticate()
 end
 
 function M.choose_selection()
+  local session = runtime.active_session_object()
   runtime.list_selections(function(result, error)
+    if runtime.active_session_object() ~= session then
+      return
+    end
     if error ~= nil then
       util.notify(vim.inspect(error), vim.log.levels.ERROR)
       return
@@ -374,6 +389,10 @@ function M.choose_selection()
       end,
     }, function(item)
       if item == nil then
+        return
+      end
+      if runtime.active_session_object() ~= session then
+        util.notify("Phenix session changed; reopen the routing picker", vim.log.levels.WARN)
         return
       end
       runtime.select(item.id, function(_, select_error)
