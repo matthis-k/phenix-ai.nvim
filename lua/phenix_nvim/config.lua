@@ -26,6 +26,9 @@ local defaults = {
   auto_connect = false,
   poll_interval_ms = 25,
   poll_budget = 32,
+  connect_timeout_ms = 30000,
+  request_timeout_ms = 30000,
+  prompt_timeout_ms = 600000,
   side = "right",
   width = 56,
   compose_height = 8,
@@ -50,7 +53,14 @@ local function configured_environment(resolved, name)
 end
 
 function M.setup(options)
-  current = vim.tbl_deep_extend("force", vim.deepcopy(defaults), options or {})
+  local resolved = vim.tbl_deep_extend("force", vim.deepcopy(defaults), options or {})
+  for _, key in ipairs({ "connect_timeout_ms", "request_timeout_ms", "prompt_timeout_ms" }) do
+    local value = resolved[key]
+    if type(value) ~= "number" or value ~= value or value <= 0 or value == math.huge then
+      error("phenix-ai.nvim " .. key .. " must be a finite positive number")
+    end
+  end
+  current = resolved
   return M.get()
 end
 

@@ -20,7 +20,16 @@ local state = {
   listeners = {},
   connect_callbacks = {},
   context_generation = 0,
+  connect_deadline = nil,
 }
+
+local function now_ms()
+  return uv.hrtime() / 1000000
+end
+
+local function timeout_error(operation)
+  return { kind = "timeout", code = "timeout", message = "Phenix " .. operation .. " timed out" }
+end
 
 local function emit(kind, value)
   for _, listener in ipairs(vim.deepcopy(state.listeners)) do
@@ -62,6 +71,7 @@ local function terminate(connection, error)
   state.connect_callbacks = {}
   state.context_generation = state.context_generation + 1
   state.connection = connection
+  state.connect_deadline = nil
   state.error = connection == "failed" and error or nil
   if client ~= nil then
     pcall(client.close, client)
@@ -193,6 +203,7 @@ local function handle_event(event)
     state.connection = data and data.state or state.connection
     state.error = data and data.error or nil
     if state.connection == "ready" then
+      state.connect_deadline = nil
       settle_connect_callbacks(state, nil)
     end
     emit("status", M.status())
@@ -230,18 +241,36 @@ function M.on_event(listener)
   end
 end
 
-function M.track(request, callback)
+function M.track(request, callback, timeout_ms)
   if request == nil then
     util.safe_call(callback, nil, { message = "native request was not created" })
     return
   end
-  table.insert(state.pending, { request = request, callback = callback })
+  table.insert(state.pending, {
+    request = request,
+    callback = callback,
+    deadline = now_ms() + (timeout_ms or state.config.request_timeout_ms),
+  })
 end
 
 function M.tick()
   local client = state.client
   if client == nil then
     return
+  end
+
+  local now = now_ms()
+  if state.connect_deadline ~= nil and now >= state.connect_deadline then
+    fail(timeout_error("connection"))
+    return
+  end
+  -- Closing the connection also stops late remote mutations and cache updates.
+  -- A timed-out mutation has an unknown outcome and must never be auto-retried.
+  for _, item in ipairs(state.pending) do
+    if now >= item.deadline then
+      fail(timeout_error("request"))
+      return
+    end
   end
 
   local ok, events = pcall(client.pump, client, state.config.poll_budget)
@@ -290,6 +319,7 @@ function M.connect(callback)
     state.preferred_selection = config_api.preferred_selection(config)
   end
   state.connection = "connecting"
+  state.connect_deadline = now_ms() + config.connect_timeout_ms
   state.error = nil
 
   local facade = native.application and native.application.connect
@@ -627,7 +657,7 @@ function M.prompt(session_id, segments, callback)
         end
       end
       util.safe_call(callback, result, error)
-    end)
+    end, state.config.prompt_timeout_ms)
   end)
 end
 
