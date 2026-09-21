@@ -14,6 +14,10 @@ This repository owns the Neovim-specific Lua client, UI, interaction model, prod
 
 The flake follows `github:matthis-k/phenix-ai`, and `flake.lock` pins the exact Phenix AI and transitive Nix dependency graph used by the standalone client. Normal validation does not update that lock implicitly.
 
+## Connection lifecycle
+
+Requests made while connecting wait for readiness. `new_session(callback)` completes only after preferred routing is applied; a missing preferred route returns an error. `disconnect()` cancels queued and pending callbacks and closes the owned runtime. Runtime failure settles pending work with its cause; call `connect()` explicitly to retry. Delayed authentication and selection UI callbacks cannot affect a replacement connection or session.
+
 ## Authentication
 
 Routing defaults to `auto`: when a configured API-key environment variable is

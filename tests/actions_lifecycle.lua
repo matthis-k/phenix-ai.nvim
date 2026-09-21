@@ -1,0 +1,60 @@
+-- Exercise delayed UI/auth callbacks independently of transport timing.
+local listeners, deferred = {}, {}
+local active = {}
+local auth_calls, selection_calls = 0, 0
+local runtime = {
+  on_event = function(listener) listeners[#listeners + 1] = listener end,
+  active_session_object = function() return active end,
+  list_authentication_methods = function(callback)
+    callback({ methods = { { id = "oauth", name = "OAuth" } } })
+  end,
+  authenticate = function(_, callback)
+    auth_calls = auth_calls + 1
+    callback({ kind = "external", uri = "https://example.invalid/oauth" })
+  end,
+  list_selections = function(callback)
+    callback({ available = { { id = "router.test" } } })
+  end,
+  select = function(_, callback)
+    selection_calls = selection_calls + 1
+    callback({})
+  end,
+}
+package.loaded["phenix_nvim.runtime"] = runtime
+local picked, items
+vim.ui.select = function(values, _, callback) items, picked = values, callback end
+vim.ui.open = function() return {} end
+vim.defer_fn = function(callback) deferred[#deferred + 1] = callback end
+vim.notify = function() end
+local actions = require("phenix_nvim.actions")
+local function status(connection)
+  for _, listener in ipairs(listeners) do listener("status", { connection = connection }) end
+end
+
+-- A delayed OAuth poll must not authenticate a replacement connection.
+actions.authenticate()
+picked(items[1])
+assert(auth_calls == 1 and #deferred == 1)
+status("disconnected")
+status("connecting")
+status("ready")
+deferred[1]()
+assert(auth_calls == 1, "stale OAuth poll reached replacement connection")
+
+-- The authentication picker itself is also tied to its connection.
+actions.authenticate()
+status("failed")
+status("connecting")
+status("ready")
+picked(items[1])
+assert(auth_calls == 1, "stale authentication picker reached replacement connection")
+
+-- A model picker may only change the session it queried.
+actions.choose_selection()
+active = {}
+picked(items[1])
+assert(selection_calls == 0, "stale routing picker changed a different session")
+actions.choose_selection()
+picked(items[1])
+assert(selection_calls == 1)
+print("action lifecycle regressions passed")

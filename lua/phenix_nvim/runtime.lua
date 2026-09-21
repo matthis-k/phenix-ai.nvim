@@ -38,18 +38,46 @@ end
 
 local function settle_connect_callbacks(value, error)
   local callbacks = state.connect_callbacks
+  local client = state.client
   state.connect_callbacks = {}
   for _, callback in ipairs(callbacks) do
-    util.safe_call(callback, value, error)
+    if value ~= nil and state.client ~= client then
+      util.safe_call(callback, nil, { kind = "cancelled", message = "Phenix connection changed" })
+    else
+      util.safe_call(callback, value, error)
+    end
+  end
+end
+
+local function terminate(connection, error)
+  stop_timer()
+  local client = state.client
+  local pending = state.pending
+  local callbacks = state.connect_callbacks
+  state.client = nil
+  state.sessions = nil
+  state.active_session = nil
+  state.session_state = { sessions = {} }
+  state.pending = {}
+  state.connect_callbacks = {}
+  state.context_generation = state.context_generation + 1
+  state.connection = connection
+  state.error = connection == "failed" and error or nil
+  if client ~= nil then
+    pcall(client.close, client)
+  end
+  emit("sessions", state.session_state)
+  emit("status", M.status())
+  for _, callback in ipairs(callbacks) do
+    util.safe_call(callback, nil, error)
+  end
+  for _, item in ipairs(pending) do
+    util.safe_call(item.callback, nil, error)
   end
 end
 
 local function fail(error)
-  state.connection = "failed"
-  state.error = type(error) == "table" and error or { message = tostring(error) }
-  stop_timer()
-  settle_connect_callbacks(nil, state.error)
-  emit("status", M.status())
+  terminate("failed", type(error) == "table" and error or { message = tostring(error) })
 end
 
 local function start_timer()
@@ -57,8 +85,11 @@ local function start_timer()
   local timer = uv.new_timer()
   state.timer = timer
   local interval = state.config.poll_interval_ms
+  local client = state.client
   timer:start(interval, interval, vim.schedule_wrap(function()
-    M.tick()
+    if state.client == client then
+      M.tick()
+    end
   end))
 end
 
@@ -155,12 +186,14 @@ local function handle_event(event)
   local kind = event.kind
   local data = event.data
   if kind == "status" then
+    if data and (data.state == "failed" or data.state == "closed") then
+      fail(data.error or { message = "Phenix connection " .. data.state })
+      return
+    end
     state.connection = data and data.state or state.connection
     state.error = data and data.error or nil
     if state.connection == "ready" then
       settle_connect_callbacks(state, nil)
-    elseif state.connection == "failed" then
-      settle_connect_callbacks(nil, state.error or { message = "Phenix connection failed" })
     end
     emit("status", M.status())
     return
@@ -185,10 +218,15 @@ function M.configure(config)
 end
 
 function M.on_event(listener)
-  table.insert(state.listeners, listener)
-  local index = #state.listeners
+  local registered = function(...) listener(...) end
+  table.insert(state.listeners, registered)
   return function()
-    state.listeners[index] = function() end
+    for index, current in ipairs(state.listeners) do
+      if current == registered then
+        table.remove(state.listeners, index)
+        return
+      end
+    end
   end
 end
 
@@ -201,17 +239,21 @@ function M.track(request, callback)
 end
 
 function M.tick()
-  if state.client == nil then
+  local client = state.client
+  if client == nil then
     return
   end
 
-  local ok, events = pcall(state.client.pump, state.client, state.config.poll_budget)
+  local ok, events = pcall(client.pump, client, state.config.poll_budget)
   if not ok then
     fail(events)
     return
   end
   for _, event in ipairs(events or {}) do
     handle_event(event)
+    if state.client ~= client then
+      return
+    end
   end
 
   for index = #state.pending, 1, -1 do
@@ -223,6 +265,9 @@ function M.tick()
     elseif complete then
       table.remove(state.pending, index)
       util.safe_call(item.callback, value, error)
+    end
+    if state.client ~= client then
+      return
     end
   end
 end
@@ -284,27 +329,18 @@ function M.connect(callback)
   end
 
   state.client = client
-  state.sessions = client:sessions()
+  local sessions_ok, sessions = pcall(client.sessions, client)
+  if not sessions_ok or sessions == nil then
+    fail(sessions or { message = "native sessions facade was not created" })
+    return
+  end
+  state.sessions = sessions
   start_timer()
   emit("status", M.status())
 end
 
 function M.disconnect()
-  stop_timer()
-  if state.client ~= nil then
-    pcall(state.client.close, state.client)
-  end
-  state.client = nil
-  state.sessions = nil
-  state.active_session = nil
-  state.session_state = { sessions = {} }
-  state.pending = {}
-  state.connect_callbacks = {}
-  state.context_generation = state.context_generation + 1
-  state.connection = "disconnected"
-  state.error = nil
-  emit("sessions", state.session_state)
-  emit("status", M.status())
+  terminate("disconnected", { kind = "cancelled", message = "Phenix disconnected" })
 end
 
 local function is_ready()
@@ -385,7 +421,11 @@ local function apply_preferred_selection(session, callback)
       end
     end
 
-    if preferred == nil or (result and result.selected == selection) then
+    if preferred == nil then
+      util.safe_call(callback, nil, { message = "configured Phenix routing selection is unavailable: " .. selection })
+      return
+    end
+    if result and result.selected == selection then
       util.safe_call(callback, session, nil)
       return
     end
@@ -422,6 +462,17 @@ local function apply_preferred_selection(session, callback)
   end)
 end
 
+local function close_created_session(session, error, callback)
+  local ok, request = pcall(session.close, session)
+  if not ok then
+    util.safe_call(callback, nil, error)
+    return
+  end
+  M.track(request, function()
+    util.safe_call(callback, nil, error)
+  end)
+end
+
 function M.new_session(callback)
   ensure_ready(callback, function()
     local ok, request = pcall(state.sessions.create, state.sessions, {
@@ -437,13 +488,18 @@ function M.new_session(callback)
         util.safe_call(callback, nil, error)
         return
       end
-      set_active(session)
       apply_preferred_selection(session, function(_, selection_error)
         if selection_error ~= nil then
-          util.safe_call(callback, nil, selection_error)
+          close_created_session(session, selection_error, callback)
           return
         end
-        util.safe_call(callback, session:info(), nil)
+        local info_ok, info = pcall(session.info, session)
+        if not info_ok then
+          close_created_session(session, { message = tostring(info) }, callback)
+          return
+        end
+        set_active(session)
+        util.safe_call(callback, info, nil)
       end)
     end)
   end)
@@ -461,13 +517,26 @@ function M.resume_session(session_id, callback)
         util.safe_call(callback, nil, error)
         return
       end
-      set_active(session)
       apply_preferred_selection(session, function(_, selection_error)
         if selection_error ~= nil then
           util.safe_call(callback, nil, selection_error)
           return
         end
-        util.safe_call(callback, session:projection() or session:info(), nil)
+        local projection_ok, projection = pcall(session.projection, session)
+        if not projection_ok then
+          util.safe_call(callback, nil, { message = tostring(projection) })
+          return
+        end
+        if projection == nil then
+          local info_ok, info = pcall(session.info, session)
+          if not info_ok then
+            util.safe_call(callback, nil, { message = tostring(info) })
+            return
+          end
+          projection = info
+        end
+        set_active(session)
+        util.safe_call(callback, projection, nil)
       end)
     end)
   end)
@@ -486,12 +555,20 @@ end
 
 function M.close_session(session_id, callback)
   ensure_ready(callback, function()
-    local session = state.sessions:cached(session_id)
+    local cached_ok, session = pcall(state.sessions.cached, state.sessions, session_id)
+    if not cached_ok then
+      util.safe_call(callback, nil, { message = tostring(session) })
+      return
+    end
     if session == nil then
       util.safe_call(callback, nil, { message = "unknown Phenix session " .. tostring(session_id) })
       return
     end
-    local request = session:close()
+    local close_ok, request = pcall(session.close, session)
+    if not close_ok then
+      util.safe_call(callback, nil, { message = tostring(request) })
+      return
+    end
     M.track(request, function(result, error)
       if error == nil then
         state.session_state.sessions[session_id] = nil
@@ -517,7 +594,11 @@ end
 
 function M.prompt(session_id, segments, callback)
   ensure_ready(callback, function()
-    local session = state.sessions:cached(session_id)
+    local cached_ok, session = pcall(state.sessions.cached, state.sessions, session_id)
+    if not cached_ok then
+      util.safe_call(callback, nil, { message = tostring(session) })
+      return
+    end
     if session == nil then
       util.safe_call(callback, nil, { message = "unknown Phenix session " .. tostring(session_id) })
       return
@@ -535,8 +616,8 @@ function M.prompt(session_id, segments, callback)
     M.track(request, function(result, error)
       if error == nil then
         refresh_projection(session_id)
-        local features = state.client:features()
-        if features.provenance and result and result.execution_id then
+        local features_ok, features = pcall(state.client.features, state.client)
+        if features_ok and features.provenance and result and result.execution_id then
           local provenance_ok, provenance = pcall(session.provenance, session, result.execution_id)
           if provenance_ok then
             M.track(provenance, function()
