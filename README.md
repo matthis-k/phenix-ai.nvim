@@ -55,23 +55,23 @@ The plugin exposes one command namespace instead of many top-level commands:
 :Phenix reference at <path>
 :Phenix image clipboard
 :Phenix image <path>
+:Phenix new
 :Phenix session new
 :Phenix session close
 :Phenix session select
-:Phenix window new
-:Phenix window close
-:Phenix window move <left|right|up|down|tab>
 :Phenix auth
 :Phenix select
 ```
 
 `:Phenix` with no subcommand toggles the current chat surface. A visible chat
 surface is one real host split with transcript and compose floats anchored to it.
-Closing either child closes the whole surface while preserving its hidden draft.
-Structural `<C-w>` operations are redirected to the host: movement, rotation,
-exchange and resizing move the real split and the floats follow it. `<C-w>T`
-moves the host to a new tab and recreates its child floats there. `<C-w>n` and
-`<C-w>v` create another side-by-side chat surface; `<C-w>s` creates one below.
+Closing either child with normal Vim window commands closes the whole surface
+while preserving its hidden draft. Standard `<C-w>` movement, rotation,
+exchange and resize operations are applied to the real host split and the floats
+follow it. `<C-w>T` moves the host to a new tab. `<C-w>n` and `<C-w>v`
+create another side-by-side chat surface; `<C-w>s` creates one below.
+`:Phenix new` is the explicit equivalent for creating another chat; Phenix does
+not add separate close or move commands.
 
 Image pasting in the compose buffer uses the same clipboard-image path as
 `:Phenix image clipboard`: the clipboard payload is materialized to a temporary
