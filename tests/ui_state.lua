@@ -56,16 +56,37 @@ wait_until(function()
   return vim.api.nvim_get_current_win() ~= host_win
 end, "native window cycling must never leave focus on the sidebar host")
 
--- Child windows are derived state. Closing or mutating one must repair it from the host.
+-- The prompt is scratch state. :quit must never ask to save it; closing it discards
+-- the buffer and the host recreates a fresh prompt view.
 local old_compose = compose_win
-vim.api.nvim_win_close(compose_win, true)
+local old_compose_buffer = vim.api.nvim_win_get_buf(compose_win)
+assert(vim.bo[old_compose_buffer].bufhidden == "wipe")
+vim.api.nvim_buf_set_lines(old_compose_buffer, 0, -1, false, { "discard me" })
+assert(vim.bo[old_compose_buffer].modified)
+local scratch = compose_model.add(state.compose, {
+  kind = "resource",
+  source = { uri = "file:///tmp/discard.txt" },
+  snapshot = "discard",
+})
+assert(compose.insert(state.compose, scratch, compose_win))
+local quit_ok, quit_error = pcall(vim.api.nvim_win_call, compose_win, function()
+  vim.cmd("quit")
+end)
+assert(quit_ok, "closing a modified prompt must not ask to save: " .. tostring(quit_error))
 wait_until(function()
   local _, repaired = sidebar.windows()
   return repaired ~= nil and repaired ~= old_compose and vim.api.nvim_win_is_valid(repaired)
 end, "closing the compose float must recreate it while the host survives")
+assert(not vim.api.nvim_buf_is_valid(old_compose_buffer), "closed prompt buffer must be discarded")
+assert(next(state.compose.items) == nil, "discarding the prompt must discard its attachments")
 transcript_win, compose_win, host_win = sidebar.windows()
 assert(sidebar.is_open())
 assert(vim.api.nvim_win_is_valid(host_win))
+local fresh_compose_buffer = vim.api.nvim_win_get_buf(compose_win)
+assert(fresh_compose_buffer ~= old_compose_buffer)
+assert(vim.deep_equal(vim.api.nvim_buf_get_lines(fresh_compose_buffer, 0, -1, false), { "" }))
+
+-- Child windows are derived state. Mutating one must repair it from the host.
 
 local replacement = vim.api.nvim_create_buf(false, true)
 local old_transcript = transcript_win
