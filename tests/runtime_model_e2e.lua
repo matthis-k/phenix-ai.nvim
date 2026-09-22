@@ -190,7 +190,7 @@ local excluded = {}
 
 local command_text = marker .. " command"
 local compose_buffer = compose_text(command_text)
-vim.cmd("PhenixSend")
+vim.cmd("Phenix send")
 local first_execution_id = wait_for_completed_turn(command_text, excluded)
 excluded[first_execution_id] = true
 assert_compose_cleared(compose_buffer)
