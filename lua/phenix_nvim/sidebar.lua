@@ -1,5 +1,6 @@
 local config = require("phenix_nvim.config")
 local state = require("phenix_nvim.state")
+local runtime = require("phenix_nvim.runtime")
 local compose = require("phenix_nvim.compose.buffer")
 local transcript = require("phenix_nvim.transcript.buffer")
 local transcript_controller = require("phenix_nvim.transcript.controller")
@@ -257,6 +258,7 @@ local function focus_child(surface, role)
   local win = surface[role .. "_win"]
   if valid_window(win) then
     surface.selected_role = role
+    runtime.activate_session(surface.session_id)
     vim.api.nvim_set_current_win(win)
     if role == "compose" then
       pcall(vim.api.nvim_win_set_cursor, win, surface.state.compose_cursor)
@@ -611,8 +613,10 @@ vim.api.nvim_create_autocmd("WinEnter", {
     end
     if win == surface.transcript_win then
       surface.selected_role = "transcript"
+      runtime.activate_session(surface.session_id)
     elseif win == surface.compose_win then
       surface.selected_role = "compose"
+      runtime.activate_session(surface.session_id)
     end
   end,
 })
