@@ -19,6 +19,7 @@ local function store(document)
     value = {
       document = document,
       buffer = nil,
+      name = nil,
       markers = {},
       attached_windows = {},
       previews = {},
@@ -231,7 +232,8 @@ function M.ensure(document)
   vim.bo[target].filetype = "markdown"
   vim.b[target].phenix_internal = true
   vim.b[target].phenix_role = "compose"
-  vim.api.nvim_buf_set_name(target, buffer_name())
+  view.name = view.name or buffer_name()
+  vim.api.nvim_buf_set_name(target, view.name)
 
   vim.keymap.set("n", "<CR>", function()
     require("phenix_nvim.actions").send({ document = document })
