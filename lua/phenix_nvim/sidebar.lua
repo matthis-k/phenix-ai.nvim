@@ -209,6 +209,15 @@ local function sync_surface(surface)
   transcript.attach_window(surface, transcript_win)
   compose.attach_window(surface.state.compose, compose_win)
   winbar.attach(transcript_win, compose_win)
+  for _, win in ipairs({ transcript_win, compose_win }) do
+    local target = vim.api.nvim_win_get_buf(win)
+    vim.keymap.set("n", "<C-w>n", function()
+      local current = children[vim.api.nvim_get_current_win()] or surface
+      if current ~= nil and not current.closing then
+        M.new_window()
+      end
+    end, { buffer = target, silent = true, desc = "Open a new Phenix chat window" })
+  end
   for key, direction in pairs({
     ["<C-w>H"] = "left",
     ["<C-w>L"] = "right",
