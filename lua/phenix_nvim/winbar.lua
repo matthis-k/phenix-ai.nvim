@@ -110,7 +110,7 @@ local function context_count(surface)
 end
 
 local function transcript_value(surface)
-  local status = runtime.status()
+  local status = runtime.status(surface and surface.session_id or nil)
   local connection_group, connection_text = connection(status)
   local execution_group, execution_text = execution(status, surface)
   local parts = {
