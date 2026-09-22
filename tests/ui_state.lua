@@ -18,6 +18,11 @@ sidebar.open()
 local transcript_win, compose_win = sidebar.windows()
 assert(vim.api.nvim_win_is_valid(transcript_win))
 assert(vim.api.nvim_win_is_valid(compose_win))
+local expected_width = math.max(20, math.floor(vim.o.columns * 0.4))
+assert(
+  math.abs(vim.api.nvim_win_get_width(transcript_win) - expected_width) <= 1,
+  "default sidebar width must track forty percent of the editor"
+)
 vim.api.nvim_win_close(compose_win, true)
 wait_until(function()
   return not sidebar.is_open()
