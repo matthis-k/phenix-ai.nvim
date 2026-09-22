@@ -54,7 +54,7 @@ The plugin exposes one command namespace instead of many top-level commands:
 :Phenix reference pick
 :Phenix reference at <path>
 :Phenix image clipboard
-:Phenix image file <path>
+:Phenix image <path>
 :Phenix session new
 :Phenix session close
 :Phenix session select
