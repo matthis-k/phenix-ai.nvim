@@ -40,6 +40,10 @@ function M.reference()
   insert(item)
 end
 
+function M.reference_range(start_line, end_line)
+  insert(context.line_selection(start_line, end_line))
+end
+
 function M.reference_at(value)
   local item, error = context.typed_reference(value)
   if item == nil then
