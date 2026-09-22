@@ -1,5 +1,4 @@
 local runtime = require("phenix_nvim.runtime")
-local state = require("phenix_nvim.state")
 
 local M = {}
 local attached = {}
@@ -41,7 +40,14 @@ local function connection(status)
   return "Comment", "○ " .. tostring(status.connection or "offline")
 end
 
-local function execution(status)
+local function surface_is_active(surface, status)
+  return surface == nil or surface.session_id == nil or surface.session_id == status.session_id
+end
+
+local function execution(status, surface)
+  if not surface_is_active(surface, status) then
+    return nil, nil
+  end
   local value = status.execution_state
   if value == "running" or value == "pending" then
     return "DiagnosticWarn", value
@@ -58,17 +64,24 @@ local function execution(status)
   return nil, nil
 end
 
-local function session_label(status)
+local function session_label(status, surface)
+  if surface ~= nil and surface.session_id ~= nil and surface.session_id ~= status.session_id then
+    return short(surface.session_id, 18)
+  end
   if status.title ~= nil and status.title ~= "" then
     return short(status.title, 28)
   end
-  if status.session_id ~= nil then
-    return short(status.session_id, 18)
+  local id = surface and surface.session_id or status.session_id
+  if id ~= nil then
+    return short(id, 18)
   end
   return nil
 end
 
-local function model_label(status)
+local function model_label(status, surface)
+  if not surface_is_active(surface, status) then
+    return nil
+  end
   local value = status.model_name or status.model_id
   if value == nil or value == "" then
     return nil
@@ -76,7 +89,10 @@ local function model_label(status)
   return "model " .. short(value, 28)
 end
 
-local function routing_label(status)
+local function routing_label(status, surface)
+  if not surface_is_active(surface, status) then
+    return nil
+  end
   local value = status.routing_profile_name or status.routing_profile_id
   if value == nil or value == "" then
     return nil
@@ -84,24 +100,25 @@ local function routing_label(status)
   return "route " .. short(value, 22)
 end
 
-local function context_count()
+local function context_count(surface)
   local count = 0
-  for _ in pairs(state.compose.items or {}) do
+  local document = surface and surface.compose
+  for _ in pairs(document and document.items or {}) do
     count = count + 1
   end
   return count
 end
 
-local function transcript_value()
+local function transcript_value(surface)
   local status = runtime.status()
   local connection_group, connection_text = connection(status)
-  local execution_group, execution_text = execution(status)
+  local execution_group, execution_text = execution(status, surface)
   local parts = {
     segment("Title", " Phenix "),
     " ",
     segment(connection_group, connection_text),
   }
-  local session = session_label(status)
+  local session = session_label(status, surface)
   if session ~= nil then
     table.insert(parts, "  ·  ")
     table.insert(parts, segment("Identifier", session))
@@ -112,8 +129,8 @@ local function transcript_value()
   end
 
   local right = {}
-  local model = model_label(status)
-  local routing = routing_label(status)
+  local model = model_label(status, surface)
+  local routing = routing_label(status, surface)
   if model ~= nil then
     table.insert(right, segment("Special", model))
   end
@@ -129,8 +146,8 @@ local function transcript_value()
   return table.concat(parts)
 end
 
-local function compose_value()
-  local count = context_count()
+local function compose_value(surface)
+  local count = context_count(surface)
   local parts = { segment("Title", " Prompt ") }
   if count > 0 then
     table.insert(parts, "  ·  ")
@@ -147,12 +164,12 @@ local function compose_value()
   return table.concat(parts)
 end
 
-local function refresh_window(win, role)
+local function refresh_window(win, view)
   if not valid(win) then
     attached[win] = nil
     return
   end
-  vim.wo[win].winbar = role == "compose" and compose_value() or transcript_value()
+  vim.wo[win].winbar = view.role == "compose" and compose_value(view.surface) or transcript_value(view.surface)
 end
 
 local function maybe_stop_listener()
@@ -163,18 +180,18 @@ local function maybe_stop_listener()
 end
 
 function M.refresh()
-  for win, role in pairs(attached) do
-    refresh_window(win, role)
+  for win, view in pairs(attached) do
+    refresh_window(win, view)
   end
   maybe_stop_listener()
 end
 
-function M.attach(transcript, compose)
+function M.attach(transcript, compose, surface)
   if valid(transcript) then
-    attached[transcript] = "transcript"
+    attached[transcript] = { role = "transcript", surface = surface }
   end
   if valid(compose) then
-    attached[compose] = "compose"
+    attached[compose] = { role = "compose", surface = surface }
   end
   if stop_listener == nil and next(attached) ~= nil then
     stop_listener = runtime.on_event(function(kind)
