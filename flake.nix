@@ -134,6 +134,9 @@
                 nvim --headless -u NONE \
                   --cmd ${pkgs.lib.escapeShellArg "set rtp^=${plugin}"} \
                   -l ${source}/tests/interaction.lua
+                nvim --headless -u NONE \
+                  --cmd ${pkgs.lib.escapeShellArg "set rtp^=${plugin}"} \
+                  -l ${source}/tests/ui_state.lua
 
                 export PHENIX_STATE_DB="$TMPDIR/phenix-ai-nvim-native-lifecycle.sqlite"
                 nvim --headless -u NONE \
