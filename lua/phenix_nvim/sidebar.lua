@@ -78,10 +78,25 @@ local function reconcile(tab)
   return nil
 end
 
+local function sidebar_width(value)
+  if value <= 1 then
+    return math.max(20, math.floor(vim.o.columns * value))
+  end
+  return math.max(1, math.floor(value))
+end
+
+local function resize(layout)
+  if layout == nil or not valid_window(layout.transcript_win) then
+    return
+  end
+  pcall(vim.api.nvim_win_set_width, layout.transcript_win, sidebar_width(config.get().width))
+end
+
 local function activate(layout)
   if layout == nil then
     return
   end
+  resize(layout)
   transcript.attach_window(layout.transcript_win)
   compose.attach_window(state.compose, layout.compose_win)
   winbar.attach(layout.transcript_win, layout.compose_win)
@@ -107,7 +122,7 @@ function M.open()
   local options = config.get()
   vim.cmd(options.side == "left" and "topleft vsplit" or "botright vsplit")
   local transcript_win = vim.api.nvim_get_current_win()
-  vim.api.nvim_win_set_width(transcript_win, options.width)
+  vim.api.nvim_win_set_width(transcript_win, sidebar_width(options.width))
   vim.api.nvim_win_set_buf(transcript_win, transcript.ensure())
 
   vim.cmd("belowright split")
@@ -204,6 +219,15 @@ vim.api.nvim_create_autocmd("TabLeave", {
     if layout ~= nil then
       remember_cursor(layout)
       compose.detach_window(layout.compose_win)
+    end
+  end,
+})
+
+vim.api.nvim_create_autocmd("VimResized", {
+  group = group,
+  callback = function()
+    for _, layout in pairs(layouts) do
+      resize(layout)
     end
   end,
 })
