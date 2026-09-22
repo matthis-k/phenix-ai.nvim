@@ -1,6 +1,8 @@
 local actions = require("phenix_nvim.actions")
+local compose = require("phenix_nvim.compose.buffer")
 local config = require("phenix_nvim.config")
 local runtime = require("phenix_nvim.runtime")
+local state = require("phenix_nvim.state")
 local status = require("phenix_nvim.status")
 local transcript = require("phenix_nvim.transcript.controller")
 
@@ -12,6 +14,7 @@ local M = {
 function M.setup(options)
   local resolved = config.setup(options)
   runtime.configure(resolved)
+  compose.ensure(state.compose)
   transcript.start()
   if resolved.auto_connect then
     runtime.connect()
