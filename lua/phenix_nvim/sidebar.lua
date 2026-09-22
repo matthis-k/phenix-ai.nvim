@@ -107,15 +107,6 @@ local function close_window(win)
   end
 end
 
-local function has_other_layout(tab)
-  for other_tab, layout in pairs(layouts) do
-    if other_tab ~= tab and not layout.closing and valid_tab(other_tab) then
-      return true
-    end
-  end
-  return false
-end
-
 local function remove_layout(tab, close_host)
   local layout = layouts[tab]
   if layout == nil then
@@ -129,9 +120,6 @@ local function remove_layout(tab, close_host)
   close_window(layout.transcript_win)
   if close_host then
     close_window(layout.host_win)
-  end
-  if not has_other_layout(tab) then
-    compose.discard(state.compose)
   end
 end
 
@@ -374,9 +362,6 @@ vim.api.nvim_create_autocmd("WinClosed", {
           vim.schedule(function()
             if layouts[tab] ~= layout then
               return
-            end
-            if role == "compose" and not has_other_layout(tab) then
-              compose.discard(state.compose)
             end
             if sync_layout(layout) then
               focus_child(layout, role)
