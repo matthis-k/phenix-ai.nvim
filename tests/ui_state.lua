@@ -101,14 +101,15 @@ wait_until(function()
     and vim.api.nvim_win_get_buf(repaired_compose) == preserved_compose_buffer
 end, "transcript/compose buffer collision must be repaired")
 
--- Closing a child view is a view operation: it must never ask to save and must
--- preserve the unsent draft and attachment identity while the host repairs the view.
+-- Closing either child is a semantic close-window action. The host owns the
+-- presentation atomically, while its hidden draft remains surface state.
+local old_transcript = transcript_win
 local old_compose = compose_win
+local old_host = host_win
 local old_compose_buffer = vim.api.nvim_win_get_buf(compose_win)
 assert(vim.bo[old_compose_buffer].bufhidden == "hide")
 vim.api.nvim_buf_set_lines(old_compose_buffer, 0, -1, false, { "draft survives close" })
 vim.bo[old_compose_buffer].modified = true
-assert(vim.bo[old_compose_buffer].modified)
 local scratch = compose_model.add(state.compose, {
   kind = "resource",
   source = { uri = "file:///tmp/preserved.txt" },
@@ -121,28 +122,18 @@ local quit_ok, quit_error = pcall(vim.api.nvim_win_call, compose_win, function()
 end)
 assert(quit_ok, "closing a modified prompt must not ask to save: " .. tostring(quit_error))
 wait_until(function()
-  local _, repaired = sidebar.windows()
-  return repaired ~= nil and repaired ~= old_compose and vim.api.nvim_win_is_valid(repaired)
-end, "closing the compose float must recreate its view while the host survives")
-assert(vim.api.nvim_buf_is_valid(old_compose_buffer), "closing the compose view must preserve its draft buffer")
-assert(compose_model.get(state.compose, scratch.id) ~= nil, "closing the compose view must preserve attachments")
-transcript_win, compose_win, host_win = sidebar.windows()
-assert(sidebar.is_open())
-assert(vim.api.nvim_win_is_valid(host_win))
-assert(vim.api.nvim_win_get_buf(compose_win) == old_compose_buffer)
+  return not sidebar.is_open()
+end, "closing a child must close its whole chat surface")
+assert(not vim.api.nvim_win_is_valid(old_transcript))
+assert(not vim.api.nvim_win_is_valid(old_compose))
+assert(not vim.api.nvim_win_is_valid(old_host))
+assert(vim.api.nvim_buf_is_valid(old_compose_buffer), "closing a surface must preserve its draft buffer")
+assert(compose_model.get(state.compose, scratch.id) ~= nil, "closing a surface must preserve attachments")
 assert(vim.deep_equal(
   vim.api.nvim_buf_get_lines(old_compose_buffer, 0, -1, false),
   preserved_lines
-), "repaired compose view must preserve the exact unsent draft")
+), "closing a surface must preserve the exact unsent draft")
 
--- Toggling the whole sidebar is also presentation-only. It must not destroy input state.
-sidebar.close()
-assert(not sidebar.is_open())
-assert(vim.api.nvim_buf_is_valid(old_compose_buffer))
-assert(old_compose_buffer == initial_compose_buffer)
-assert(vim.fn.bufwinid(old_compose_buffer) == -1, "closed sidebar must leave compose buffer hidden")
-assert(compose_model.get(state.compose, scratch.id) ~= nil)
-assert(vim.deep_equal(vim.api.nvim_buf_get_lines(old_compose_buffer, 0, -1, false), preserved_lines))
 sidebar.open()
 transcript_win, compose_win, host_win = sidebar.windows()
 assert(vim.api.nvim_win_get_buf(compose_win) == old_compose_buffer)
@@ -172,6 +163,42 @@ assert(not vim.api.nvim_win_is_valid(transcript_win))
 assert(not vim.api.nvim_win_is_valid(compose_win))
 assert(vim.api.nvim_buf_is_valid(initial_compose_buffer), "host teardown must not own compose-buffer lifetime")
 assert(vim.fn.bufwinid(initial_compose_buffer) == -1)
+
+-- Multiple chat surfaces can coexist in one tab. Each owns a distinct draft and
+-- transcript buffer, while all structural window operations are applied to the real host.
+sidebar.open()
+local primary_surface = sidebar.current_surface()
+local primary_transcript, primary_compose, primary_host = sidebar.windows(primary_surface)
+local secondary_surface = assert(sidebar.new_window(primary_surface))
+local secondary_transcript, secondary_compose, secondary_host = sidebar.windows(secondary_surface)
+assert(primary_host ~= secondary_host)
+assert(primary_transcript ~= secondary_transcript)
+assert(primary_compose ~= secondary_compose)
+assert(vim.api.nvim_win_get_buf(primary_compose) ~= vim.api.nvim_win_get_buf(secondary_compose))
+assert(vim.api.nvim_win_get_buf(primary_transcript) ~= vim.api.nvim_win_get_buf(secondary_transcript))
+
+local moved = sidebar.move_window("left", secondary_surface)
+assert(moved, "moving a Phenix window must operate on its host")
+wait_until(function()
+  local current_transcript, current_compose, current_host = sidebar.windows(secondary_surface)
+  if current_host ~= secondary_host then
+    return false
+  end
+  local transcript_config = vim.api.nvim_win_get_config(current_transcript)
+  local compose_config = vim.api.nvim_win_get_config(current_compose)
+  return transcript_config.win == current_host and compose_config.win == current_host
+end, "floating transcript and compose views must follow a moved host")
+
+vim.api.nvim_win_close(secondary_compose, true)
+wait_until(function()
+  return not vim.api.nvim_win_is_valid(secondary_host)
+    and not vim.api.nvim_win_is_valid(secondary_transcript)
+end, "closing one child must close only its owning surface")
+assert(vim.api.nvim_win_is_valid(primary_host))
+assert(vim.api.nvim_win_is_valid(primary_transcript))
+assert(vim.api.nvim_win_is_valid(primary_compose))
+vim.api.nvim_set_current_win(primary_compose)
+sidebar.close()
 
 -- Hosts and their child floats are tab-local.
 sidebar.open()
@@ -205,7 +232,7 @@ wait_until(sidebar.is_open, "second tab sidebar must survive changes in another 
 -- Attachment identity comes from extmarks, not text that merely looks like an attachment
 -- marker. Large or pasted text can therefore contain marker-shaped strings safely.
 local _, input_win = sidebar.windows()
-local document = state.compose
+local document = sidebar.current_compose()
 compose.clear(document)
 local item = compose_model.add(document, {
   kind = "resource",
@@ -243,7 +270,7 @@ clipboard.temp_image_file = original_temp_image_file
 assert(image_item.kind == "image")
 assert(vim.fn.filereadable(clipboard_path) == 0, "clipboard temporary image must be removed after snapshotting")
 local after_transcript, after_compose = sidebar.windows()
-assert(vim.api.nvim_win_get_buf(after_transcript) == transcript.ensure())
+assert(vim.api.nvim_win_get_buf(after_transcript) == select(1, sidebar.buffers()))
 assert(vim.api.nvim_win_get_buf(after_compose) == compose.ensure(document))
 assert(vim.w[after_transcript].phenix_sidebar_role == "transcript")
 assert(vim.w[after_compose].phenix_sidebar_role == "compose")
@@ -251,7 +278,7 @@ assert(before_transcript == after_transcript or not vim.api.nvim_win_is_valid(be
 assert(before_compose == after_compose or not vim.api.nvim_win_is_valid(before_compose))
 
 -- Transcript rendering uses explicit role labels and readable window-local display options.
-local transcript_buffer = transcript.ensure()
+local transcript_buffer = select(1, sidebar.buffers())
 local current_transcript = select(1, sidebar.windows())
 transcript.render_projection({
   order = { "user", "assistant" },
