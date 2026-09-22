@@ -839,11 +839,12 @@ function M.refresh_session_state(callback)
   util.safe_call(callback, projection, projection == nil and { message = "no active session projection" } or nil)
 end
 
-function M.status()
+function M.status(session_id)
+  session_id = session_id == nil and active_id() or session_id
   local result = {
     connection = state.connection,
     error = state.error,
-    session_id = active_id(),
+    session_id = session_id,
   }
   if state.client ~= nil then
     local ok, client_status = pcall(state.client.status, state.client)
@@ -852,8 +853,15 @@ function M.status()
       result.error = client_status.error or result.error
     end
   end
-  if state.active_session ~= nil then
-    local ok, session_status = pcall(state.active_session.status, state.active_session)
+  local session = state.active_session
+  if session_id ~= nil and session_id ~= active_id() and state.sessions ~= nil then
+    local cached_ok, cached = pcall(state.sessions.cached, state.sessions, session_id)
+    if cached_ok then
+      session = cached
+    end
+  end
+  if session ~= nil then
+    local ok, session_status = pcall(session.status, session)
     if ok and type(session_status) == "table" then
       for key, value in pairs(session_status) do
         result[key] = value
