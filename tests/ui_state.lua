@@ -133,24 +133,6 @@ assert(vim.deep_equal(
 
 -- Toggling the whole sidebar is also presentation-only. It must not destroy input state.
 sidebar.close()
-
--- Even an explicit external wipe cannot leave Phenix without canonical compose state.
-local wiped_compose = compose.ensure(state.compose)
-assert(wiped_compose == initial_compose_buffer)
-vim.api.nvim_buf_delete(wiped_compose, { force = true })
-wait_until(function()
-  local replacement = vim.fn.bufnr("phenix://compose")
-  return replacement > 0
-    and replacement ~= wiped_compose
-    and vim.api.nvim_buf_is_valid(replacement)
-end, "forced compose wipe must recreate the hidden canonical buffer")
-local replacement_compose = vim.fn.bufnr("phenix://compose")
-assert(not vim.bo[replacement_compose].buflisted)
-assert(vim.bo[replacement_compose].bufhidden == "hide")
-assert(vim.b[replacement_compose].phenix_internal == true)
-assert(vim.b[replacement_compose].phenix_role == "compose")
-assert(vim.fn.bufwinid(replacement_compose) == -1)
-assert(next(state.compose.items) == nil, "forced wipe must leave compose state valid and empty")
 assert(not sidebar.is_open())
 assert(vim.api.nvim_buf_is_valid(old_compose_buffer))
 assert(old_compose_buffer == initial_compose_buffer)
@@ -301,3 +283,21 @@ wait_until(function()
 end, "wiping the transcript buffer must rebuild the transcript projection")
 
 sidebar.close()
+
+-- Even an explicit external wipe cannot leave Phenix without canonical compose state.
+compose.clear(state.compose)
+local wiped_compose = compose.ensure(state.compose)
+vim.api.nvim_buf_delete(wiped_compose, { force = true })
+wait_until(function()
+  local replacement = vim.fn.bufnr("phenix://compose")
+  return replacement > 0
+    and replacement ~= wiped_compose
+    and vim.api.nvim_buf_is_valid(replacement)
+end, "forced compose wipe must recreate the hidden canonical buffer")
+local replacement_compose = vim.fn.bufnr("phenix://compose")
+assert(not vim.bo[replacement_compose].buflisted)
+assert(vim.bo[replacement_compose].bufhidden == "hide")
+assert(vim.b[replacement_compose].phenix_internal == true)
+assert(vim.b[replacement_compose].phenix_role == "compose")
+assert(vim.fn.bufwinid(replacement_compose) == -1)
+assert(next(state.compose.items) == nil, "forced wipe must leave compose state valid and empty")
