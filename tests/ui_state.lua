@@ -1,6 +1,8 @@
 local frontend = require("phenix_nvim")
 frontend.setup({ auto_connect = false })
 
+local actions = require("phenix_nvim.actions")
+local clipboard = require("phenix_nvim.clipboard")
 local sidebar = require("phenix_nvim.sidebar")
 local compose = require("phenix_nvim.compose.buffer")
 local compose_model = require("phenix_nvim.compose.model")
@@ -193,6 +195,28 @@ for _, mapping in ipairs(vim.api.nvim_buf_get_keymap(input_buffer, "n")) do
   paste_mappings[mapping.lhs] = true
 end
 assert(paste_mappings.p and paste_mappings.P, "compose must own normal paste handling buffer-locally")
+
+-- Clipboard image attachment uses the same file path as :Phenix image and must never
+-- swap transcript/compose buffers while focusing the input view.
+compose.clear(document)
+local clipboard_path = vim.fn.tempname() .. ".png"
+assert(vim.fn.writefile({ "fake-png" }, clipboard_path, "b") == 0)
+local original_temp_image_file = clipboard.temp_image_file
+clipboard.temp_image_file = function()
+  return clipboard_path
+end
+local before_transcript, before_compose = sidebar.windows()
+local image_item = assert(actions.attach_image("clipboard"))
+clipboard.temp_image_file = original_temp_image_file
+assert(image_item.kind == "image")
+assert(vim.fn.filereadable(clipboard_path) == 0, "clipboard temporary image must be removed after snapshotting")
+local after_transcript, after_compose = sidebar.windows()
+assert(vim.api.nvim_win_get_buf(after_transcript) == transcript.ensure())
+assert(vim.api.nvim_win_get_buf(after_compose) == compose.ensure(document))
+assert(vim.w[after_transcript].phenix_sidebar_role == "transcript")
+assert(vim.w[after_compose].phenix_sidebar_role == "compose")
+assert(before_transcript == after_transcript or not vim.api.nvim_win_is_valid(before_transcript))
+assert(before_compose == after_compose or not vim.api.nvim_win_is_valid(before_compose))
 
 -- Transcript rendering uses explicit role labels and readable window-local display options.
 local transcript_buffer = transcript.ensure()
