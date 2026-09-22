@@ -23,8 +23,9 @@ assert(vim.b[initial_compose_buffer].phenix_internal == true)
 assert(vim.b[initial_compose_buffer].phenix_role == "compose")
 assert(vim.fn.bufwinid(initial_compose_buffer) == -1, "compose buffer should start hidden")
 local foreign_document = compose_model.new()
-local rebound = pcall(compose.ensure, foreign_document)
-assert(not rebound, "persistent compose buffer must not be rebound to another model")
+local foreign_compose_buffer = compose.ensure(foreign_document)
+assert(foreign_compose_buffer ~= initial_compose_buffer, "each compose model must own a distinct persistent buffer")
+assert(compose.ensure(foreign_document) == foreign_compose_buffer)
 assert(compose.ensure(state.compose) == initial_compose_buffer)
 
 sidebar.open()
@@ -280,13 +281,14 @@ assert(before_compose == after_compose or not vim.api.nvim_win_is_valid(before_c
 -- Transcript rendering uses explicit role labels and readable window-local display options.
 local transcript_buffer = select(1, sidebar.buffers())
 local current_transcript = select(1, sidebar.windows())
+local current_surface = sidebar.current_surface()
 transcript.render_projection({
   order = { "user", "assistant" },
   nodes = {
     user = { id = "user", kind = "message", role = "user", text = "hello" },
     assistant = { id = "assistant", kind = "message", role = "assistant", text = "world" },
   },
-})
+}, current_surface.transcript_key)
 local lines = vim.api.nvim_buf_get_lines(transcript_buffer, 0, -1, false)
 assert(lines[1] == "You")
 assert(vim.tbl_contains(lines, "Assistant"))
