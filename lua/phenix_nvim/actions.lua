@@ -14,7 +14,13 @@ local M = {}
 local function insert(item)
   local stored = compose_model.add(state.compose, item)
   local win = sidebar.focus_compose()
-  compose.insert(state.compose, stored, win)
+  local inserted, error = compose.insert(state.compose, stored, win)
+  if not inserted then
+    compose_model.remove(state.compose, stored.id)
+    util.notify(error or "could not insert compose attachment", vim.log.levels.ERROR)
+    return nil
+  end
+  return stored
 end
 
 function M.reference()
