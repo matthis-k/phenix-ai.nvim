@@ -37,6 +37,7 @@ for _, name in ipairs({
   "new_session",
   "close_session",
   "choose_session",
+  "new",
 }) do
   originals[name] = actions[name]
   actions[name] = function(...)
@@ -61,6 +62,11 @@ execute("image", "/tmp/a", "b.png")
 execute("session", "new")
 execute("session", "close")
 execute("session", "select")
+execute("new")
+execute("new", "sidebar")
+execute("new", "tab")
+execute("new", "curr_window")
+execute("new", "fullscreen")
 execute("auth")
 execute("select")
 execute("cancel")
@@ -82,6 +88,11 @@ assert(vim.deep_equal(names, {
   "new_session",
   "close_session",
   "choose_session",
+  "new",
+  "new",
+  "new",
+  "new",
+  "new",
   "authenticate",
   "choose_selection",
   "cancel",
@@ -91,6 +102,11 @@ assert(calls[6].args[1] == "/tmp/a b.txt")
 assert(calls[7].args[1] == "clipboard")
 assert(calls[8].args[1] == "clipboard")
 assert(calls[9].args[1] == "/tmp/a b.png")
+assert(calls[13].args[1] == "sidebar")
+assert(calls[14].args[1] == "sidebar")
+assert(calls[15].args[1] == "tab")
+assert(calls[16].args[1] == "curr_window")
+assert(calls[17].args[1] == "fullscreen")
 
 local before_invalid = #calls
 execute("toggle", "unexpected")
@@ -98,12 +114,24 @@ execute("send", "unexpected")
 execute("cancel", "unexpected")
 execute("auth", "unexpected")
 execute("select", "unexpected")
-assert(#calls == before_invalid, "commands with unexpected arguments must not execute mutations")
+execute("new", "unexpected")
+execute("new", "sidebar", "extra")
+execute("window", "close")
+execute("window", "move", "left")
+assert(#calls == before_invalid, "commands with unexpected or removed arguments must not execute mutations")
 
 local roots = commands.complete("", "Phenix ", #"Phenix ")
 assert(vim.tbl_contains(roots, "image"))
 assert(vim.tbl_contains(roots, "session"))
 assert(vim.tbl_contains(roots, "reference"))
+assert(vim.tbl_contains(roots, "new"))
+assert(not vim.tbl_contains(roots, "window"))
+
+local presentations = commands.complete("", "Phenix new ", #"Phenix new ")
+assert(vim.tbl_contains(presentations, "sidebar"))
+assert(vim.tbl_contains(presentations, "tab"))
+assert(vim.tbl_contains(presentations, "curr_window"))
+assert(vim.tbl_contains(presentations, "fullscreen"))
 
 local image_sources = commands.complete("", "Phenix image ", #"Phenix image ")
 assert(vim.tbl_contains(image_sources, "clipboard"))

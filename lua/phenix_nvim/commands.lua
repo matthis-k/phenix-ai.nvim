@@ -7,6 +7,7 @@ local roots = {
   "auth",
   "cancel",
   "image",
+  "new",
   "reference",
   "select",
   "send",
@@ -108,6 +109,19 @@ function M.execute(options)
     return
   end
 
+  if command == "new" then
+    if #args > 1 then
+      usage("Usage: Phenix new [sidebar|tab|curr_window|fullscreen]")
+      return
+    end
+    local mode = args[1] or "sidebar"
+    if mode ~= "sidebar" and mode ~= "tab" and mode ~= "curr_window" and mode ~= "fullscreen" then
+      usage("Usage: Phenix new [sidebar|tab|curr_window|fullscreen]")
+      return
+    end
+    actions.new(mode)
+    return
+  end
   if command == "session" then
     local subcommand = table.remove(args, 1)
     if #args ~= 0 then
@@ -176,6 +190,10 @@ function M.complete(arglead, cmdline, cursorpos)
   if args[1] == "session" and #args == 1 then
     return matches({ "close", "new", "select" }, arglead)
   end
+  if args[1] == "new" and #args == 1 then
+    return matches({ "curr_window", "fullscreen", "sidebar", "tab" }, arglead)
+  end
+
   return {}
 end
 

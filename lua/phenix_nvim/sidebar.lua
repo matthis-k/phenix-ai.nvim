@@ -1,13 +1,20 @@
 local config = require("phenix_nvim.config")
 local state = require("phenix_nvim.state")
+local runtime = require("phenix_nvim.runtime")
 local compose = require("phenix_nvim.compose.buffer")
 local transcript = require("phenix_nvim.transcript.buffer")
+local transcript_controller = require("phenix_nvim.transcript.controller")
 local winbar = require("phenix_nvim.winbar")
 
 local M = {}
 local group = vim.api.nvim_create_augroup("phenix-sidebar", { clear = true })
-local layouts = {}
-local host_buffer
+local surfaces = {}
+local hosts = {}
+local children = {}
+local next_surface_id = 0
+local reconciling = false
+local primary_states = {}
+local primary_compose_claimed = false
 
 local function valid_window(win)
   return win ~= nil and vim.api.nvim_win_is_valid(win)
@@ -17,47 +24,56 @@ local function valid_tab(tab)
   return tab ~= nil and vim.api.nvim_tabpage_is_valid(tab)
 end
 
-local function ensure_host_buffer()
-  if host_buffer ~= nil and vim.api.nvim_buf_is_valid(host_buffer) then
-    return host_buffer
-  end
-  host_buffer = vim.api.nvim_create_buf(false, true)
-  vim.bo[host_buffer].buftype = "nofile"
-  vim.bo[host_buffer].bufhidden = "hide"
-  vim.bo[host_buffer].swapfile = false
-  vim.bo[host_buffer].modifiable = false
-  vim.bo[host_buffer].filetype = "phenix-sidebar"
-  vim.api.nvim_buf_set_name(host_buffer, "phenix://sidebar-host")
-  return host_buffer
+local function surface_buffer_name(surface)
+  return "phenix://chat/" .. tostring(surface.id)
 end
 
-local function window_matches(win, tab, target)
+local function ensure_host_buffer(surface)
+  if surface.host_buffer ~= nil and vim.api.nvim_buf_is_valid(surface.host_buffer) then
+    return surface.host_buffer
+  end
+  local target = vim.api.nvim_create_buf(false, true)
+  surface.host_buffer = target
+  vim.bo[target].buftype = "nofile"
+  vim.bo[target].bufhidden = "hide"
+  vim.bo[target].swapfile = false
+  vim.bo[target].modifiable = false
+  vim.bo[target].filetype = "phenix-sidebar"
+  vim.b[target].phenix_internal = true
+  vim.b[target].phenix_role = "host"
+  vim.b[target].phenix_surface_id = surface.id
+  vim.api.nvim_buf_set_name(target, surface_buffer_name(surface))
+  return target
+end
+
+local function window_matches(win, surface, target)
   return valid_window(win)
-    and valid_tab(tab)
-    and vim.api.nvim_win_get_tabpage(win) == tab
+    and valid_tab(surface.tab)
+    and vim.api.nvim_win_get_tabpage(win) == surface.tab
     and vim.api.nvim_win_get_buf(win) == target
 end
 
-local function host_matches(layout)
-  return layout ~= nil and window_matches(layout.host_win, layout.tab, ensure_host_buffer())
+local function host_matches(surface)
+  return window_matches(surface.host_win, surface, ensure_host_buffer(surface))
 end
 
-local function repair_host(layout)
-  if layout == nil
-    or not valid_tab(layout.tab)
-    or not valid_window(layout.host_win)
-    or vim.api.nvim_win_get_tabpage(layout.host_win) ~= layout.tab
+local function repair_host(surface)
+  if surface == nil
+    or surface.closing
+    or not valid_tab(surface.tab)
+    or not valid_window(surface.host_win)
+    or vim.api.nvim_win_get_tabpage(surface.host_win) ~= surface.tab
   then
     return false
   end
-  local target = ensure_host_buffer()
-  if vim.api.nvim_win_get_buf(layout.host_win) ~= target then
-    local ok = pcall(vim.api.nvim_win_set_buf, layout.host_win, target)
+  local target = ensure_host_buffer(surface)
+  if vim.api.nvim_win_get_buf(surface.host_win) ~= target then
+    local ok = pcall(vim.api.nvim_win_set_buf, surface.host_win, target)
     if not ok then
       return false
     end
   end
-  return host_matches(layout)
+  return host_matches(surface)
 end
 
 local function sidebar_width(value)
@@ -67,11 +83,12 @@ local function sidebar_width(value)
   return math.max(1, math.floor(value))
 end
 
-local function apply_host_options(win)
+local function apply_host_options(surface)
+  local win = surface.host_win
   if not valid_window(win) then
     return
   end
-  vim.wo[win].winfixwidth = true
+  vim.wo[win].winfixwidth = false
   vim.wo[win].wrap = false
   vim.wo[win].number = false
   vim.wo[win].relativenumber = false
@@ -81,24 +98,25 @@ local function apply_host_options(win)
   vim.wo[win].winbar = ""
   vim.wo[win].statusline = " "
   vim.w[win].phenix_sidebar_host = true
+  vim.w[win].phenix_surface_id = surface.id
   vim.w[win].phenix_window_selectable = false
 end
 
-local function remember_cursor(layout)
-  if layout ~= nil and valid_window(layout.compose_win) then
-    local cursor = vim.api.nvim_win_get_cursor(layout.compose_win)
-    layout.compose_cursor = cursor
-    state.remembered_compose_cursor = cursor
+local function remember_cursor(surface)
+  if surface ~= nil and valid_window(surface.compose_win) then
+    surface.state.compose_cursor = vim.api.nvim_win_get_cursor(surface.compose_win)
   end
 end
 
-local function detach_children(layout)
-  if layout == nil then
+local function detach_children(surface)
+  if surface == nil then
     return
   end
-  winbar.detach(layout.transcript_win, layout.compose_win)
-  compose.detach_window(layout.compose_win)
-  transcript.detach_window(layout.transcript_win)
+  winbar.detach(surface.transcript_win, surface.compose_win)
+  compose.detach_window(surface.compose_win)
+  transcript.detach_window(surface.transcript_win)
+  children[surface.transcript_win] = nil
+  children[surface.compose_win] = nil
 end
 
 local function close_window(win)
@@ -107,33 +125,89 @@ local function close_window(win)
   end
 end
 
-local function remove_layout(tab, close_host)
-  local layout = layouts[tab]
-  if layout == nil then
+local function unregister(surface)
+  surfaces[surface.id] = nil
+  hosts[surface.host_win] = nil
+  children[surface.transcript_win] = nil
+  children[surface.compose_win] = nil
+end
+
+local host_option_names = {
+  "winfixwidth",
+  "wrap",
+  "number",
+  "relativenumber",
+  "signcolumn",
+  "foldcolumn",
+  "cursorline",
+  "winbar",
+  "statusline",
+}
+
+local function snapshot_host(win)
+  if not valid_window(win) then
+    return nil
+  end
+  local options = {}
+  for _, name in ipairs(host_option_names) do
+    options[name] = vim.wo[win][name]
+  end
+  return {
+    buffer = vim.api.nvim_win_get_buf(win),
+    cursor = vim.api.nvim_win_get_cursor(win),
+    options = options,
+  }
+end
+
+local function restore_host(surface)
+  local snapshot = surface.restore_host
+  local win = surface.host_win
+  if snapshot == nil or not valid_window(win) then
+    return false
+  end
+  if vim.api.nvim_buf_is_valid(snapshot.buffer) then
+    pcall(vim.api.nvim_win_set_buf, win, snapshot.buffer)
+  end
+  for name, value in pairs(snapshot.options or {}) do
+    pcall(function()
+      vim.wo[win][name] = value
+    end)
+  end
+  vim.w[win].phenix_sidebar_host = nil
+  vim.w[win].phenix_surface_id = nil
+  vim.w[win].phenix_window_selectable = nil
+  pcall(vim.api.nvim_win_set_cursor, win, snapshot.cursor or { 1, 0 })
+  return true
+end
+
+local function release_surface(surface)
+  if surface == nil or surface.closing then
     return
   end
-  layouts[tab] = nil
-  layout.closing = true
-  remember_cursor(layout)
-  detach_children(layout)
-  close_window(layout.compose_win)
-  close_window(layout.transcript_win)
-  if close_host then
-    close_window(layout.host_win)
+  surface.closing = true
+  remember_cursor(surface)
+  detach_children(surface)
+  close_window(surface.compose_win)
+  close_window(surface.transcript_win)
+  unregister(surface)
+end
+
+local function close_surface(surface, close_host)
+  if surface == nil or surface.closing then
+    return
+  end
+  local restore = close_host and surface.restore_host ~= nil and valid_window(surface.host_win)
+  release_surface(surface)
+  if restore then
+    restore_host(surface)
+  elseif close_host then
+    close_window(surface.host_win)
   end
 end
 
-local function resize_host(layout)
-  if not repair_host(layout) then
-    return
-  end
-  apply_host_options(layout.host_win)
-  pcall(vim.api.nvim_win_set_width, layout.host_win, sidebar_width(config.get().width))
-end
-
-local function geometry(layout)
-  local width = math.max(1, vim.api.nvim_win_get_width(layout.host_win))
-  local height = math.max(2, vim.api.nvim_win_get_height(layout.host_win))
+local function geometry(surface)
+  local width = math.max(1, vim.api.nvim_win_get_width(surface.host_win))
+  local height = math.max(2, vim.api.nvim_win_get_height(surface.host_win))
   local requested_compose = math.max(1, math.floor(config.get().compose_height))
   local compose_height = math.min(requested_compose, height - 1)
   local transcript_height = math.max(1, height - compose_height)
@@ -144,12 +218,12 @@ local function geometry(layout)
   }
 end
 
-local function float_config(layout, role)
-  local size = geometry(layout)
+local function float_config(surface, role)
+  local size = geometry(surface)
   local is_compose = role == "compose"
   return {
     relative = "win",
-    win = layout.host_win,
+    win = surface.host_win,
     anchor = "NW",
     row = is_compose and size.transcript_height or 0,
     col = 0,
@@ -162,184 +236,465 @@ local function float_config(layout, role)
   }
 end
 
-local function ensure_float(layout, role, target)
+local function ensure_float(surface, role, target)
   local field = role .. "_win"
-  local win = layout[field]
-  local expected = window_matches(win, layout.tab, target)
-  if expected then
-    pcall(vim.api.nvim_win_set_config, win, float_config(layout, role))
+  local win = surface[field]
+  if window_matches(win, surface, target) then
+    pcall(vim.api.nvim_win_set_config, win, float_config(surface, role))
     vim.w[win].phenix_sidebar_role = role
+    vim.w[win].phenix_surface_id = surface.id
     vim.w[win].phenix_window_selectable = true
+    children[win] = surface
     return win
   end
 
+  children[win] = nil
   close_window(win)
-  win = vim.api.nvim_open_win(target, false, float_config(layout, role))
-  layout[field] = win
+  win = vim.api.nvim_open_win(target, false, float_config(surface, role))
+  surface[field] = win
+  children[win] = surface
   vim.w[win].phenix_sidebar_role = role
+  vim.w[win].phenix_surface_id = surface.id
   vim.w[win].phenix_window_selectable = true
   return win
 end
 
-local function sync_layout(layout)
-  if layout == nil or layout.closing or not repair_host(layout) then
+local function sync_surface(surface)
+  if surface == nil or surface.closing or not repair_host(surface) then
     return false
   end
-  resize_host(layout)
-  local transcript_win = ensure_float(layout, "transcript", transcript.ensure())
-  local compose_win = ensure_float(layout, "compose", compose.ensure(state.compose))
-  transcript.attach_window(transcript_win)
-  compose.attach_window(state.compose, compose_win)
-  winbar.attach(transcript_win, compose_win)
+  apply_host_options(surface)
+  transcript_controller.bind(surface.transcript_key, surface.state.session_id)
+  local transcript_win = ensure_float(surface, "transcript", transcript.ensure(surface.transcript_key))
+  local compose_win = ensure_float(surface, "compose", compose.ensure(surface.state.compose))
+  transcript.attach_window(surface.transcript_key, transcript_win)
+  compose.attach_window(surface.state.compose, compose_win)
+  winbar.attach(transcript_win, compose_win, surface)
+  local function map_children(key, callback, description)
+    for _, win in ipairs({ transcript_win, compose_win }) do
+      vim.keymap.set("n", key, callback, {
+        buffer = vim.api.nvim_win_get_buf(win),
+        silent = true,
+        desc = description,
+      })
+    end
+  end
+
+  map_children("<C-w>n", function()
+    M.new("sidebar", surface, { command = "aboveleft new" })
+  end, "Open a new Phenix chat in a new split")
+  map_children("<C-w>v", function()
+    M.new("sidebar", surface, { command = "rightbelow vsplit" })
+  end, "Open a new Phenix chat beside this one")
+  map_children("<C-w>s", function()
+    M.new("sidebar", surface, { command = "rightbelow split" })
+  end, "Open a new Phenix chat below this one")
+
+  for key, direction in pairs({
+    ["<C-w>H"] = "left",
+    ["<C-w>L"] = "right",
+    ["<C-w>K"] = "up",
+    ["<C-w>J"] = "down",
+    ["<C-w>T"] = "tab",
+  }) do
+    local target_direction = direction
+    map_children(key, function()
+      M.move_window(target_direction, surface)
+    end, "Move Phenix chat " .. target_direction)
+  end
+
+  for key, command in pairs({
+    ["<C-w>r"] = "wincmd r",
+    ["<C-w>R"] = "wincmd R",
+    ["<C-w>x"] = "wincmd x",
+    ["<C-w>="] = "wincmd =",
+    ["<C-w>+"] = "wincmd +",
+    ["<C-w>-"] = "wincmd -",
+    ["<C-w><"] = "wincmd <",
+    ["<C-w>>"] = "wincmd >",
+  }) do
+    local host_command = command
+    map_children(key, function()
+      M.host_command(host_command, surface)
+    end, "Apply window operation to Phenix chat host")
+  end
   return true
 end
 
-local function reconcile(tab)
-  local layout = layouts[tab]
-  if layout == nil or layout.closing then
+local function reconcile_surface(surface)
+  if surface == nil or surface.closing then
     return nil
   end
-  if not valid_tab(tab) or not repair_host(layout) then
-    remove_layout(tab, false)
+  if not repair_host(surface) or not sync_surface(surface) then
+    close_surface(surface, false)
     return nil
   end
-  if not sync_layout(layout) then
-    remove_layout(tab, false)
-    return nil
-  end
-  return layout
+  return surface
 end
 
-local function focus_child(layout, role)
-  if layout == nil or not valid_tab(layout.tab) or vim.api.nvim_get_current_tabpage() ~= layout.tab then
+local function focus_child(surface, role)
+  if surface == nil or not valid_tab(surface.tab) or vim.api.nvim_get_current_tabpage() ~= surface.tab then
     return
   end
-  local win = layout[role .. "_win"]
+  local win = surface[role .. "_win"]
   if valid_window(win) then
-    layout.selected_role = role
+    surface.selected_role = role
+    runtime.activate_session(surface.session_id)
     vim.api.nvim_set_current_win(win)
     if role == "compose" then
-      pcall(vim.api.nvim_win_set_cursor, win, layout.compose_cursor or state.remembered_compose_cursor)
+      pcall(vim.api.nvim_win_set_cursor, win, surface.state.compose_cursor)
     end
   end
 end
 
-local function role_for_window(layout, win)
-  if layout == nil then
+local function surface_for_window(win)
+  return hosts[win] or children[win]
+end
+
+local function current_surface()
+  local win = vim.api.nvim_get_current_win()
+  local direct = surface_for_window(win)
+  if direct ~= nil and not direct.closing then
+    return direct
+  end
+  local tab = vim.api.nvim_get_current_tabpage()
+  local found
+  for _, surface in pairs(surfaces) do
+    if not surface.closing and surface.tab == tab then
+      if found ~= nil then
+        return nil
+      end
+      found = surface
+    end
+  end
+  return found
+end
+
+local function redirect_host_focus(surface)
+  if surface == nil or surface.closing or surface.redirecting_host_focus then
+    return
+  end
+  surface.redirecting_host_focus = true
+  vim.schedule(function()
+    surface.redirecting_host_focus = false
+    if surfaces[surface.id] ~= surface or not repair_host(surface) then
+      return
+    end
+    if vim.api.nvim_get_current_win() ~= surface.host_win then
+      return
+    end
+    if not sync_surface(surface) then
+      close_surface(surface, false)
+      return
+    end
+    focus_child(surface, surface.selected_role or "compose")
+  end)
+end
+
+local function primary_state(tab)
+  local value = primary_states[tab]
+  if value == nil then
+    if not primary_compose_claimed then
+      primary_compose_claimed = true
+      value = {
+        session_id = nil,
+        compose = state.compose,
+        compose_cursor = vim.deepcopy(state.remembered_compose_cursor),
+        transcript_key = transcript.default_key(),
+      }
+    else
+      value = state.new_surface()
+    end
+    primary_states[tab] = value
+  end
+  return value
+end
+
+local function create_surface(host_win, surface_state, metadata)
+  next_surface_id = next_surface_id + 1
+  metadata = metadata or {}
+  local surface = {
+    id = next_surface_id,
+    tab = vim.api.nvim_win_get_tabpage(host_win),
+    host_win = host_win,
+    host_buffer = nil,
+    transcript_win = nil,
+    compose_win = nil,
+    state = surface_state or state.new_surface(),
+    selected_role = "compose",
+    redirecting_host_focus = false,
+    closing = false,
+    presentation = metadata.presentation or "sidebar",
+    restore_host = metadata.restore_host,
+  }
+  vim.api.nvim_win_set_buf(host_win, ensure_host_buffer(surface))
+  surface.compose = surface.state.compose
+  surface.session_id = surface.state.session_id
+  surface.transcript_key = surface.state.transcript_key or surface
+  surfaces[surface.id] = surface
+  hosts[host_win] = surface
+  apply_host_options(surface)
+  sync_surface(surface)
+  return surface
+end
+
+local function create_sidebar_host(origin, command)
+  local options = config.get()
+  local host
+  local split_command = command or (options.side == "left" and "topleft vsplit" or "botright vsplit")
+  origin = origin or vim.api.nvim_get_current_win()
+  vim.api.nvim_win_call(origin, function()
+    vim.cmd(split_command)
+    host = vim.api.nvim_get_current_win()
+  end)
+  if command == nil or command:find("vsplit", 1, true) ~= nil then
+    pcall(vim.api.nvim_win_set_width, host, sidebar_width(options.width))
+  end
+  return host
+end
+
+local function source_window(origin)
+  if origin ~= nil and valid_window(origin.host_win) then
+    return origin.host_win
+  end
+  local win = vim.api.nvim_get_current_win()
+  local surface = surface_for_window(win)
+  if surface ~= nil then
+    return surface.host_win
+  end
+  local config = vim.api.nvim_win_get_config(win)
+  if config.relative ~= "" then
     return nil
   end
-  if layout.transcript_win == win then
-    return "transcript"
-  end
-  if layout.compose_win == win then
-    return "compose"
+  return win
+end
+
+function M.is_open()
+  return current_surface() ~= nil
+end
+
+function M.current()
+  return current_surface()
+end
+
+function M.current_surface()
+  return current_surface()
+end
+
+function M.surface_for_document(document)
+  for _, surface in pairs(surfaces) do
+    if not surface.closing and surface.compose == document then
+      return surface
+    end
   end
   return nil
 end
 
-local function redirect_host_focus(layout)
-  if layout == nil or layout.closing or layout.redirecting_host_focus then
-    return
-  end
-  layout.redirecting_host_focus = true
-  vim.schedule(function()
-    layout.redirecting_host_focus = false
-    if layouts[layout.tab] ~= layout or not repair_host(layout) then
-      return
-    end
-    if vim.api.nvim_get_current_win() ~= layout.host_win then
-      return
-    end
-    if not sync_layout(layout) then
-      remove_layout(layout.tab, false)
-      return
-    end
-    focus_child(layout, layout.selected_role or "compose")
-  end)
-end
-
-function M.is_open()
-  return reconcile(vim.api.nvim_get_current_tabpage()) ~= nil
+function M.surface_for_window(win)
+  return surface_for_window(win or vim.api.nvim_get_current_win())
 end
 
 function M.remember_cursor()
-  remember_cursor(reconcile(vim.api.nvim_get_current_tabpage()))
+  remember_cursor(current_surface())
 end
 
 function M.open()
-  local tab = vim.api.nvim_get_current_tabpage()
-  local layout = reconcile(tab)
-  if layout ~= nil then
+  local surface = current_surface()
+  if surface ~= nil and reconcile_surface(surface) ~= nil then
     winbar.refresh()
-    focus_child(layout, "compose")
-    return layout.compose_win
+    focus_child(surface, "compose")
+    return surface
   end
 
-  local options = config.get()
-  vim.cmd(options.side == "left" and "topleft vsplit" or "botright vsplit")
-  local host_win = vim.api.nvim_get_current_win()
-  vim.api.nvim_win_set_buf(host_win, ensure_host_buffer())
+  local tab = vim.api.nvim_get_current_tabpage()
+  local surface_state = primary_state(tab)
+  if surface_state.session_id == nil then
+    surface_state.session_id = runtime.active_session()
+  end
+  surface = create_surface(create_sidebar_host(), surface_state, { presentation = "sidebar" })
+  focus_child(surface, "compose")
+  return surface
+end
 
-  layout = {
-    tab = tab,
-    host_win = host_win,
-    transcript_win = nil,
-    compose_win = nil,
-    compose_cursor = vim.deepcopy(state.remembered_compose_cursor),
-    selected_role = "compose",
-    redirecting_host_focus = false,
-    closing = false,
-  }
-  layouts[tab] = layout
-  resize_host(layout)
-  sync_layout(layout)
-  focus_child(layout, "compose")
-  return layout.compose_win
+function M.new(mode, origin, options)
+  mode = mode or "sidebar"
+  options = options or {}
+  local origin_win = source_window(origin)
+  local host
+  local metadata = { presentation = mode }
+
+  if mode == "sidebar" then
+    if origin_win == nil then
+      return nil, "sidebar presentation requires a normal source window"
+    end
+    host = create_sidebar_host(origin_win, options.command)
+  elseif mode == "tab" then
+    vim.cmd("tabnew")
+    local editor = vim.api.nvim_get_current_win()
+    host = create_sidebar_host(editor)
+  elseif mode == "curr_window" then
+    if origin_win == nil then
+      return nil, "current window is not a normal window"
+    end
+    local existing = surface_for_window(origin_win)
+    if existing ~= nil then
+      metadata.restore_host = existing.restore_host
+      release_surface(existing)
+    else
+      metadata.restore_host = snapshot_host(origin_win)
+    end
+    host = origin_win
+  elseif mode == "fullscreen" then
+    vim.cmd("tabnew")
+    host = vim.api.nvim_get_current_win()
+  else
+    return nil, "unknown Phenix presentation mode: " .. tostring(mode)
+  end
+
+  local surface = create_surface(host, nil, metadata)
+  if options.session_id ~= nil then
+    surface.state.session_id = options.session_id
+    surface.session_id = options.session_id
+    sync_surface(surface)
+  end
+  focus_child(surface, "compose")
+  return surface
 end
 
 function M.close()
-  remove_layout(vim.api.nvim_get_current_tabpage(), true)
+  close_surface(current_surface(), true)
+end
+
+
+function M.host_command(command, surface)
+  surface = surface or current_surface()
+  if surface == nil or type(command) ~= "string" or command == "" then
+    return nil
+  end
+  vim.api.nvim_win_call(surface.host_win, function()
+    vim.cmd(command)
+  end)
+  if valid_window(surface.host_win) then
+    surface.tab = vim.api.nvim_win_get_tabpage(surface.host_win)
+  end
+  sync_surface(surface)
+  M.reconcile()
+  return true
+end
+
+function M.move_window(direction, surface)
+  surface = surface or current_surface()
+  if surface == nil then
+    return nil
+  end
+  local commands = {
+    left = "wincmd H",
+    right = "wincmd L",
+    up = "wincmd K",
+    down = "wincmd J",
+    top = "wincmd K",
+    bottom = "wincmd J",
+    tab = "wincmd T",
+  }
+  local command = commands[direction]
+  if command == nil then
+    return nil
+  end
+  return M.host_command(command, surface)
 end
 
 function M.toggle()
-  if M.is_open() then
-    M.close()
+  local surface = current_surface()
+  if surface ~= nil then
+    close_surface(surface, true)
   else
     M.open()
   end
 end
 
-function M.focus_compose()
-  local win = M.open()
-  local layout = reconcile(vim.api.nvim_get_current_tabpage())
-  focus_child(layout, "compose")
-  return win
+function M.focus_compose(target)
+  local surface = type(target) == "table" and target.id ~= nil and target or current_surface()
+  local document = type(target) == "table" and target.id == nil and target or nil
+  if document ~= nil and (surface == nil or surface.state.compose ~= document) then
+    for _, candidate in pairs(surfaces) do
+      if candidate.state.compose == document then
+        surface = candidate
+        break
+      end
+    end
+  end
+  if surface == nil then
+    M.open()
+    surface = current_surface()
+  end
+  reconcile_surface(surface)
+  focus_child(surface, "compose")
+  return surface and surface.compose_win or nil
 end
 
-function M.buffers()
-  return transcript.ensure(), compose.ensure(state.compose)
+function M.bind_session(session_id, surface)
+  surface = surface or current_surface()
+  if surface == nil then
+    return nil
+  end
+  surface.state.session_id = session_id
+  surface.session_id = session_id
+  transcript_controller.bind(surface.transcript_key, session_id)
+  sync_surface(surface)
+  return surface
 end
 
-function M.windows()
-  local layout = reconcile(vim.api.nvim_get_current_tabpage())
-  if layout == nil then
+function M.current_compose()
+  local surface = current_surface()
+  return surface and surface.compose or state.compose
+end
+
+function M.buffers(surface)
+  surface = surface or current_surface()
+  if surface == nil then
+    return transcript.ensure(), compose.ensure(state.compose)
+  end
+  return transcript.ensure(surface.transcript_key), compose.ensure(surface.state.compose)
+end
+
+function M.windows(surface)
+  surface = surface or current_surface()
+  if surface == nil or reconcile_surface(surface) == nil then
     return nil, nil, nil
   end
-  return layout.transcript_win, layout.compose_win, layout.host_win
+  return surface.transcript_win, surface.compose_win, surface.host_win
 end
 
 function M.is_host(win)
-  win = win or vim.api.nvim_get_current_win()
-  for _, layout in pairs(layouts) do
-    if not layout.closing and layout.host_win == win then
-      return true
-    end
-  end
-  return false
+  return hosts[win or vim.api.nvim_get_current_win()] ~= nil
 end
 
 function M.is_selectable(win)
   return valid_window(win) and not M.is_host(win)
+end
+
+function M.reconcile()
+  if reconciling then
+    return
+  end
+  reconciling = true
+  vim.schedule(function()
+    reconciling = false
+    local ids = {}
+    for id in pairs(surfaces) do
+      table.insert(ids, id)
+    end
+    for _, id in ipairs(ids) do
+      local live = surfaces[id]
+      if live ~= nil and not live.closing then
+        if not valid_tab(live.tab) or not repair_host(live) then
+          close_surface(live, false)
+        else
+          sync_surface(live)
+        end
+      end
+    end
+  end)
 end
 
 vim.api.nvim_create_autocmd("WinClosed", {
@@ -349,103 +704,63 @@ vim.api.nvim_create_autocmd("WinClosed", {
     if closed == nil then
       return
     end
-    for tab, layout in pairs(layouts) do
-      if not layout.closing then
-        if layout.host_win == closed then
-          vim.schedule(function()
-            if layouts[tab] == layout then
-              remove_layout(tab, false)
-            end
-          end)
-        elseif layout.transcript_win == closed or layout.compose_win == closed then
-          local role = layout.transcript_win == closed and "transcript" or "compose"
-          vim.schedule(function()
-            if layouts[tab] ~= layout then
-              return
-            end
-            if sync_layout(layout) then
-              focus_child(layout, role)
-            end
-          end)
-        end
-      end
+    local surface = surface_for_window(closed)
+    if surface == nil or surface.closing then
+      return
     end
-  end,
-})
-
-vim.api.nvim_create_autocmd("BufWinLeave", {
-  group = group,
-  callback = function()
     vim.schedule(function()
-      for tab, layout in pairs(layouts) do
-        if not layout.closing then
-          if not repair_host(layout) then
-            remove_layout(tab, false)
-          else
-            sync_layout(layout)
-          end
-        end
+      if surfaces[surface.id] == surface then
+        -- A Phenix chat is an atomic surface. Closing either child is semantically
+        -- the same action as closing its reservation host.
+        close_surface(surface, closed ~= surface.host_win)
       end
     end)
   end,
 })
 
+vim.api.nvim_create_autocmd({ "BufWinLeave", "WinNew", "WinResized", "VimResized" }, {
+  group = group,
+  callback = M.reconcile,
+})
+
 vim.api.nvim_create_autocmd("TabLeave", {
   group = group,
   callback = function()
-    local layout = layouts[vim.api.nvim_get_current_tabpage()]
-    if layout ~= nil and not layout.closing then
-      remember_cursor(layout)
-      compose.detach_window(layout.compose_win)
+    local tab = vim.api.nvim_get_current_tabpage()
+    for _, surface in pairs(surfaces) do
+      if surface.tab == tab and not surface.closing then
+        remember_cursor(surface)
+        compose.detach_window(surface.compose_win)
+      end
     end
   end,
 })
 
 vim.api.nvim_create_autocmd("TabEnter", {
   group = group,
-  callback = function()
-    vim.schedule(function()
-      reconcile(vim.api.nvim_get_current_tabpage())
-    end)
-  end,
+  callback = M.reconcile,
 })
 
 vim.api.nvim_create_autocmd("WinEnter", {
   group = group,
   callback = function()
-    local tab = vim.api.nvim_get_current_tabpage()
-    local layout = layouts[tab]
-    if layout == nil or layout.closing then
-      return
-    end
     local win = vim.api.nvim_get_current_win()
-    local role = role_for_window(layout, win)
-    if role ~= nil then
-      layout.selected_role = role
+    local surface = surface_for_window(win)
+    if surface == nil or surface.closing then
+      M.reconcile()
       return
     end
-    if win == layout.host_win then
-      redirect_host_focus(layout)
+    if win == surface.host_win then
+      redirect_host_focus(surface)
       return
     end
-    vim.schedule(function()
-      reconcile(tab)
-    end)
-  end,
-})
-
-vim.api.nvim_create_autocmd({ "VimResized", "WinResized" }, {
-  group = group,
-  callback = function()
-    vim.schedule(function()
-      for tab, layout in pairs(layouts) do
-        if valid_tab(tab) and not layout.closing then
-          if not sync_layout(layout) then
-            remove_layout(tab, false)
-          end
-        end
-      end
-    end)
+    if win == surface.transcript_win then
+      surface.selected_role = "transcript"
+      runtime.activate_session(surface.session_id)
+    elseif win == surface.compose_win then
+      surface.selected_role = "compose"
+      runtime.activate_session(surface.session_id)
+    end
   end,
 })
 

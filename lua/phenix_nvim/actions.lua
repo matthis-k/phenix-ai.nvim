@@ -11,14 +11,29 @@ local state = require("phenix_nvim.state")
 local util = require("phenix_nvim.util")
 
 local M = {}
-local submissions = {}
+local submissions = setmetatable({}, { __mode = "k" })
 
-local function insert(item)
-  local stored = compose_model.add(state.compose, item)
-  local win = sidebar.focus_compose()
-  local inserted, error = compose.insert(state.compose, stored, win)
+local function target_surface(options)
+  options = options or {}
+  local surface = options.document and sidebar.surface_for_document(options.document) or sidebar.current_surface()
+  if surface == nil then
+    surface = sidebar.open()
+  end
+  return surface
+end
+
+local function insert(item, options)
+  local surface = target_surface(options)
+  if surface == nil then
+    util.notify("could not open Phenix chat window", vim.log.levels.ERROR)
+    return nil
+  end
+  local document = options and options.document or surface.compose
+  local win = sidebar.focus_compose(surface)
+  local stored = compose_model.add(document, item)
+  local inserted, error = compose.insert(document, stored, win)
   if not inserted then
-    compose_model.remove(state.compose, stored.id)
+    compose_model.remove(document, stored.id)
     util.notify(error or "could not insert compose attachment", vim.log.levels.ERROR)
     return nil
   end
@@ -65,13 +80,14 @@ function M.reference_picker()
   end)
 end
 
-local function attach_image_file(path, temporary, quiet)
+local function attach_image_file(path, temporary, options)
+  options = options or {}
   local item, error = image.from_file(path)
   if temporary then
     os.remove(path)
   end
   if item == nil then
-    if not quiet then
+    if not options.quiet then
       util.notify(error, vim.log.levels.ERROR)
     end
     return nil
@@ -79,7 +95,7 @@ local function attach_image_file(path, temporary, quiet)
   if temporary then
     item.path = nil
   end
-  return insert(item)
+  return insert(item, options)
 end
 
 function M.attach_image(source, options)
@@ -93,26 +109,43 @@ function M.attach_image(source, options)
       end
       return nil
     end
-    return attach_image_file(path, true, options.quiet)
+    return attach_image_file(path, true, options)
   end
-  return attach_image_file(source, false, options.quiet)
+  return attach_image_file(source, false, options)
 end
 
-local function submit(session_id, content, revision)
+local function submit(surface, content, revision)
+  local document = surface.compose
+  local session_id = surface.session_id
   runtime.prompt(session_id, content, function(_, error)
-    submissions[revision] = nil
+    if submissions[document] == revision then
+      submissions[document] = nil
+    end
     if error ~= nil then
       util.notify(vim.inspect(error), vim.log.levels.ERROR)
       return
     end
-    if state.compose.revision == revision then
-      compose.clear(state.compose)
+    if document.revision == revision then
+      compose.clear(document)
     end
   end)
 end
 
-function M.send()
-  local content, error = compose.serialize(state.compose)
+function M.send(options)
+  local surface = target_surface(options)
+  if surface == nil then
+    return
+  end
+  local document = options and options.document or surface.compose
+  if document ~= surface.compose then
+    surface = sidebar.surface_for_document(document)
+    if surface == nil then
+      util.notify("compose document is not attached to a Phenix chat window", vim.log.levels.ERROR)
+      return
+    end
+  end
+
+  local content, error = compose.serialize(document)
   if content == nil then
     util.notify(error, vim.log.levels.ERROR)
     return
@@ -121,25 +154,33 @@ function M.send()
     util.notify("compose buffer is empty", vim.log.levels.WARN)
     return
   end
-  local revision = state.compose.revision
-  if submissions[revision] then
+  local revision = document.revision
+  if submissions[document] == revision then
     util.notify("this compose revision is already being sent", vim.log.levels.WARN)
     return
   end
-  submissions[revision] = true
+  submissions[document] = revision
 
-  local session_id = runtime.active_session()
-  if session_id ~= nil then
-    submit(session_id, content, revision)
+  if surface.session_id ~= nil then
+    submit(surface, content, revision)
     return
   end
   runtime.new_session(function(created, create_error)
     if create_error ~= nil then
-      submissions[revision] = nil
+      if submissions[document] == revision then
+        submissions[document] = nil
+      end
       util.notify(vim.inspect(create_error), vim.log.levels.ERROR)
       return
     end
-    submit(created.session_id, content, revision)
+    local session_id = created and (created.session_id or created.id)
+    if session_id == nil then
+      submissions[document] = nil
+      util.notify("Phenix created a session without an id", vim.log.levels.ERROR)
+      return
+    end
+    sidebar.bind_session(session_id, surface)
+    submit(surface, content, revision)
   end)
 end
 
@@ -147,12 +188,28 @@ function M.toggle()
   sidebar.toggle()
 end
 
+function M.new(mode)
+  local surface, error = sidebar.new(mode or "sidebar")
+  if surface == nil and error ~= nil then
+    util.notify(error, vim.log.levels.ERROR)
+  end
+  return surface
+end
+
+
 function M.cancel()
   runtime.cancel_active()
 end
 
 function M.new_session(callback)
+  local surface = target_surface()
   sessions.new(function(value, error)
+    if error == nil and surface ~= nil then
+      local session_id = value and (value.session_id or value.id)
+      if session_id ~= nil then
+        sidebar.bind_session(session_id, surface)
+      end
+    end
     if callback ~= nil then
       util.safe_call(callback, value, error)
     elseif error ~= nil then
@@ -162,15 +219,31 @@ function M.new_session(callback)
 end
 
 function M.close_session()
-  sessions.close(nil, function(_, error)
+  local surface = target_surface()
+  local session_id = surface and surface.session_id or runtime.active_session()
+  sessions.close(session_id, function(_, error)
     if error ~= nil then
       util.notify(vim.inspect(error), vim.log.levels.ERROR)
+      return
+    end
+    if surface ~= nil then
+      sidebar.bind_session(nil, surface)
     end
   end)
 end
 
 function M.choose_session()
-  sessions.choose()
+  local surface = target_surface()
+  sessions.choose(function(value, error)
+    if error ~= nil then
+      util.notify(vim.inspect(error), vim.log.levels.ERROR)
+      return
+    end
+    local session_id = value and (value.session_id or value.id)
+    if surface ~= nil and session_id ~= nil then
+      sidebar.bind_session(session_id, surface)
+    end
+  end)
 end
 
 local function presentation_kind(item)

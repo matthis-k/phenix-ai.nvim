@@ -7,6 +7,14 @@ local runtime = {
   on_event = function(listener) listeners[#listeners + 1] = listener end,
   active_session_object = function() return active end,
   active_session = function() return "session-send" end,
+  activate_session = function() end,
+  status = function()
+    return { connection = "ready", session_id = "session-send" }
+  end,
+  session_state = function()
+    return { sessions = {} }
+  end,
+  refresh_session_state = function() end,
   prompt = function(_, _, callback)
     table.insert(prompt_callbacks, callback)
   end,

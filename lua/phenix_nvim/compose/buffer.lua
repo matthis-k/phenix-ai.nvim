@@ -5,54 +5,70 @@ local model = require("phenix_nvim.compose.model")
 local M = {}
 local namespace = vim.api.nvim_create_namespace("phenix-compose")
 local preview_group = vim.api.nvim_create_augroup("phenix-compose-preview", { clear = true })
-local buffer
-local buffer_document
-local markers = {}
-local attached_windows = {}
-local previews = {}
+local stores = setmetatable({}, { __mode = "k" })
+local next_buffer_id = 0
 
 local function valid_window(win)
   return win ~= nil and vim.api.nvim_win_is_valid(win)
 end
 
-local function close_preview(win, id)
-  local window_previews = previews[win]
+local function store(document)
+  assert(document ~= nil, "Phenix compose document is required")
+  local value = stores[document]
+  if value == nil then
+    value = {
+      document = document,
+      buffer = nil,
+      name = nil,
+      markers = {},
+      attached_windows = {},
+      previews = {},
+      recreating = true,
+    }
+    stores[document] = value
+  end
+  return value
+end
+
+local function close_preview(view, win, id)
+  local window_previews = view.previews[win]
   local preview = window_previews and window_previews[id] or nil
   if preview ~= nil then
     image.close(preview)
     window_previews[id] = nil
   end
   if window_previews ~= nil and next(window_previews) == nil then
-    previews[win] = nil
+    view.previews[win] = nil
   end
 end
 
-local function close_item_previews(id)
-  for win in pairs(previews) do
-    close_preview(win, id)
+local function close_item_previews(view, id)
+  for win in pairs(view.previews) do
+    close_preview(view, win, id)
   end
 end
 
-local function close_window_previews(win)
-  local window_previews = previews[win]
+local function close_window_previews(view, win)
+  local window_previews = view.previews[win]
   if window_previews == nil then
     return
   end
   for id in pairs(window_previews) do
-    close_preview(win, id)
+    close_preview(view, win, id)
   end
-  previews[win] = nil
+  view.previews[win] = nil
 end
 
-local function close_previews()
-  for win in pairs(previews) do
-    close_window_previews(win)
+local function close_previews(view)
+  for win in pairs(view.previews) do
+    close_window_previews(view, win)
   end
 end
 
-local function marker_position(target, item)
-  local extmark = markers[item.id]
-  if extmark == nil then
+local function marker_position(view, item)
+  local target = view.buffer
+  local extmark = view.markers[item.id]
+  if target == nil or extmark == nil or not vim.api.nvim_buf_is_valid(target) then
     return nil
   end
   local position = vim.api.nvim_buf_get_extmark_by_id(target, namespace, extmark, {})
@@ -83,65 +99,68 @@ local function placement(win, row, column)
 end
 
 function M.reconcile_markers(document)
-  if buffer == nil or not vim.api.nvim_buf_is_valid(buffer) then
+  local view = store(document)
+  local target = view.buffer
+  if target == nil or not vim.api.nvim_buf_is_valid(target) then
     return
   end
   local active = {}
   local stale = {}
-  for id in pairs(markers) do
+  for id in pairs(view.markers) do
     local item = model.get(document, id)
-    if item ~= nil and marker_position(buffer, item) ~= nil then
+    if item ~= nil and marker_position(view, item) ~= nil then
       active[id] = true
     else
       table.insert(stale, id)
     end
   end
   for _, id in ipairs(stale) do
-    local extmark = markers[id]
+    local extmark = view.markers[id]
     if extmark ~= nil then
-      pcall(vim.api.nvim_buf_del_extmark, buffer, namespace, extmark)
+      pcall(vim.api.nvim_buf_del_extmark, target, namespace, extmark)
     end
-    markers[id] = nil
-    close_item_previews(id)
+    view.markers[id] = nil
+    close_item_previews(view, id)
   end
   model.reconcile(document, active)
 end
 
-local function refresh_window(document, win)
-  if buffer == nil or not vim.api.nvim_buf_is_valid(buffer) then
-    close_window_previews(win)
-    attached_windows[win] = nil
+local function refresh_window(document, view, win)
+  local target = view.buffer
+  if target == nil or not vim.api.nvim_buf_is_valid(target) then
+    close_window_previews(view, win)
+    view.attached_windows[win] = nil
     return
   end
-  if not valid_window(win) or vim.api.nvim_win_get_buf(win) ~= buffer then
-    close_window_previews(win)
-    attached_windows[win] = nil
+  if not valid_window(win) or vim.api.nvim_win_get_buf(win) ~= target then
+    close_window_previews(view, win)
+    view.attached_windows[win] = nil
     return
   end
 
-  local window_previews = previews[win] or {}
-  previews[win] = window_previews
+  local window_previews = view.previews[win] or {}
+  view.previews[win] = window_previews
   for id in pairs(window_previews) do
     local item = model.get(document, id)
-    if item == nil or item.kind ~= "image" or markers[id] == nil then
-      close_preview(win, id)
+    if item == nil or item.kind ~= "image" or view.markers[id] == nil then
+      close_preview(view, win, id)
     end
   end
 
-  for id in pairs(markers) do
+  for id in pairs(view.markers) do
     local item = model.get(document, id)
     if item == nil or item.kind ~= "image" then
-      close_preview(win, id)
+      close_preview(view, win, id)
     else
-      local row, column = marker_position(buffer, item)
+      local row, column = marker_position(view, item)
       local where = row ~= nil and placement(win, row, column) or nil
       if where == nil then
-        close_preview(win, id)
+        close_preview(view, win, id)
       elseif window_previews[id] ~= nil then
         if not image.update(window_previews[id], where) then
-          close_preview(win, id)
-          window_previews = previews[win] or {}
-          previews[win] = window_previews
+          close_preview(view, win, id)
+          window_previews = view.previews[win] or {}
+          view.previews[win] = window_previews
           window_previews[id] = image.preview(item, where)
         end
       else
@@ -152,18 +171,20 @@ local function refresh_window(document, win)
 end
 
 function M.refresh_previews(document, win)
-  document = document or buffer_document
-  if document == nil then
-    close_previews()
+  if document ~= nil then
+    local view = store(document)
+    if win ~= nil then
+      refresh_window(document, view, win)
+      return
+    end
+    for attached in pairs(view.attached_windows) do
+      refresh_window(document, view, attached)
+    end
     return
   end
-  if win ~= nil then
-    refresh_window(document, win)
-    return
-  end
-  for attached, attached_document in pairs(attached_windows) do
-    if attached_document == document then
-      refresh_window(document, attached)
+  for current_document, view in pairs(stores) do
+    for attached in pairs(view.attached_windows) do
+      refresh_window(current_document, view, attached)
     end
   end
 end
@@ -175,9 +196,9 @@ local function native_paste(key)
   vim.cmd.normal({ bang = true, args = { count .. register_prefix .. key } })
 end
 
-local function paste(_document, key)
+local function paste(document, key)
   if clipboard.register_uses_system_clipboard(vim.v.register) then
-    local attached = require("phenix_nvim.actions").attach_image("clipboard", { quiet = true })
+    local attached = require("phenix_nvim.actions").attach_image("clipboard", { quiet = true, document = document })
     if attached ~= nil then
       return
     end
@@ -185,107 +206,114 @@ local function paste(_document, key)
   native_paste(key)
 end
 
-function M.ensure(document)
-  if buffer ~= nil and vim.api.nvim_buf_is_valid(buffer) then
-    if document ~= nil and buffer_document ~= nil and document ~= buffer_document then
-      error("Phenix compose buffer is already bound to its canonical document")
-    end
-    if buffer_document == nil then
-      buffer_document = document
-    end
-    return buffer
+local function buffer_name()
+  next_buffer_id = next_buffer_id + 1
+  if next_buffer_id == 1 then
+    return "phenix://compose"
   end
-  buffer_document = document
-  buffer = vim.api.nvim_create_buf(false, true)
-  vim.bo[buffer].buflisted = false
-  vim.bo[buffer].buftype = "acwrite"
-  vim.bo[buffer].bufhidden = "hide"
-  vim.bo[buffer].swapfile = false
-  vim.bo[buffer].filetype = "markdown"
-  vim.b[buffer].phenix_internal = true
-  vim.b[buffer].phenix_role = "compose"
-  vim.api.nvim_buf_set_name(buffer, "phenix://compose")
+  return "phenix://compose/" .. tostring(next_buffer_id)
+end
+
+function M.ensure(document)
+  local view = store(document)
+  if view.buffer ~= nil and vim.api.nvim_buf_is_valid(view.buffer) then
+    return view.buffer
+  end
+
+  local target = vim.api.nvim_create_buf(false, true)
+  view.buffer = target
+  view.markers = {}
+  view.attached_windows = {}
+  view.previews = {}
+  vim.bo[target].buflisted = false
+  vim.bo[target].buftype = "acwrite"
+  vim.bo[target].bufhidden = "hide"
+  vim.bo[target].swapfile = false
+  vim.bo[target].filetype = "markdown"
+  vim.b[target].phenix_internal = true
+  vim.b[target].phenix_role = "compose"
+  view.name = view.name or buffer_name()
+  vim.api.nvim_buf_set_name(target, view.name)
+
   vim.keymap.set("n", "<CR>", function()
-    require("phenix_nvim.actions").send()
+    require("phenix_nvim.actions").send({ document = document })
   end, {
-    buffer = buffer,
+    buffer = target,
     desc = "Send Phenix prompt",
     silent = true,
   })
   vim.keymap.set("n", "p", function()
-    paste(buffer_document, "p")
+    paste(document, "p")
   end, {
-    buffer = buffer,
+    buffer = target,
     desc = "Paste text or clipboard image",
     silent = true,
   })
   vim.keymap.set("n", "P", function()
-    paste(buffer_document, "P")
+    paste(document, "P")
   end, {
-    buffer = buffer,
+    buffer = target,
     desc = "Paste text or clipboard image before cursor",
     silent = true,
   })
   vim.api.nvim_create_autocmd("BufWriteCmd", {
-    buffer = buffer,
+    buffer = target,
     callback = function()
-      require("phenix_nvim.actions").send()
+      require("phenix_nvim.actions").send({ document = document })
     end,
   })
   vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, {
-    buffer = buffer,
+    buffer = target,
     callback = function()
-      if buffer_document ~= nil then
-        model.touch(buffer_document)
-        M.reconcile_markers(buffer_document)
-        M.refresh_previews(buffer_document)
+      if view.buffer ~= target then
+        return
       end
-      if buffer ~= nil and vim.api.nvim_buf_is_valid(buffer) then
-        vim.bo[buffer].modified = false
+      model.touch(document)
+      M.reconcile_markers(document)
+      M.refresh_previews(document)
+      if vim.api.nvim_buf_is_valid(target) then
+        vim.bo[target].modified = false
       end
     end,
   })
   vim.api.nvim_create_autocmd("QuitPre", {
-    buffer = buffer,
+    buffer = target,
     callback = function()
-      if buffer ~= nil and vim.api.nvim_buf_is_valid(buffer) then
-        vim.bo[buffer].modified = false
+      if vim.api.nvim_buf_is_valid(target) then
+        vim.bo[target].modified = false
       end
     end,
   })
   vim.api.nvim_create_autocmd("BufWipeout", {
-    buffer = buffer,
+    buffer = target,
     callback = function()
-      local document = buffer_document
-      close_previews()
-      markers = {}
-      attached_windows = {}
-      if document ~= nil then
-        model.clear(document)
+      if view.buffer ~= target then
+        return
       end
-      buffer_document = nil
-      buffer = nil
-
-      -- A forced external wipe is an explicit draft reset, but it must not leave
-      -- the plugin without its canonical internal compose buffer.
-      if document ~= nil then
+      close_previews(view)
+      view.markers = {}
+      view.attached_windows = {}
+      model.clear(document)
+      view.buffer = nil
+      if view.recreating then
         vim.schedule(function()
-          if buffer == nil then
+          if view.buffer == nil and view.recreating then
             M.ensure(document)
           end
         end)
       end
     end,
   })
-  return buffer
+  return target
 end
 
 function M.attach_window(document, win)
+  local view = store(document)
   local target = M.ensure(document)
   if not valid_window(win) or vim.api.nvim_win_get_buf(win) ~= target then
     return
   end
-  attached_windows[win] = document
+  view.attached_windows[win] = true
   vim.wo[win].wrap = true
   vim.wo[win].linebreak = true
   vim.wo[win].breakindent = true
@@ -299,14 +327,30 @@ end
 
 function M.detach_window(win)
   if win == nil then
-    for attached in pairs(attached_windows) do
-      close_window_previews(attached)
+    for _, view in pairs(stores) do
+      for attached in pairs(view.attached_windows) do
+        close_window_previews(view, attached)
+      end
+      view.attached_windows = {}
     end
-    attached_windows = {}
     return
   end
-  close_window_previews(win)
-  attached_windows[win] = nil
+  for _, view in pairs(stores) do
+    if view.attached_windows[win] ~= nil then
+      close_window_previews(view, win)
+      view.attached_windows[win] = nil
+      return
+    end
+  end
+end
+
+function M.document_for_buffer(target)
+  for document, view in pairs(stores) do
+    if view.buffer == target then
+      return document
+    end
+  end
+  return nil
 end
 
 function M.marker(item)
@@ -324,10 +368,15 @@ local function label(item)
 end
 
 function M.insert(document, item, win)
+  local view = store(document)
   local target = M.ensure(document)
   if not valid_window(win) or vim.api.nvim_win_get_buf(win) ~= target then
-    local visible = vim.fn.bufwinid(target)
-    win = visible > 0 and visible or nil
+    for attached in pairs(view.attached_windows) do
+      if valid_window(attached) and vim.api.nvim_win_get_buf(attached) == target then
+        win = attached
+        break
+      end
+    end
   end
   if not valid_window(win) then
     return nil, "compose buffer is not visible"
@@ -337,7 +386,7 @@ function M.insert(document, item, win)
   local column = cursor[2]
   local marker = M.marker(item)
   vim.api.nvim_buf_set_text(target, row, column, row, column, { marker })
-  markers[item.id] = vim.api.nvim_buf_set_extmark(target, namespace, row, column, {
+  view.markers[item.id] = vim.api.nvim_buf_set_extmark(target, namespace, row, column, {
     end_row = row,
     end_col = column + #marker,
     hl_group = "Special",
@@ -385,15 +434,16 @@ local function append_text(result, lines)
 end
 
 function M.serialize(document)
+  local view = store(document)
   local target = M.ensure(document)
   M.reconcile_markers(document)
 
   local attachments = {}
   local active = {}
-  for id in pairs(markers) do
+  for id in pairs(view.markers) do
     local item = model.get(document, id)
     if item ~= nil then
-      local row, column = marker_position(target, item)
+      local row, column = marker_position(view, item)
       if row ~= nil then
         table.insert(attachments, {
           id = id,
@@ -440,9 +490,10 @@ function M.serialize(document)
 end
 
 function M.clear(document)
+  local view = store(document)
   local target = M.ensure(document)
-  close_previews()
-  markers = {}
+  close_previews(view)
+  view.markers = {}
   vim.api.nvim_buf_clear_namespace(target, namespace, 0, -1)
   vim.api.nvim_buf_set_lines(target, 0, -1, false, { "" })
   model.clear(document)
@@ -462,7 +513,7 @@ vim.api.nvim_create_autocmd("WinClosed", {
   group = preview_group,
   callback = function(args)
     local win = tonumber(args.match)
-    if win ~= nil and attached_windows[win] ~= nil then
+    if win ~= nil then
       M.detach_window(win)
     end
   end,

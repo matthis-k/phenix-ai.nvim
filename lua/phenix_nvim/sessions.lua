@@ -27,14 +27,18 @@ function M.close(session_id, callback)
   runtime.close_session(session_id, callback)
 end
 
-function M.choose()
+function M.choose(callback)
   local picker_generation = generation
   runtime.list_sessions(function(result, error)
     if picker_generation ~= generation then
       return
     end
     if error ~= nil then
-      util.notify(vim.inspect(error), vim.log.levels.ERROR)
+      if callback ~= nil then
+        util.safe_call(callback, nil, error)
+      else
+        util.notify(vim.inspect(error), vim.log.levels.ERROR)
+      end
       return
     end
     local sessions = result and (result.sessions or result) or {}
@@ -47,13 +51,17 @@ function M.choose()
       if picker_generation ~= generation then
         return
       end
-      if item ~= nil then
-        runtime.resume_session(item.session_id or item.id, function(_, resume_error)
-          if resume_error ~= nil then
-            util.notify(vim.inspect(resume_error), vim.log.levels.ERROR)
-          end
-        end)
+      if item == nil then
+        util.safe_call(callback, nil, nil)
+        return
       end
+      runtime.resume_session(item.session_id or item.id, function(value, resume_error)
+        if callback ~= nil then
+          util.safe_call(callback, resume_error == nil and item or nil, resume_error)
+        elseif resume_error ~= nil then
+          util.notify(vim.inspect(resume_error), vim.log.levels.ERROR)
+        end
+      end)
     end)
   end)
 end
