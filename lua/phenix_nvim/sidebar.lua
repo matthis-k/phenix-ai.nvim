@@ -678,7 +678,7 @@ vim.api.nvim_create_autocmd("WinClosed", {
   end,
 })
 
-vim.api.nvim_create_autocmd("BufWinLeave", {
+vim.api.nvim_create_autocmd("BufWinEnter", {
   group = group,
   callback = function()
     local tab = vim.api.nvim_get_current_tabpage()
