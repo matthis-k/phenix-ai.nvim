@@ -188,8 +188,12 @@ function M.toggle()
   sidebar.toggle()
 end
 
-function M.new_window()
-  return sidebar.new_window()
+function M.new(mode)
+  local surface, error = sidebar.new(mode or "sidebar")
+  if surface == nil and error ~= nil then
+    util.notify(error, vim.log.levels.ERROR)
+  end
+  return surface
 end
 
 
