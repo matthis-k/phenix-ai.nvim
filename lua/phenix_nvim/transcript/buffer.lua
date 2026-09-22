@@ -18,6 +18,7 @@ local function store(key)
     value = {
       key = key,
       buffer = nil,
+      name = nil,
       marks = {},
       attached_windows = {},
       last_projection = nil,
@@ -116,7 +117,8 @@ function M.ensure(key)
   vim.bo[view.buffer].swapfile = false
   vim.bo[view.buffer].filetype = "markdown"
   vim.bo[view.buffer].undolevels = -1
-  vim.api.nvim_buf_set_name(view.buffer, buffer_name())
+  view.name = view.name or buffer_name()
+  vim.api.nvim_buf_set_name(view.buffer, view.name)
   view.marks = {}
   view.attached_windows = {}
   if view.last_projection ~= nil and type(M.render_projection) == "function" then
