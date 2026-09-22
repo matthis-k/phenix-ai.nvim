@@ -62,6 +62,8 @@ local function apply_host_options(win)
   vim.wo[win].cursorline = false
   vim.wo[win].winbar = ""
   vim.wo[win].statusline = " "
+  vim.w[win].phenix_sidebar_host = true
+  vim.w[win].phenix_window_selectable = false
 end
 
 local function remember_cursor(layout)
@@ -192,11 +194,46 @@ local function focus_child(layout, role)
   end
   local win = layout[role .. "_win"]
   if valid_window(win) then
+    layout.selected_role = role
     vim.api.nvim_set_current_win(win)
     if role == "compose" then
       pcall(vim.api.nvim_win_set_cursor, win, layout.compose_cursor or state.remembered_compose_cursor)
     end
   end
+end
+
+local function role_for_window(layout, win)
+  if layout == nil then
+    return nil
+  end
+  if layout.transcript_win == win then
+    return "transcript"
+  end
+  if layout.compose_win == win then
+    return "compose"
+  end
+  return nil
+end
+
+local function redirect_host_focus(layout)
+  if layout == nil or layout.closing or layout.redirecting_host_focus then
+    return
+  end
+  layout.redirecting_host_focus = true
+  vim.schedule(function()
+    layout.redirecting_host_focus = false
+    if layouts[layout.tab] ~= layout or not host_matches(layout) then
+      return
+    end
+    if vim.api.nvim_get_current_win() ~= layout.host_win then
+      return
+    end
+    if not sync_layout(layout) then
+      remove_layout(layout.tab, false)
+      return
+    end
+    focus_child(layout, layout.selected_role or "compose")
+  end)
 end
 
 function M.is_open()
@@ -227,6 +264,8 @@ function M.open()
     transcript_win = nil,
     compose_win = nil,
     compose_cursor = vim.deepcopy(state.remembered_compose_cursor),
+    selected_role = "compose",
+    redirecting_host_focus = false,
     closing = false,
   }
   layouts[tab] = layout
@@ -265,6 +304,20 @@ function M.windows()
     return nil, nil, nil
   end
   return layout.transcript_win, layout.compose_win, layout.host_win
+end
+
+function M.is_host(win)
+  win = win or vim.api.nvim_get_current_win()
+  for _, layout in pairs(layouts) do
+    if not layout.closing and layout.host_win == win then
+      return true
+    end
+  end
+  return false
+end
+
+function M.is_selectable(win)
+  return valid_window(win) and not M.is_host(win)
 end
 
 vim.api.nvim_create_autocmd("WinClosed", {
@@ -323,11 +376,35 @@ vim.api.nvim_create_autocmd("TabLeave", {
   end,
 })
 
-vim.api.nvim_create_autocmd({ "TabEnter", "WinEnter" }, {
+vim.api.nvim_create_autocmd("TabEnter", {
   group = group,
   callback = function()
     vim.schedule(function()
       reconcile(vim.api.nvim_get_current_tabpage())
+    end)
+  end,
+})
+
+vim.api.nvim_create_autocmd("WinEnter", {
+  group = group,
+  callback = function()
+    local tab = vim.api.nvim_get_current_tabpage()
+    local layout = layouts[tab]
+    if layout == nil or layout.closing then
+      return
+    end
+    local win = vim.api.nvim_get_current_win()
+    local role = role_for_window(layout, win)
+    if role ~= nil then
+      layout.selected_role = role
+      return
+    end
+    if win == layout.host_win then
+      redirect_host_focus(layout)
+      return
+    end
+    vim.schedule(function()
+      reconcile(tab)
     end)
   end,
 })
