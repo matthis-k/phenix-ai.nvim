@@ -638,6 +638,18 @@ function M.active_session_object()
   return state.active_session
 end
 
+function M.activate_session(session_id, callback)
+  if session_id == nil then
+    util.safe_call(callback, nil, { message = "no Phenix session selected" })
+    return
+  end
+  if active_id() == session_id then
+    util.safe_call(callback, M.session_projection(session_id), nil)
+    return
+  end
+  M.resume_session(session_id, callback)
+end
+
 function M.prompt(session_id, segments, callback)
   ensure_ready(callback, function()
     local cached_ok, session = pcall(state.sessions.cached, state.sessions, session_id)
