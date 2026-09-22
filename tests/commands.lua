@@ -28,6 +28,7 @@ for _, name in ipairs({
   "authenticate",
   "choose_selection",
   "reference",
+  "reference_range",
   "reference_picker",
   "reference_at",
   "attach_image",
@@ -49,6 +50,7 @@ end
 execute()
 execute("send")
 execute("reference")
+commands.execute({ fargs = { "reference" }, range = 2, line1 = 3, line2 = 5 })
 execute("reference", "pick")
 execute("reference", "at", "/tmp/a", "b.txt")
 execute("image")
@@ -69,6 +71,7 @@ assert(vim.deep_equal(names, {
   "toggle",
   "send",
   "reference",
+  "reference_range",
   "reference_picker",
   "reference_at",
   "attach_image",
@@ -81,10 +84,11 @@ assert(vim.deep_equal(names, {
   "choose_selection",
   "cancel",
 }))
-assert(calls[5].args[1] == "/tmp/a b.txt")
-assert(calls[6].args[1] == "clipboard")
+assert(calls[4].args[1] == 3 and calls[4].args[2] == 5)
+assert(calls[6].args[1] == "/tmp/a b.txt")
 assert(calls[7].args[1] == "clipboard")
-assert(calls[8].args[1] == "/tmp/a b.png")
+assert(calls[8].args[1] == "clipboard")
+assert(calls[9].args[1] == "/tmp/a b.png")
 
 local before_invalid = #calls
 execute("toggle", "unexpected")
