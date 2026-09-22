@@ -278,6 +278,7 @@ local function install_window_actions(surface, target)
     J = "J",
     K = "K",
     L = "L",
+    T = "T",
     r = "r",
     R = "R",
     x = "x",
@@ -527,6 +528,7 @@ function M.host_wincmd(command, surface)
     down = "J",
     up = "K",
     right = "L",
+    tab = "T",
   }
   command = aliases[command] or command
   local allowed = {
@@ -534,6 +536,7 @@ function M.host_wincmd(command, surface)
     J = true,
     K = true,
     L = true,
+    T = true,
     r = true,
     R = true,
     x = true,
@@ -551,13 +554,40 @@ function M.host_wincmd(command, surface)
   end
 
   remember_cursor(surface)
+  local old_tab = surface.tab
+  local changes_tab = command == "T"
   surface.moving = true
+
+  if changes_tab then
+    detach_children(surface)
+    unregister_window(surface.transcript_win)
+    unregister_window(surface.compose_win)
+    close_window(surface.transcript_win)
+    close_window(surface.compose_win)
+    surface.transcript_win = nil
+    surface.compose_win = nil
+  end
+
   local ok = pcall(vim.api.nvim_win_call, surface.host_win, function()
     vim.cmd("wincmd " .. command)
   end)
+  if ok and valid_window(surface.host_win) then
+    surface.tab = vim.api.nvim_win_get_tabpage(surface.host_win)
+    register_window(surface, surface.host_win)
+  end
   surface.moving = false
   if not ok then
+    if changes_tab and surface_open(surface) then
+      sync_surface(surface)
+    end
     return false
+  end
+
+  if old_tab ~= surface.tab then
+    if last_surface_by_tab[old_tab] == surface then
+      last_surface_by_tab[old_tab] = fallback_surface(old_tab, surface)
+    end
+    last_surface_by_tab[surface.tab] = surface
   end
 
   vim.schedule(function()
