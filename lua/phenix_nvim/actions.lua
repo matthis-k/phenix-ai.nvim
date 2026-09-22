@@ -1,3 +1,4 @@
+local clipboard = require("phenix_nvim.clipboard")
 local compose = require("phenix_nvim.compose.buffer")
 local compose_model = require("phenix_nvim.compose.model")
 local config_api = require("phenix_nvim.config")
@@ -59,23 +60,37 @@ function M.reference_picker()
   end)
 end
 
-function M.attach_image(path)
-  local function attach(value)
-    if value == nil or value == "" then
-      return
-    end
-    local item, error = image.from_file(value)
-    if item == nil then
+local function attach_image_file(path, temporary, quiet)
+  local item, error = image.from_file(path)
+  if temporary then
+    os.remove(path)
+  end
+  if item == nil then
+    if not quiet then
       util.notify(error, vim.log.levels.ERROR)
-      return
     end
-    insert(item)
+    return nil
   end
-  if path ~= nil then
-    attach(path)
-  else
-    vim.ui.input({ prompt = "Image file: ", completion = "file" }, attach)
+  if temporary then
+    item.path = nil
   end
+  return insert(item)
+end
+
+function M.attach_image(source, options)
+  options = options or {}
+  source = source == nil or source == "" and "clipboard" or source
+  if source == "clipboard" then
+    local path, error = clipboard.temp_image_file()
+    if path == nil then
+      if not options.quiet then
+        util.notify(error or "clipboard does not contain a supported image", vim.log.levels.ERROR)
+      end
+      return nil
+    end
+    return attach_image_file(path, true, options.quiet)
+  end
+  return attach_image_file(source, false, options.quiet)
 end
 
 local function submit(session_id, content, revision)
