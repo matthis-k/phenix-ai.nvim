@@ -86,6 +86,14 @@ assert(calls[6].args[1] == "clipboard")
 assert(calls[7].args[1] == "clipboard")
 assert(calls[8].args[1] == "/tmp/a b.png")
 
+local before_invalid = #calls
+execute("toggle", "unexpected")
+execute("send", "unexpected")
+execute("cancel", "unexpected")
+execute("auth", "unexpected")
+execute("select", "unexpected")
+assert(#calls == before_invalid, "commands with unexpected arguments must not execute mutations")
+
 local roots = commands.complete("", "Phenix ", #"Phenix ")
 assert(vim.tbl_contains(roots, "image"))
 assert(vim.tbl_contains(roots, "session"))
