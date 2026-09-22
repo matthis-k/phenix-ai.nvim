@@ -12,6 +12,8 @@ local hosts = {}
 local children = {}
 local next_surface_id = 0
 local reconciling = false
+local primary_states = {}
+local primary_compose_claimed = false
 
 local function valid_window(win)
   return win ~= nil and vim.api.nvim_win_is_valid(win)
@@ -306,6 +308,24 @@ local function redirect_host_focus(surface)
   end)
 end
 
+local function primary_state(tab)
+  local value = primary_states[tab]
+  if value == nil then
+    if not primary_compose_claimed then
+      primary_compose_claimed = true
+      value = {
+        session_id = nil,
+        compose = state.compose,
+        compose_cursor = vim.deepcopy(state.remembered_compose_cursor),
+      }
+    else
+      value = state.new_surface()
+    end
+    primary_states[tab] = value
+  end
+  return value
+end
+
 local function create_surface(host_win, surface_state)
   next_surface_id = next_surface_id + 1
   local surface = {
@@ -323,6 +343,7 @@ local function create_surface(host_win, surface_state)
   vim.api.nvim_win_set_buf(host_win, ensure_host_buffer(surface))
   surface.compose = surface.state.compose
   surface.session_id = surface.state.session_id
+  surface.transcript_key = surface
   surfaces[surface.id] = surface
   hosts[host_win] = surface
   apply_host_options(surface)
@@ -375,14 +396,19 @@ function M.open()
     return surface
   end
 
-  surface = create_surface(create_default_host())
+  local tab = vim.api.nvim_get_current_tabpage()
+  surface = create_surface(create_default_host(), primary_state(tab))
   focus_child(surface, "compose")
   return surface
 end
 
-function M.new_window(options)
-  options = options or {}
-  local origin = current_surface()
+function M.new_window(origin, options)
+  if type(origin) ~= "table" or origin.host_win == nil then
+    options = origin or options or {}
+    origin = current_surface()
+  else
+    options = options or {}
+  end
   local origin_host = origin and origin.host_win or vim.api.nvim_get_current_win()
   local command = options.command or "rightbelow vsplit"
   local host
@@ -407,16 +433,19 @@ function M.close_window()
   M.close()
 end
 
-function M.move_window(direction)
-  local surface = current_surface()
+function M.move_window(direction, surface)
+  surface = surface or current_surface()
   if surface == nil then
     return nil
   end
   local commands = {
     left = "wincmd H",
     right = "wincmd L",
+    up = "wincmd K",
+    down = "wincmd J",
     top = "wincmd K",
     bottom = "wincmd J",
+    tab = "wincmd T",
   }
   local command = commands[direction] or direction
   if type(command) ~= "string" or command == "" then
@@ -425,8 +454,11 @@ function M.move_window(direction)
   vim.api.nvim_win_call(surface.host_win, function()
     vim.cmd(command)
   end)
-  M.reconcile()
-  return surface
+  if valid_window(surface.host_win) then
+    surface.tab = vim.api.nvim_win_get_tabpage(surface.host_win)
+  end
+  sync_surface(surface)
+  return true
 end
 
 function M.toggle()
@@ -470,16 +502,21 @@ function M.bind_session(session_id, surface)
   return surface
 end
 
-function M.buffers()
+function M.current_compose()
   local surface = current_surface()
+  return surface and surface.compose or state.compose
+end
+
+function M.buffers(surface)
+  surface = surface or current_surface()
   if surface == nil then
     return transcript.ensure(), compose.ensure(state.compose)
   end
   return transcript.ensure(surface), compose.ensure(surface.state.compose)
 end
 
-function M.windows()
-  local surface = current_surface()
+function M.windows(surface)
+  surface = surface or current_surface()
   if surface == nil or reconcile_surface(surface) == nil then
     return nil, nil, nil
   end
