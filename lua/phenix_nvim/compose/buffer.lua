@@ -258,6 +258,14 @@ function M.attach_window(document, win)
     return
   end
   attached_windows[win] = document
+  vim.wo[win].wrap = true
+  vim.wo[win].linebreak = true
+  vim.wo[win].breakindent = true
+  vim.wo[win].number = false
+  vim.wo[win].relativenumber = false
+  vim.wo[win].signcolumn = "no"
+  vim.wo[win].foldcolumn = "0"
+  vim.wo[win].winfixheight = true
   M.refresh_previews(document, win)
 end
 
