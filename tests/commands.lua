@@ -133,6 +133,7 @@ assert(vim.tbl_contains(windows, "move"))
 local moves = commands.complete("", "Phenix window move ", #"Phenix window move ")
 assert(vim.tbl_contains(moves, "left"))
 assert(vim.tbl_contains(moves, "right"))
+assert(vim.tbl_contains(moves, "tab"))
 assert(vim.tbl_contains(moves, "up"))
 assert(vim.tbl_contains(moves, "down"))
 
