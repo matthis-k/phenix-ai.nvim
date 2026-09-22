@@ -524,6 +524,9 @@ function M.new(mode, origin, options)
   local metadata = { presentation = mode }
 
   if mode == "sidebar" then
+    if origin_win == nil then
+      return nil, "sidebar presentation requires a normal source window"
+    end
     host = create_sidebar_host(origin_win, options.command)
   elseif mode == "tab" then
     vim.cmd("tabnew")
@@ -535,6 +538,7 @@ function M.new(mode, origin, options)
     end
     local existing = surface_for_window(origin_win)
     if existing ~= nil then
+      metadata.restore_host = existing.restore_host
       release_surface(existing)
     else
       metadata.restore_host = snapshot_host(origin_win)
