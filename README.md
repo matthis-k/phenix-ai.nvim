@@ -41,6 +41,33 @@ The automatic route follows the configured credential: OpenAI selects
 `router.openai-api`; OpenCode selects `router.opencode-go`. If neither is
 present, ChatGPT OAuth remains the preferred route.
 
+## Commands
+
+The plugin exposes one command namespace instead of many top-level commands:
+
+```text
+:Phenix
+:Phenix toggle
+:Phenix send
+:Phenix cancel
+:Phenix reference
+:Phenix reference pick
+:Phenix reference at <path>
+:Phenix image clipboard
+:Phenix image file <path>
+:Phenix session new
+:Phenix session close
+:Phenix session select
+:Phenix auth
+:Phenix select
+```
+
+`:Phenix` with no subcommand toggles the sidebar. Image pasting in the compose
+buffer uses the same clipboard-image path as `:Phenix image clipboard`: the
+clipboard payload is materialized to a temporary image file, snapshotted into
+the prompt attachment, and the temporary file is removed.
+
+
 or only to the Phenix child process:
 
 ```lua
@@ -51,7 +78,7 @@ require("phenix_nvim").setup({
 })
 ```
 
-`:PhenixAuth` exposes both runtime authentication methods and frontend API-key
+`:Phenix auth` exposes both runtime authentication methods and frontend API-key
 providers. If the selected API key is not already available through its
 environment variable, the client opens a secret input field, reconnects the
 Phenix ACP child with the entered value, resumes the active session, and selects
