@@ -37,6 +37,9 @@ for _, name in ipairs({
   "new_session",
   "close_session",
   "choose_session",
+  "new_window",
+  "close_window",
+  "move_window",
 }) do
   originals[name] = actions[name]
   actions[name] = function(...)
@@ -61,6 +64,9 @@ execute("image", "/tmp/a", "b.png")
 execute("session", "new")
 execute("session", "close")
 execute("session", "select")
+execute("window", "new")
+execute("window", "close")
+execute("window", "move", "left")
 execute("auth")
 execute("select")
 execute("cancel")
@@ -82,6 +88,9 @@ assert(vim.deep_equal(names, {
   "new_session",
   "close_session",
   "choose_session",
+  "new_window",
+  "close_window",
+  "move_window",
   "authenticate",
   "choose_selection",
   "cancel",
@@ -91,6 +100,7 @@ assert(calls[6].args[1] == "/tmp/a b.txt")
 assert(calls[7].args[1] == "clipboard")
 assert(calls[8].args[1] == "clipboard")
 assert(calls[9].args[1] == "/tmp/a b.png")
+assert(calls[15].args[1] == "left")
 
 local before_invalid = #calls
 execute("toggle", "unexpected")
@@ -104,6 +114,7 @@ local roots = commands.complete("", "Phenix ", #"Phenix ")
 assert(vim.tbl_contains(roots, "image"))
 assert(vim.tbl_contains(roots, "session"))
 assert(vim.tbl_contains(roots, "reference"))
+assert(vim.tbl_contains(roots, "window"))
 
 local image_sources = commands.complete("", "Phenix image ", #"Phenix image ")
 assert(vim.tbl_contains(image_sources, "clipboard"))
@@ -113,6 +124,17 @@ local sessions = commands.complete("", "Phenix session ", #"Phenix session ")
 assert(vim.tbl_contains(sessions, "new"))
 assert(vim.tbl_contains(sessions, "close"))
 assert(vim.tbl_contains(sessions, "select"))
+
+local windows = commands.complete("", "Phenix window ", #"Phenix window ")
+assert(vim.tbl_contains(windows, "new"))
+assert(vim.tbl_contains(windows, "close"))
+assert(vim.tbl_contains(windows, "move"))
+
+local moves = commands.complete("", "Phenix window move ", #"Phenix window move ")
+assert(vim.tbl_contains(moves, "left"))
+assert(vim.tbl_contains(moves, "right"))
+assert(vim.tbl_contains(moves, "up"))
+assert(vim.tbl_contains(moves, "down"))
 
 for name, original in pairs(originals) do
   actions[name] = original
