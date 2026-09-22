@@ -88,20 +88,21 @@ wait_until(function()
     and vim.api.nvim_win_get_buf(repaired_compose) == preserved_compose_buffer
 end, "transcript/compose buffer collision must be repaired")
 
--- The prompt is scratch state. :quit must never ask to save it; closing it discards
--- the buffer and the host recreates a fresh prompt view.
+-- Closing a child view is a view operation: it must never ask to save and must
+-- preserve the unsent draft and attachment identity while the host repairs the view.
 local old_compose = compose_win
 local old_compose_buffer = vim.api.nvim_win_get_buf(compose_win)
 assert(vim.bo[old_compose_buffer].bufhidden == "hide")
-vim.api.nvim_buf_set_lines(old_compose_buffer, 0, -1, false, { "discard me" })
+vim.api.nvim_buf_set_lines(old_compose_buffer, 0, -1, false, { "draft survives close" })
 vim.bo[old_compose_buffer].modified = true
 assert(vim.bo[old_compose_buffer].modified)
 local scratch = compose_model.add(state.compose, {
   kind = "resource",
-  source = { uri = "file:///tmp/discard.txt" },
-  snapshot = "discard",
+  source = { uri = "file:///tmp/preserved.txt" },
+  snapshot = "preserved",
 })
 assert(compose.insert(state.compose, scratch, compose_win))
+local preserved_lines = vim.api.nvim_buf_get_lines(old_compose_buffer, 0, -1, false)
 local quit_ok, quit_error = pcall(vim.api.nvim_win_call, compose_win, function()
   vim.cmd("quit")
 end)
@@ -109,15 +110,29 @@ assert(quit_ok, "closing a modified prompt must not ask to save: " .. tostring(q
 wait_until(function()
   local _, repaired = sidebar.windows()
   return repaired ~= nil and repaired ~= old_compose and vim.api.nvim_win_is_valid(repaired)
-end, "closing the compose float must recreate it while the host survives")
-assert(not vim.api.nvim_buf_is_valid(old_compose_buffer), "closed prompt buffer must be discarded")
-assert(next(state.compose.items) == nil, "discarding the prompt must discard its attachments")
+end, "closing the compose float must recreate its view while the host survives")
+assert(vim.api.nvim_buf_is_valid(old_compose_buffer), "closing the compose view must preserve its draft buffer")
+assert(compose_model.get(state.compose, scratch.id) ~= nil, "closing the compose view must preserve attachments")
 transcript_win, compose_win, host_win = sidebar.windows()
 assert(sidebar.is_open())
 assert(vim.api.nvim_win_is_valid(host_win))
-local fresh_compose_buffer = vim.api.nvim_win_get_buf(compose_win)
-assert(fresh_compose_buffer ~= old_compose_buffer)
-assert(vim.deep_equal(vim.api.nvim_buf_get_lines(fresh_compose_buffer, 0, -1, false), { "" }))
+assert(vim.api.nvim_win_get_buf(compose_win) == old_compose_buffer)
+assert(vim.deep_equal(
+  vim.api.nvim_buf_get_lines(old_compose_buffer, 0, -1, false),
+  preserved_lines
+), "repaired compose view must preserve the exact unsent draft")
+
+-- Toggling the whole sidebar is also presentation-only. It must not destroy input state.
+sidebar.close()
+assert(not sidebar.is_open())
+assert(vim.api.nvim_buf_is_valid(old_compose_buffer))
+assert(compose_model.get(state.compose, scratch.id) ~= nil)
+assert(vim.deep_equal(vim.api.nvim_buf_get_lines(old_compose_buffer, 0, -1, false), preserved_lines))
+sidebar.open()
+transcript_win, compose_win, host_win = sidebar.windows()
+assert(vim.api.nvim_win_get_buf(compose_win) == old_compose_buffer)
+assert(vim.deep_equal(vim.api.nvim_buf_get_lines(old_compose_buffer, 0, -1, false), preserved_lines))
+compose.clear(state.compose)
 
 -- Child windows are derived state. Mutating one must repair it from the host.
 
