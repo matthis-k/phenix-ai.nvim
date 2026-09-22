@@ -11,6 +11,7 @@ local state = require("phenix_nvim.state")
 local util = require("phenix_nvim.util")
 
 local M = {}
+local submissions = {}
 
 local function insert(item)
   local stored = compose_model.add(state.compose, item)
@@ -95,6 +96,7 @@ end
 
 local function submit(session_id, content, revision)
   runtime.prompt(session_id, content, function(_, error)
+    submissions[revision] = nil
     if error ~= nil then
       util.notify(vim.inspect(error), vim.log.levels.ERROR)
       return
@@ -116,6 +118,12 @@ function M.send()
     return
   end
   local revision = state.compose.revision
+  if submissions[revision] then
+    util.notify("this compose revision is already being sent", vim.log.levels.WARN)
+    return
+  end
+  submissions[revision] = true
+
   local session_id = runtime.active_session()
   if session_id ~= nil then
     submit(session_id, content, revision)
@@ -123,6 +131,7 @@ function M.send()
   end
   runtime.new_session(function(created, create_error)
     if create_error ~= nil then
+      submissions[revision] = nil
       util.notify(vim.inspect(create_error), vim.log.levels.ERROR)
       return
     end
