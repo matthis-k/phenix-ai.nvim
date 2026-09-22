@@ -19,6 +19,14 @@ vim.ui.img = {
   end,
 }
 
+local from_bytes = assert(image.from_bytes("clipboard.png", "image/png", "clipboard-bytes"))
+assert(from_bytes.name == "clipboard.png")
+assert(from_bytes.mime_type == "image/png")
+assert(from_bytes.bytes == "clipboard-bytes")
+assert(from_bytes.path == nil)
+local unsupported, unsupported_error = image.from_bytes("clipboard.bmp", "image/bmp", "bytes")
+assert(unsupported == nil and unsupported_error ~= nil)
+
 local attachment = {
   kind = "image",
   name = "snapshot.png",
