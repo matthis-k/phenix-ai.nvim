@@ -12,6 +12,7 @@ local function wait_until(predicate, message)
 end
 
 local first_tab = vim.api.nvim_get_current_tabpage()
+local editor_win = vim.api.nvim_get_current_win()
 sidebar.open()
 local transcript_win, compose_win, host_win = sidebar.windows()
 assert(vim.api.nvim_win_is_valid(host_win))
@@ -30,6 +31,30 @@ assert(transcript_config.relative == "win" and transcript_config.win == host_win
 assert(compose_config.relative == "win" and compose_config.win == host_win)
 assert(transcript_config.width == vim.api.nvim_win_get_width(host_win))
 assert(compose_config.width == vim.api.nvim_win_get_width(host_win))
+
+-- The reservation split is implementation state, not a user-selectable third pane.
+assert(vim.w[host_win].phenix_sidebar_host == true)
+assert(vim.w[host_win].phenix_window_selectable == false)
+assert(sidebar.is_host(host_win))
+assert(not sidebar.is_selectable(host_win))
+assert(sidebar.is_selectable(transcript_win) and sidebar.is_selectable(compose_win))
+
+vim.api.nvim_set_current_win(host_win)
+wait_until(function()
+  return vim.api.nvim_get_current_win() == compose_win
+end, "selecting the host must redirect to the active sidebar child")
+
+vim.api.nvim_set_current_win(transcript_win)
+vim.api.nvim_set_current_win(host_win)
+wait_until(function()
+  return vim.api.nvim_get_current_win() == transcript_win
+end, "host selection must preserve the last selected sidebar child")
+
+vim.api.nvim_set_current_win(editor_win)
+vim.cmd("wincmd w")
+wait_until(function()
+  return vim.api.nvim_get_current_win() ~= host_win
+end, "native window cycling must never leave focus on the sidebar host")
 
 -- Child windows are derived state. Closing or mutating one must repair it from the host.
 local old_compose = compose_win
