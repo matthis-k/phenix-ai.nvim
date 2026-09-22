@@ -56,12 +56,43 @@ wait_until(function()
   return vim.api.nvim_get_current_win() ~= host_win
 end, "native window cycling must never leave focus on the sidebar host")
 
+-- Replacing a child buffer is repaired from the host instead of letting the two
+-- sidebar roles collapse into each other. The hidden compose buffer keeps its draft.
+transcript_win, compose_win, host_win = sidebar.windows()
+local preserved_compose_buffer = vim.api.nvim_win_get_buf(compose_win)
+vim.api.nvim_buf_set_lines(preserved_compose_buffer, 0, -1, false, { "draft survives repair" })
+vim.bo[preserved_compose_buffer].modified = false
+local old_compose_view = compose_win
+vim.api.nvim_win_set_buf(compose_win, transcript.ensure())
+wait_until(function()
+  local repaired_transcript, repaired_compose = sidebar.windows()
+  return repaired_compose ~= nil
+    and repaired_compose ~= old_compose_view
+    and vim.api.nvim_win_get_buf(repaired_compose) == preserved_compose_buffer
+    and vim.api.nvim_win_get_buf(repaired_transcript) == transcript.ensure()
+end, "compose/transcript buffer collision must be repaired")
+transcript_win, compose_win, host_win = sidebar.windows()
+assert(vim.api.nvim_buf_get_lines(preserved_compose_buffer, 0, -1, false)[1] == "draft survives repair")
+assert(vim.w[transcript_win].phenix_sidebar_role == "transcript")
+assert(vim.w[compose_win].phenix_sidebar_role == "compose")
+
+local old_transcript_view = transcript_win
+vim.api.nvim_win_set_buf(transcript_win, preserved_compose_buffer)
+wait_until(function()
+  local repaired_transcript, repaired_compose = sidebar.windows()
+  return repaired_transcript ~= nil
+    and repaired_transcript ~= old_transcript_view
+    and vim.api.nvim_win_get_buf(repaired_transcript) == transcript.ensure()
+    and vim.api.nvim_win_get_buf(repaired_compose) == preserved_compose_buffer
+end, "transcript/compose buffer collision must be repaired")
+
 -- The prompt is scratch state. :quit must never ask to save it; closing it discards
 -- the buffer and the host recreates a fresh prompt view.
 local old_compose = compose_win
 local old_compose_buffer = vim.api.nvim_win_get_buf(compose_win)
-assert(vim.bo[old_compose_buffer].bufhidden == "wipe")
+assert(vim.bo[old_compose_buffer].bufhidden == "hide")
 vim.api.nvim_buf_set_lines(old_compose_buffer, 0, -1, false, { "discard me" })
+vim.bo[old_compose_buffer].modified = true
 assert(vim.bo[old_compose_buffer].modified)
 local scratch = compose_model.add(state.compose, {
   kind = "resource",
@@ -179,5 +210,24 @@ assert(vim.tbl_contains(lines, "Assistant"))
 assert(vim.wo[current_transcript].wrap)
 assert(vim.wo[current_transcript].linebreak)
 assert(not vim.wo[current_transcript].number)
+
+-- Even an explicit transcript buffer wipe cannot turn the compose view into a
+-- transcript or leave the transcript blank: the canonical projection is restored.
+local old_transcript_buffer = transcript_buffer
+vim.api.nvim_buf_delete(old_transcript_buffer, { force = true })
+wait_until(function()
+  local repaired_transcript, repaired_compose = sidebar.windows()
+  if repaired_transcript == nil or repaired_compose == nil then
+    return false
+  end
+  local repaired_buffer = vim.api.nvim_win_get_buf(repaired_transcript)
+  if repaired_buffer == old_transcript_buffer or not vim.api.nvim_buf_is_valid(repaired_buffer) then
+    return false
+  end
+  local repaired_lines = vim.api.nvim_buf_get_lines(repaired_buffer, 0, -1, false)
+  return repaired_lines[1] == "You"
+    and vim.tbl_contains(repaired_lines, "Assistant")
+    and vim.api.nvim_win_get_buf(repaired_compose) ~= repaired_buffer
+end, "wiping the transcript buffer must rebuild the transcript projection")
 
 sidebar.close()
