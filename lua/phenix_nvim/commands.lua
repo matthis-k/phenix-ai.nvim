@@ -73,17 +73,14 @@ function M.execute(options)
     local source = table.remove(args, 1)
     if source == nil or source == "clipboard" then
       if #args ~= 0 then
-        usage("Usage: Phenix image [clipboard|file <path>]")
+        usage("Usage: Phenix image [clipboard|<path>]")
         return
       end
       actions.attach_image("clipboard")
       return
     end
-    if source == "file" and #args > 0 then
-      actions.attach_image(join(args))
-      return
-    end
-    usage("Usage: Phenix image [clipboard|file <path>]")
+    table.insert(args, 1, source)
+    actions.attach_image(join(args))
     return
   end
 
@@ -147,14 +144,10 @@ function M.complete(arglead, cmdline, cursorpos)
     end
     return {}
   end
-  if args[1] == "image" then
-    if #args == 1 then
-      return matches({ "clipboard", "file" }, arglead)
-    end
-    if args[2] == "file" then
-      return vim.fn.getcompletion(arglead, "file")
-    end
-    return {}
+  if args[1] == "image" and #args == 1 then
+    local values = { "clipboard" }
+    vim.list_extend(values, vim.fn.getcompletion(arglead, "file"))
+    return matches(values, arglead)
   end
   if args[1] == "session" and #args == 1 then
     return matches({ "close", "new", "select" }, arglead)
