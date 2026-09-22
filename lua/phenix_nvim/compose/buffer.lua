@@ -175,13 +175,10 @@ local function native_paste(key)
   vim.cmd.normal({ bang = true, args = { count .. register_prefix .. key } })
 end
 
-local function paste(document, key)
+local function paste(_document, key)
   if clipboard.register_uses_system_clipboard(vim.v.register) then
-    local attachment = clipboard.image()
-    if attachment ~= nil then
-      local stored = model.add(document, attachment)
-      local win = vim.api.nvim_get_current_win()
-      M.insert(document, stored, win)
+    local attached = require("phenix_nvim.actions").attach_image("clipboard", { quiet = true })
+    if attached ~= nil then
       return
     end
   end
@@ -198,7 +195,7 @@ function M.ensure(document)
   buffer_document = document
   buffer = vim.api.nvim_create_buf(false, true)
   vim.bo[buffer].buftype = "acwrite"
-  vim.bo[buffer].bufhidden = "wipe"
+  vim.bo[buffer].bufhidden = "hide"
   vim.bo[buffer].swapfile = false
   vim.bo[buffer].filetype = "markdown"
   vim.api.nvim_buf_set_name(buffer, "phenix://compose")
@@ -236,6 +233,9 @@ function M.ensure(document)
         model.touch(buffer_document)
         M.reconcile_markers(buffer_document)
         M.refresh_previews(buffer_document)
+      end
+      if buffer ~= nil and vim.api.nvim_buf_is_valid(buffer) then
+        vim.bo[buffer].modified = false
       end
     end,
   })
@@ -430,6 +430,23 @@ function M.clear(document)
   vim.api.nvim_buf_set_lines(target, 0, -1, false, { "" })
   model.clear(document)
   vim.bo[target].modified = false
+end
+
+function M.discard(document)
+  local target = buffer
+  if target ~= nil and vim.api.nvim_buf_is_valid(target) then
+    vim.bo[target].modified = false
+    vim.api.nvim_buf_delete(target, { force = true })
+    return
+  end
+  close_previews()
+  markers = {}
+  attached_windows = {}
+  if document ~= nil then
+    model.clear(document)
+  end
+  buffer_document = nil
+  buffer = nil
 end
 
 vim.api.nvim_create_autocmd({ "WinScrolled", "WinResized", "VimResized" }, {
