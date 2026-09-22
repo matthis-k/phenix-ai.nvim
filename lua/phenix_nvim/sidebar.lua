@@ -209,6 +209,22 @@ local function sync_surface(surface)
   transcript.attach_window(surface, transcript_win)
   compose.attach_window(surface.state.compose, compose_win)
   winbar.attach(transcript_win, compose_win)
+  for key, direction in pairs({
+    ["<C-w>H"] = "left",
+    ["<C-w>L"] = "right",
+    ["<C-w>K"] = "top",
+    ["<C-w>J"] = "bottom",
+  }) do
+    for _, win in ipairs({ transcript_win, compose_win }) do
+      local target = vim.api.nvim_win_get_buf(win)
+      vim.keymap.set("n", key, function()
+        local current = children[vim.api.nvim_get_current_win()] or surface
+        if current ~= nil and not current.closing then
+          M.move_window(direction)
+        end
+      end, { buffer = target, silent = true, desc = "Move Phenix chat " .. direction })
+    end
+  end
   return true
 end
 
@@ -360,10 +376,11 @@ function M.new_window(options)
   local origin = current_surface()
   local origin_host = origin and origin.host_win or vim.api.nvim_get_current_win()
   local command = options.command or "rightbelow vsplit"
+  local host
   vim.api.nvim_win_call(origin_host, function()
     vim.cmd(command)
+    host = vim.api.nvim_get_current_win()
   end)
-  local host = vim.api.nvim_get_current_win()
   local surface = create_surface(host)
   if options.session_id ~= nil then
     surface.state.session_id = options.session_id
