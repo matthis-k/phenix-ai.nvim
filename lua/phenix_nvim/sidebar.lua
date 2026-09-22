@@ -466,9 +466,9 @@ function M.surface_for_document(document)
   return nil
 end
 
-function M.open()
+function M.open(surface)
   local tab = vim.api.nvim_get_current_tabpage()
-  local surface = M.current_surface() or ensure_default_surface(tab)
+  surface = surface or M.current_surface() or ensure_default_surface(tab)
   return open_surface(surface)
 end
 
@@ -565,8 +565,8 @@ function M.move_window(direction, surface)
   return M.host_wincmd(direction, surface)
 end
 
-function M.focus_compose()
-  local surface = M.open()
+function M.focus_compose(surface)
+  surface = M.open(surface)
   if surface == nil then
     return nil
   end
