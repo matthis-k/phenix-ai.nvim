@@ -89,6 +89,15 @@ local function close_window(win)
   end
 end
 
+local function has_other_layout(tab)
+  for other_tab, layout in pairs(layouts) do
+    if other_tab ~= tab and not layout.closing and valid_tab(other_tab) then
+      return true
+    end
+  end
+  return false
+end
+
 local function remove_layout(tab, close_host)
   local layout = layouts[tab]
   if layout == nil then
@@ -102,6 +111,9 @@ local function remove_layout(tab, close_host)
   close_window(layout.transcript_win)
   if close_host then
     close_window(layout.host_win)
+  end
+  if not has_other_layout(tab) then
+    compose.discard(state.compose)
   end
 end
 
@@ -150,12 +162,16 @@ local function ensure_float(layout, role, target)
   local expected = window_matches(win, layout.tab, target)
   if expected then
     pcall(vim.api.nvim_win_set_config, win, float_config(layout, role))
+    vim.w[win].phenix_sidebar_role = role
+    vim.w[win].phenix_window_selectable = true
     return win
   end
 
   close_window(win)
   win = vim.api.nvim_open_win(target, false, float_config(layout, role))
   layout[field] = win
+  vim.w[win].phenix_sidebar_role = role
+  vim.w[win].phenix_window_selectable = true
   return win
 end
 
@@ -338,7 +354,13 @@ vim.api.nvim_create_autocmd("WinClosed", {
         elseif layout.transcript_win == closed or layout.compose_win == closed then
           local role = layout.transcript_win == closed and "transcript" or "compose"
           vim.schedule(function()
-            if layouts[tab] == layout and sync_layout(layout) then
+            if layouts[tab] ~= layout then
+              return
+            end
+            if role == "compose" and not has_other_layout(tab) then
+              compose.discard(state.compose)
+            end
+            if sync_layout(layout) then
               focus_child(layout, role)
             end
           end)
