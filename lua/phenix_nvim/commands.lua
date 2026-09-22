@@ -13,6 +13,7 @@ local roots = {
   "session",
   "toggle",
   "window",
+  "window",
 }
 
 local function join(args, first)
@@ -109,6 +110,27 @@ function M.execute(options)
     return
   end
 
+  if command == "window" then
+    local subcommand = table.remove(args, 1)
+    if subcommand == "new" and #args == 0 then
+      actions.new_window()
+      return
+    end
+    if subcommand == "close" and #args == 0 then
+      actions.close_window()
+      return
+    end
+    if subcommand == "move" and #args == 1 then
+      local direction = args[1]
+      if direction == "left" or direction == "right" or direction == "top" or direction == "bottom" then
+        actions.move_window(direction)
+        return
+      end
+    end
+    usage("Usage: Phenix window <new|close|move <left|right|top|bottom>>")
+    return
+  end
+
   if command == "session" then
     local subcommand = table.remove(args, 1)
     if #args ~= 0 then
@@ -197,6 +219,14 @@ function M.complete(arglead, cmdline, cursorpos)
   end
   if args[1] == "session" and #args == 1 then
     return matches({ "close", "new", "select" }, arglead)
+  end
+  if args[1] == "window" then
+    if #args == 1 then
+      return matches({ "close", "move", "new" }, arglead)
+    end
+    if args[2] == "move" and #args == 2 then
+      return matches({ "bottom", "left", "right", "top" }, arglead)
+    end
   end
   if args[1] == "window" then
     if #args == 1 then
