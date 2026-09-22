@@ -5,6 +5,7 @@ local group = vim.api.nvim_create_augroup("phenix-transcript-view", { clear = tr
 local buffer
 local marks = {}
 local attached_windows = {}
+local last_projection
 
 local function inspect(value)
   if value == nil then
@@ -85,6 +86,9 @@ function M.ensure()
   vim.api.nvim_buf_set_name(buffer, "phenix://transcript")
   marks = {}
   attached_windows = {}
+  if last_projection ~= nil and type(M.render_projection) == "function" then
+    M.render_projection(last_projection)
+  end
   return buffer
 end
 
@@ -234,7 +238,12 @@ function M.render_node(node)
   scroll_to_tail()
 end
 
+function M.remember_projection(projection)
+  last_projection = vim.deepcopy(projection)
+end
+
 function M.render_projection(projection)
+  M.remember_projection(projection)
   local target = M.ensure()
   vim.bo[target].modifiable = true
   vim.api.nvim_buf_set_lines(target, 0, -1, false, {})
