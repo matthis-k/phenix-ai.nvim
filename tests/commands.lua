@@ -1,6 +1,8 @@
 local commands = require("phenix_nvim.commands")
 local actions = require("phenix_nvim.actions")
 
+vim.cmd.runtime("plugin/phenix.lua")
+
 assert(vim.fn.exists(":Phenix") == 2, "one Phenix command must be registered")
 for _, legacy in ipairs({
   "PhenixToggle",
