@@ -2,8 +2,7 @@ local runtime = require("phenix_nvim.runtime")
 local state = require("phenix_nvim.state")
 
 local M = {}
-local transcript_win
-local compose_win
+local attached = {}
 local stop_listener
 
 local function valid(win)
@@ -148,19 +147,36 @@ local function compose_value()
   return table.concat(parts)
 end
 
-function M.refresh()
-  if valid(transcript_win) then
-    vim.wo[transcript_win].winbar = transcript_value()
+local function refresh_window(win, role)
+  if not valid(win) then
+    attached[win] = nil
+    return
   end
-  if valid(compose_win) then
-    vim.wo[compose_win].winbar = compose_value()
+  vim.wo[win].winbar = role == "compose" and compose_value() or transcript_value()
+end
+
+local function maybe_stop_listener()
+  if next(attached) == nil and stop_listener ~= nil then
+    stop_listener()
+    stop_listener = nil
   end
 end
 
+function M.refresh()
+  for win, role in pairs(attached) do
+    refresh_window(win, role)
+  end
+  maybe_stop_listener()
+end
+
 function M.attach(transcript, compose)
-  transcript_win = transcript
-  compose_win = compose
-  if stop_listener == nil then
+  if valid(transcript) then
+    attached[transcript] = "transcript"
+  end
+  if valid(compose) then
+    attached[compose] = "compose"
+  end
+  if stop_listener == nil and next(attached) ~= nil then
     stop_listener = runtime.on_event(function(kind)
       if kind == "status" or kind == "sessions" then
         M.refresh()
@@ -171,16 +187,17 @@ function M.attach(transcript, compose)
 end
 
 function M.detach(transcript, compose)
-  if transcript == nil or transcript == transcript_win then
-    transcript_win = nil
+  if transcript == nil and compose == nil then
+    attached = {}
+  else
+    if transcript ~= nil then
+      attached[transcript] = nil
+    end
+    if compose ~= nil then
+      attached[compose] = nil
+    end
   end
-  if compose == nil or compose == compose_win then
-    compose_win = nil
-  end
-  if transcript_win == nil and compose_win == nil and stop_listener ~= nil then
-    stop_listener()
-    stop_listener = nil
-  end
+  maybe_stop_listener()
 end
 
 return M

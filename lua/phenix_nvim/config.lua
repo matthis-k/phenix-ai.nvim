@@ -30,7 +30,7 @@ local defaults = {
   request_timeout_ms = 30000,
   prompt_timeout_ms = 600000,
   side = "right",
-  width = 56,
+  width = 0.4,
   compose_height = 8,
 }
 
@@ -59,6 +59,13 @@ function M.setup(options)
     if type(value) ~= "number" or value ~= value or value <= 0 or value == math.huge then
       error("phenix-ai.nvim " .. key .. " must be a finite positive number")
     end
+  end
+  if type(resolved.width) ~= "number"
+    or resolved.width ~= resolved.width
+    or resolved.width <= 0
+    or resolved.width == math.huge
+  then
+    error("phenix-ai.nvim width must be a finite positive number")
   end
   current = resolved
   return M.get()

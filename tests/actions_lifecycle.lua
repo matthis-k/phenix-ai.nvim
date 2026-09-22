@@ -1,10 +1,15 @@
 -- Exercise delayed UI/auth callbacks independently of transport timing.
 local listeners, deferred = {}, {}
 local active = {}
-local auth_calls, selection_calls = 0, 0
+local auth_calls, selection_calls, resume_calls = 0, 0, 0
+local prompt_callbacks = {}
 local runtime = {
   on_event = function(listener) listeners[#listeners + 1] = listener end,
   active_session_object = function() return active end,
+  active_session = function() return "session-send" end,
+  prompt = function(_, _, callback)
+    table.insert(prompt_callbacks, callback)
+  end,
   list_authentication_methods = function(callback)
     callback({ methods = { { id = "oauth", name = "OAuth" } } })
   end,
@@ -17,6 +22,13 @@ local runtime = {
   end,
   select = function(_, callback)
     selection_calls = selection_calls + 1
+    callback({})
+  end,
+  list_sessions = function(callback)
+    callback({ sessions = { { session_id = "session-a", title = "A" } } })
+  end,
+  resume_session = function(_, callback)
+    resume_calls = resume_calls + 1
     callback({})
   end,
 }
@@ -57,4 +69,44 @@ assert(selection_calls == 0, "stale routing picker changed a different session")
 actions.choose_selection()
 picked(items[1])
 assert(selection_calls == 1)
+
+-- A delayed session picker must not resume a session on a replacement connection.
+local sessions = require("phenix_nvim.sessions")
+sessions.choose()
+local stale_items, stale_pick = items, picked
+status("failed")
+status("connecting")
+status("ready")
+stale_pick(stale_items[1])
+assert(resume_calls == 0, "stale session picker reached replacement connection")
+sessions.choose()
+picked(items[1])
+assert(resume_calls == 1)
+
+-- Repeating send without editing must not dispatch the same compose revision twice.
+local compose = require("phenix_nvim.compose.buffer")
+local state = require("phenix_nvim.state")
+local original_serialize = compose.serialize
+local original_clear = compose.clear
+local clear_calls = 0
+compose.serialize = function()
+  return { { kind = "text", text = "question" } }
+end
+compose.clear = function()
+  clear_calls = clear_calls + 1
+end
+state.compose.revision = 100
+actions.send()
+actions.send()
+assert(#prompt_callbacks == 1, "same compose revision was submitted more than once")
+prompt_callbacks[1]({}, nil)
+assert(clear_calls == 1)
+actions.send()
+assert(#prompt_callbacks == 2, "settled compose revision should be sendable again")
+state.compose.revision = 101
+actions.send()
+assert(#prompt_callbacks == 3, "edited compose revision must remain independently sendable")
+compose.serialize = original_serialize
+compose.clear = original_clear
+
 print("action lifecycle regressions passed")

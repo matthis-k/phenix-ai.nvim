@@ -1,4 +1,5 @@
 local M = {}
+local pending_decisions = {}
 
 local function state_kind(review)
   local kind = type(review.state) == "table" and review.state.kind or nil
@@ -41,8 +42,21 @@ local function decide(review, decision, buffer, updated_callback)
   if state_kind(review) ~= "pending" then
     return
   end
-  local runtime = require("phenix_nvim.runtime")
-  runtime.decide_review(review, decision, function(updated, error)
+
+  local key = tostring(review.id) .. ":" .. tostring(review.revision)
+  if pending_decisions[key] then
+    return
+  end
+  pending_decisions[key] = true
+
+  local settled = false
+  local function complete(updated, error)
+    if settled then
+      return
+    end
+    settled = true
+    pending_decisions[key] = nil
+
     if error ~= nil then
       vim.notify(vim.inspect(error), vim.log.levels.ERROR, { title = "Phenix" })
       return
@@ -59,7 +73,13 @@ local function decide(review, decision, buffer, updated_callback)
         vim.notify("Phenix review rejected", nil, { title = "Phenix" })
       end
     end
-  end)
+  end
+
+  local runtime = require("phenix_nvim.runtime")
+  local ok, error = pcall(runtime.decide_review, review, decision, complete)
+  if not ok then
+    complete(nil, { message = tostring(error) })
+  end
 end
 
 function M.open(review)

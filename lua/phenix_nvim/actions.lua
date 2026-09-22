@@ -1,3 +1,4 @@
+local clipboard = require("phenix_nvim.clipboard")
 local compose = require("phenix_nvim.compose.buffer")
 local compose_model = require("phenix_nvim.compose.model")
 local config_api = require("phenix_nvim.config")
@@ -10,11 +11,18 @@ local state = require("phenix_nvim.state")
 local util = require("phenix_nvim.util")
 
 local M = {}
+local submissions = {}
 
 local function insert(item)
   local stored = compose_model.add(state.compose, item)
   local win = sidebar.focus_compose()
-  compose.insert(state.compose, stored, win)
+  local inserted, error = compose.insert(state.compose, stored, win)
+  if not inserted then
+    compose_model.remove(state.compose, stored.id)
+    util.notify(error or "could not insert compose attachment", vim.log.levels.ERROR)
+    return nil
+  end
+  return stored
 end
 
 function M.reference()
@@ -30,6 +38,10 @@ function M.reference()
     return
   end
   insert(item)
+end
+
+function M.reference_range(start_line, end_line)
+  insert(context.line_selection(start_line, end_line))
 end
 
 function M.reference_at(value)
@@ -53,27 +65,42 @@ function M.reference_picker()
   end)
 end
 
-function M.attach_image(path)
-  local function attach(value)
-    if value == nil or value == "" then
-      return
-    end
-    local item, error = image.from_file(value)
-    if item == nil then
+local function attach_image_file(path, temporary, quiet)
+  local item, error = image.from_file(path)
+  if temporary then
+    os.remove(path)
+  end
+  if item == nil then
+    if not quiet then
       util.notify(error, vim.log.levels.ERROR)
-      return
     end
-    insert(item)
+    return nil
   end
-  if path ~= nil then
-    attach(path)
-  else
-    vim.ui.input({ prompt = "Image file: ", completion = "file" }, attach)
+  if temporary then
+    item.path = nil
   end
+  return insert(item)
+end
+
+function M.attach_image(source, options)
+  options = options or {}
+  source = (source == nil or source == "") and "clipboard" or source
+  if source == "clipboard" then
+    local path, error = clipboard.temp_image_file()
+    if path == nil then
+      if not options.quiet then
+        util.notify(error or "clipboard does not contain a supported image", vim.log.levels.ERROR)
+      end
+      return nil
+    end
+    return attach_image_file(path, true, options.quiet)
+  end
+  return attach_image_file(source, false, options.quiet)
 end
 
 local function submit(session_id, content, revision)
   runtime.prompt(session_id, content, function(_, error)
+    submissions[revision] = nil
     if error ~= nil then
       util.notify(vim.inspect(error), vim.log.levels.ERROR)
       return
@@ -95,6 +122,12 @@ function M.send()
     return
   end
   local revision = state.compose.revision
+  if submissions[revision] then
+    util.notify("this compose revision is already being sent", vim.log.levels.WARN)
+    return
+  end
+  submissions[revision] = true
+
   local session_id = runtime.active_session()
   if session_id ~= nil then
     submit(session_id, content, revision)
@@ -102,6 +135,7 @@ function M.send()
   end
   runtime.new_session(function(created, create_error)
     if create_error ~= nil then
+      submissions[revision] = nil
       util.notify(vim.inspect(create_error), vim.log.levels.ERROR)
       return
     end

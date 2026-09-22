@@ -5,10 +5,4 @@ local M = {
   remembered_compose_cursor = { 1, 0 },
 }
 
-function M.reset_compose()
-  M.compose = compose_model.new()
-  M.remembered_compose_cursor = { 1, 0 }
-  return M.compose
-end
-
 return M

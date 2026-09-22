@@ -8,6 +8,28 @@ local mime_types = {
   webp = "image/webp",
 }
 
+local extensions = {
+  ["image/png"] = "png",
+  ["image/jpeg"] = "jpg",
+  ["image/gif"] = "gif",
+  ["image/webp"] = "webp",
+}
+
+function M.from_bytes(name, mime_type, bytes)
+  if extensions[mime_type] == nil then
+    return nil, "unsupported image MIME type: " .. tostring(mime_type)
+  end
+  if type(bytes) ~= "string" or bytes == "" then
+    return nil, "image payload is empty"
+  end
+  return {
+    kind = "image",
+    name = name or ("clipboard." .. extensions[mime_type]),
+    mime_type = mime_type,
+    bytes = bytes,
+  }
+end
+
 function M.from_file(path)
   local handle, error = io.open(path, "rb")
   if handle == nil then
@@ -20,13 +42,12 @@ function M.from_file(path)
   if mime_type == nil then
     return nil, "unsupported image type: " .. path
   end
-  return {
-    kind = "image",
-    name = vim.fn.fnamemodify(path, ":t"),
-    path = vim.fn.fnamemodify(path, ":p"),
-    mime_type = mime_type,
-    bytes = bytes,
-  }
+  local value, decode_error = M.from_bytes(vim.fn.fnamemodify(path, ":t"), mime_type, bytes)
+  if value == nil then
+    return nil, decode_error
+  end
+  value.path = vim.fn.fnamemodify(path, ":p")
+  return value
 end
 
 local function backend()

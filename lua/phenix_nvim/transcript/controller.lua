@@ -57,6 +57,7 @@ function M.refresh()
     buffer.render_projection(projection)
     return
   end
+  buffer.remember_projection(projection)
   for _, node_id in ipairs(changed) do
     buffer.render_node(projection.nodes[node_id])
   end
