@@ -187,7 +187,10 @@ end
 
 function M.ensure(document)
   if buffer ~= nil and vim.api.nvim_buf_is_valid(buffer) then
-    if document ~= nil then
+    if document ~= nil and buffer_document ~= nil and document ~= buffer_document then
+      error("Phenix compose buffer is already bound to its canonical document")
+    end
+    if buffer_document == nil then
       buffer_document = document
     end
     return buffer
