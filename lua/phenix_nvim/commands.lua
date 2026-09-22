@@ -186,7 +186,6 @@ function M.complete(arglead, cmdline, cursorpos)
     return matches({ "close", "new", "select" }, arglead)
   end
 
-
   return {}
 end
 
