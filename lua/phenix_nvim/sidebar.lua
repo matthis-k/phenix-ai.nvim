@@ -545,8 +545,12 @@ function M.reconcile()
   reconciling = true
   vim.schedule(function()
     reconciling = false
-    for _, surface in pairs(vim.deepcopy(surfaces)) do
-      local live = surfaces[surface.id]
+    local ids = {}
+    for id in pairs(surfaces) do
+      table.insert(ids, id)
+    end
+    for _, id in ipairs(ids) do
+      local live = surfaces[id]
       if live ~= nil and not live.closing then
         if not valid_tab(live.tab) or not repair_host(live) then
           close_surface(live, false)
