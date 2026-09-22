@@ -79,7 +79,7 @@ end
 
 function M.attach_image(source, options)
   options = options or {}
-  source = source == nil or source == "" and "clipboard" or source
+  source = (source == nil or source == "") and "clipboard" or source
   if source == "clipboard" then
     local path, error = clipboard.temp_image_file()
     if path == nil then
