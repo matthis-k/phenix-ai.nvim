@@ -198,7 +198,7 @@ function M.ensure(document)
   buffer_document = document
   buffer = vim.api.nvim_create_buf(false, true)
   vim.bo[buffer].buftype = "acwrite"
-  vim.bo[buffer].bufhidden = "hide"
+  vim.bo[buffer].bufhidden = "wipe"
   vim.bo[buffer].swapfile = false
   vim.bo[buffer].filetype = "markdown"
   vim.api.nvim_buf_set_name(buffer, "phenix://compose")
@@ -239,12 +239,23 @@ function M.ensure(document)
       end
     end,
   })
+  vim.api.nvim_create_autocmd("QuitPre", {
+    buffer = buffer,
+    callback = function()
+      if buffer ~= nil and vim.api.nvim_buf_is_valid(buffer) then
+        vim.bo[buffer].modified = false
+      end
+    end,
+  })
   vim.api.nvim_create_autocmd("BufWipeout", {
     buffer = buffer,
     callback = function()
       close_previews()
       markers = {}
       attached_windows = {}
+      if buffer_document ~= nil then
+        model.clear(buffer_document)
+      end
       buffer_document = nil
       buffer = nil
     end,
