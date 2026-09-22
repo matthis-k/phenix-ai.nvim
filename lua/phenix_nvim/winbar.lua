@@ -153,7 +153,7 @@ local function compose_value(surface)
     table.insert(parts, "  ·  ")
     table.insert(parts, segment("Comment", string.format("%d context", count)))
   end
-  local status = runtime.status()
+  local status = runtime.status(surface and surface.session_id or nil)
   if status.connection ~= "ready" then
     local group, text = connection(status)
     table.insert(parts, "%=")
