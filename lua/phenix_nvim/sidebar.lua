@@ -239,9 +239,10 @@ local function sync_surface(surface)
     ["<C-w>J"] = "down",
     ["<C-w>T"] = "tab",
   }) do
+    local target_direction = direction
     map_children(key, function()
-      M.move_window(direction, surface)
-    end, "Move Phenix chat " .. direction)
+      M.move_window(target_direction, surface)
+    end, "Move Phenix chat " .. target_direction)
   end
 
   for key, command in pairs({
@@ -254,8 +255,9 @@ local function sync_surface(surface)
     ["<C-w><"] = "wincmd <",
     ["<C-w>>"] = "wincmd >",
   }) do
+    local host_command = command
     map_children(key, function()
-      M.host_command(command, surface)
+      M.host_command(host_command, surface)
     end, "Apply window operation to Phenix chat host")
   end
   return true
