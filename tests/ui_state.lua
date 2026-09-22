@@ -15,8 +15,17 @@ end
 
 local first_tab = vim.api.nvim_get_current_tabpage()
 local editor_win = vim.api.nvim_get_current_win()
+local initial_compose_buffer = vim.fn.bufnr("phenix://compose")
+assert(initial_compose_buffer > 0 and vim.api.nvim_buf_is_valid(initial_compose_buffer))
+assert(not vim.bo[initial_compose_buffer].buflisted, "compose buffer must stay out of the normal buffer list")
+assert(vim.bo[initial_compose_buffer].bufhidden == "hide")
+assert(vim.b[initial_compose_buffer].phenix_internal == true)
+assert(vim.b[initial_compose_buffer].phenix_role == "compose")
+assert(vim.fn.bufwinid(initial_compose_buffer) == -1, "compose buffer should start hidden")
+
 sidebar.open()
 local transcript_win, compose_win, host_win = sidebar.windows()
+assert(vim.api.nvim_win_get_buf(compose_win) == initial_compose_buffer)
 assert(vim.api.nvim_win_is_valid(host_win))
 assert(vim.api.nvim_win_is_valid(transcript_win))
 assert(vim.api.nvim_win_is_valid(compose_win))
@@ -124,8 +133,28 @@ assert(vim.deep_equal(
 
 -- Toggling the whole sidebar is also presentation-only. It must not destroy input state.
 sidebar.close()
+
+-- Even an explicit external wipe cannot leave Phenix without canonical compose state.
+local wiped_compose = compose.ensure(state.compose)
+assert(wiped_compose == initial_compose_buffer)
+vim.api.nvim_buf_delete(wiped_compose, { force = true })
+wait_until(function()
+  local replacement = vim.fn.bufnr("phenix://compose")
+  return replacement > 0
+    and replacement ~= wiped_compose
+    and vim.api.nvim_buf_is_valid(replacement)
+end, "forced compose wipe must recreate the hidden canonical buffer")
+local replacement_compose = vim.fn.bufnr("phenix://compose")
+assert(not vim.bo[replacement_compose].buflisted)
+assert(vim.bo[replacement_compose].bufhidden == "hide")
+assert(vim.b[replacement_compose].phenix_internal == true)
+assert(vim.b[replacement_compose].phenix_role == "compose")
+assert(vim.fn.bufwinid(replacement_compose) == -1)
+assert(next(state.compose.items) == nil, "forced wipe must leave compose state valid and empty")
 assert(not sidebar.is_open())
 assert(vim.api.nvim_buf_is_valid(old_compose_buffer))
+assert(old_compose_buffer == initial_compose_buffer)
+assert(vim.fn.bufwinid(old_compose_buffer) == -1, "closed sidebar must leave compose buffer hidden")
 assert(compose_model.get(state.compose, scratch.id) ~= nil)
 assert(vim.deep_equal(vim.api.nvim_buf_get_lines(old_compose_buffer, 0, -1, false), preserved_lines))
 sidebar.open()
@@ -155,6 +184,8 @@ wait_until(function()
 end, "closing the sidebar host must close the whole Phenix view")
 assert(not vim.api.nvim_win_is_valid(transcript_win))
 assert(not vim.api.nvim_win_is_valid(compose_win))
+assert(vim.api.nvim_buf_is_valid(initial_compose_buffer), "host teardown must not own compose-buffer lifetime")
+assert(vim.fn.bufwinid(initial_compose_buffer) == -1)
 
 -- Hosts and their child floats are tab-local.
 sidebar.open()
