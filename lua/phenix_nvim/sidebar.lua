@@ -205,10 +205,10 @@ local function sync_surface(surface)
     return false
   end
   apply_host_options(surface)
-  transcript_controller.bind(surface, surface.state.session_id)
-  local transcript_win = ensure_float(surface, "transcript", transcript.ensure(surface))
+  transcript_controller.bind(surface.transcript_key, surface.state.session_id)
+  local transcript_win = ensure_float(surface, "transcript", transcript.ensure(surface.transcript_key))
   local compose_win = ensure_float(surface, "compose", compose.ensure(surface.state.compose))
-  transcript.attach_window(surface, transcript_win)
+  transcript.attach_window(surface.transcript_key, transcript_win)
   compose.attach_window(surface.state.compose, compose_win)
   winbar.attach(transcript_win, compose_win)
   for _, win in ipairs({ transcript_win, compose_win }) do
@@ -317,6 +317,7 @@ local function primary_state(tab)
         session_id = nil,
         compose = state.compose,
         compose_cursor = vim.deepcopy(state.remembered_compose_cursor),
+        transcript_key = transcript.default_key(),
       }
     else
       value = state.new_surface()
@@ -343,7 +344,7 @@ local function create_surface(host_win, surface_state)
   vim.api.nvim_win_set_buf(host_win, ensure_host_buffer(surface))
   surface.compose = surface.state.compose
   surface.session_id = surface.state.session_id
-  surface.transcript_key = surface
+  surface.transcript_key = surface.state.transcript_key or surface
   surfaces[surface.id] = surface
   hosts[host_win] = surface
   apply_host_options(surface)
@@ -497,7 +498,7 @@ function M.bind_session(session_id, surface)
   end
   surface.state.session_id = session_id
   surface.session_id = session_id
-  transcript_controller.bind(surface, session_id)
+  transcript_controller.bind(surface.transcript_key, session_id)
   sync_surface(surface)
   return surface
 end
@@ -512,7 +513,7 @@ function M.buffers(surface)
   if surface == nil then
     return transcript.ensure(), compose.ensure(state.compose)
   end
-  return transcript.ensure(surface), compose.ensure(surface.state.compose)
+  return transcript.ensure(surface.transcript_key), compose.ensure(surface.state.compose)
 end
 
 function M.windows(surface)
