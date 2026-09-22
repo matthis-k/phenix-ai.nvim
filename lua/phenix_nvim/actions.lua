@@ -192,13 +192,6 @@ function M.new_window()
   return sidebar.new_window()
 end
 
-function M.close_window()
-  sidebar.close_window()
-end
-
-function M.move_window(direction)
-  return sidebar.move_window(direction)
-end
 
 function M.cancel()
   runtime.cancel_active()
