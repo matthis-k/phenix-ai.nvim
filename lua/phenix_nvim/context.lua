@@ -47,6 +47,25 @@ function M.pick_reference(callback)
   end)
 end
 
+function M.line_selection(start_line, end_line)
+  local buffer = vim.api.nvim_get_current_buf()
+  start_line = math.max(1, tonumber(start_line) or 1)
+  end_line = math.max(start_line, tonumber(end_line) or start_line)
+  local lines = vim.api.nvim_buf_get_lines(buffer, start_line - 1, end_line, false)
+  local last = lines[#lines] or ""
+  return {
+    kind = "selection",
+    source = {
+      uri = uri(buffer),
+      start_line = start_line - 1,
+      start_column = 0,
+      end_line = end_line - 1,
+      end_column = #last,
+    },
+    snapshot = table.concat(lines, "\n"),
+  }
+end
+
 function M.current_location()
   local buffer = vim.api.nvim_get_current_buf()
   local cursor = vim.api.nvim_win_get_cursor(0)
