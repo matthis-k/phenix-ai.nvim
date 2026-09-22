@@ -31,23 +31,43 @@ function M.execute(options)
   end
 
   if command == "toggle" then
-    actions.toggle()
+    if #args == 0 then
+      actions.toggle()
+    else
+      usage("Usage: Phenix toggle")
+    end
     return
   end
   if command == "send" then
-    actions.send()
+    if #args == 0 then
+      actions.send()
+    else
+      usage("Usage: Phenix send")
+    end
     return
   end
   if command == "cancel" then
-    actions.cancel()
+    if #args == 0 then
+      actions.cancel()
+    else
+      usage("Usage: Phenix cancel")
+    end
     return
   end
   if command == "auth" then
-    actions.authenticate()
+    if #args == 0 then
+      actions.authenticate()
+    else
+      usage("Usage: Phenix auth")
+    end
     return
   end
   if command == "select" then
-    actions.choose_selection()
+    if #args == 0 then
+      actions.choose_selection()
+    else
+      usage("Usage: Phenix select")
+    end
     return
   end
 
