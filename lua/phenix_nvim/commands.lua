@@ -74,7 +74,11 @@ function M.execute(options)
   if command == "reference" then
     local subcommand = table.remove(args, 1)
     if subcommand == nil then
-      actions.reference()
+      if options.range ~= nil and options.range > 0 then
+        actions.reference_range(options.line1, options.line2)
+      else
+        actions.reference()
+      end
       return
     end
     if subcommand == "pick" and #args == 0 then
