@@ -11,59 +11,88 @@ local function wait_until(predicate, message)
   assert(vim.wait(1000, predicate, 10), message)
 end
 
--- A partially closed sidebar is invalid state. Closing either pane tears down its sibling
--- so the next open starts from one coherent layout instead of stale window ids.
 local first_tab = vim.api.nvim_get_current_tabpage()
 sidebar.open()
-local transcript_win, compose_win = sidebar.windows()
+local transcript_win, compose_win, host_win = sidebar.windows()
+assert(vim.api.nvim_win_is_valid(host_win))
 assert(vim.api.nvim_win_is_valid(transcript_win))
 assert(vim.api.nvim_win_is_valid(compose_win))
+
+-- One real split reserves the sidebar. Transcript and compose are floats anchored to it.
 local expected_width = math.max(20, math.floor(vim.o.columns * 0.4))
 assert(
-  math.abs(vim.api.nvim_win_get_width(transcript_win) - expected_width) <= 1,
-  "default sidebar width must track forty percent of the editor"
+  math.abs(vim.api.nvim_win_get_width(host_win) - expected_width) <= 1,
+  "default sidebar host width must track forty percent of the editor"
 )
+local transcript_config = vim.api.nvim_win_get_config(transcript_win)
+local compose_config = vim.api.nvim_win_get_config(compose_win)
+assert(transcript_config.relative == "win" and transcript_config.win == host_win)
+assert(compose_config.relative == "win" and compose_config.win == host_win)
+assert(transcript_config.width == vim.api.nvim_win_get_width(host_win))
+assert(compose_config.width == vim.api.nvim_win_get_width(host_win))
+
+-- Child windows are derived state. Closing or mutating one must repair it from the host.
+local old_compose = compose_win
 vim.api.nvim_win_close(compose_win, true)
 wait_until(function()
-  return not sidebar.is_open()
-end, "closing one sidebar pane must reconcile the whole sidebar")
-assert(not vim.api.nvim_win_is_valid(transcript_win), "orphaned transcript pane must be closed")
+  local _, repaired = sidebar.windows()
+  return repaired ~= nil and repaired ~= old_compose and vim.api.nvim_win_is_valid(repaired)
+end, "closing the compose float must recreate it while the host survives")
+transcript_win, compose_win, host_win = sidebar.windows()
+assert(sidebar.is_open())
+assert(vim.api.nvim_win_is_valid(host_win))
 
--- Sidebar windows are tab-local. Opening Phenix in another tab must not overwrite the
--- first tab's layout state.
+local replacement = vim.api.nvim_create_buf(false, true)
+local old_transcript = transcript_win
+vim.api.nvim_win_set_buf(transcript_win, replacement)
+wait_until(function()
+  local repaired = select(1, sidebar.windows())
+  return repaired ~= nil
+    and repaired ~= old_transcript
+    and vim.api.nvim_win_is_valid(repaired)
+    and vim.api.nvim_win_get_buf(repaired) == transcript.ensure()
+end, "replacing a child float buffer must restore the owned transcript view")
+
+-- The host owns lifecycle. Closing it tears down both floating children.
+transcript_win, compose_win, host_win = sidebar.windows()
+vim.api.nvim_win_close(host_win, true)
+wait_until(function()
+  return not sidebar.is_open()
+end, "closing the sidebar host must close the whole Phenix view")
+assert(not vim.api.nvim_win_is_valid(transcript_win))
+assert(not vim.api.nvim_win_is_valid(compose_win))
+
+-- Hosts and their child floats are tab-local.
 sidebar.open()
-local first_transcript, first_compose = sidebar.windows()
+local first_transcript, first_compose, first_host = sidebar.windows()
 vim.cmd("tabnew")
 local second_tab = vim.api.nvim_get_current_tabpage()
 sidebar.open()
-local second_transcript, second_compose = sidebar.windows()
+local second_transcript, second_compose, second_host = sidebar.windows()
+assert(first_host ~= second_host)
 assert(first_transcript ~= second_transcript and first_compose ~= second_compose)
+assert(vim.api.nvim_win_is_valid(first_host))
 assert(vim.api.nvim_win_is_valid(first_transcript) and vim.api.nvim_win_is_valid(first_compose))
 
 vim.api.nvim_set_current_tabpage(first_tab)
 wait_until(function()
-  local current_transcript, current_compose = sidebar.windows()
-  return current_transcript == first_transcript and current_compose == first_compose
-end, "returning to a tab must restore its sidebar layout")
+  local current_transcript, current_compose, current_host = sidebar.windows()
+  return current_host == first_host
+    and current_transcript == first_transcript
+    and current_compose == first_compose
+end, "returning to a tab must restore its anchored sidebar view")
 sidebar.close()
+assert(not vim.api.nvim_win_is_valid(first_host))
 assert(not vim.api.nvim_win_is_valid(first_transcript))
 assert(not vim.api.nvim_win_is_valid(first_compose))
+assert(vim.api.nvim_win_is_valid(second_host))
 assert(vim.api.nvim_win_is_valid(second_transcript) and vim.api.nvim_win_is_valid(second_compose))
 
 vim.api.nvim_set_current_tabpage(second_tab)
 wait_until(sidebar.is_open, "second tab sidebar must survive changes in another tab")
 
--- Replacing one of the sidebar buffers also invalidates the layout.
-local replacement = vim.api.nvim_create_buf(false, true)
-vim.api.nvim_win_set_buf(second_compose, replacement)
-wait_until(function()
-  return not sidebar.is_open()
-end, "replacing a sidebar buffer must reconcile the sidebar")
-assert(not vim.api.nvim_win_is_valid(second_transcript), "buffer replacement must not leave an orphan pane")
-
 -- Attachment identity comes from extmarks, not text that merely looks like an attachment
 -- marker. Large or pasted text can therefore contain marker-shaped strings safely.
-sidebar.open()
 local _, input_win = sidebar.windows()
 local document = state.compose
 compose.clear(document)
