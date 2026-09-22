@@ -27,6 +27,13 @@ assert(from_bytes.path == nil)
 local unsupported, unsupported_error = image.from_bytes("clipboard.bmp", "image/bmp", "bytes")
 assert(unsupported == nil and unsupported_error ~= nil)
 
+local clipboard = require("phenix_nvim.clipboard")
+local temp_image = assert(clipboard.write_temp_image(from_bytes))
+local temp_handle = assert(io.open(temp_image, "rb"))
+assert(temp_handle:read("*a") == "clipboard-bytes")
+temp_handle:close()
+os.remove(temp_image)
+
 local attachment = {
   kind = "image",
   name = "snapshot.png",
