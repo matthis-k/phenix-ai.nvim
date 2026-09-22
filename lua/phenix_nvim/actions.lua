@@ -80,13 +80,14 @@ function M.reference_picker()
   end)
 end
 
-local function attach_image_file(path, temporary, quiet)
+local function attach_image_file(path, temporary, options)
+  options = options or {}
   local item, error = image.from_file(path)
   if temporary then
     os.remove(path)
   end
   if item == nil then
-    if not quiet then
+    if not options.quiet then
       util.notify(error, vim.log.levels.ERROR)
     end
     return nil
@@ -108,9 +109,9 @@ function M.attach_image(source, options)
       end
       return nil
     end
-    return attach_image_file(path, true, options.quiet)
+    return attach_image_file(path, true, options)
   end
-  return attach_image_file(source, false, options.quiet)
+  return attach_image_file(source, false, options)
 end
 
 local function submit(surface, content, revision)
