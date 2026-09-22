@@ -25,4 +25,8 @@ jobs:
           echo "===FLAKE_LOCK_BEGIN==="
           cat flake.lock
           echo "===FLAKE_LOCK_END==="
+      - uses: actions/upload-artifact@v4
+        with:
+          name: propagated-flake-lock
+          path: flake.lock
       - run: nix flake check --no-update-lock-file --show-trace
