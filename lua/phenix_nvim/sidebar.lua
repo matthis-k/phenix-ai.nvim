@@ -211,7 +211,7 @@ local function sync_surface(surface)
   local compose_win = ensure_float(surface, "compose", compose.ensure(surface.state.compose))
   transcript.attach_window(surface.transcript_key, transcript_win)
   compose.attach_window(surface.state.compose, compose_win)
-  winbar.attach(transcript_win, compose_win)
+  winbar.attach(transcript_win, compose_win, surface)
   for _, win in ipairs({ transcript_win, compose_win }) do
     local target = vim.api.nvim_win_get_buf(win)
     vim.keymap.set("n", "<C-w>n", function()
