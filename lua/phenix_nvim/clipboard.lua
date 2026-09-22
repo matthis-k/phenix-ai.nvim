@@ -18,7 +18,7 @@ local function run(args)
     return nil
   end
   local ok, result = pcall(function()
-    return vim.system(args, { text = false }):wait()
+    return vim.system(args, { text = false }):wait(2000)
   end)
   if not ok or type(result) ~= "table" or result.code ~= 0 then
     return nil
@@ -76,6 +76,33 @@ function M.image()
     end
   end
   return x11_image()
+end
+
+function M.write_temp_image(value)
+  if type(value) ~= "table" or value.kind ~= "image" or type(value.bytes) ~= "string" or value.bytes == "" then
+    return nil, "clipboard does not contain a supported image"
+  end
+  local extension = tostring(value.name or ""):match("%.([%w]+)$") or "png"
+  local path = vim.fn.tempname() .. "." .. extension
+  local handle, open_error = io.open(path, "wb")
+  if handle == nil then
+    return nil, open_error
+  end
+  local ok, write_error = pcall(handle.write, handle, value.bytes)
+  handle:close()
+  if not ok then
+    os.remove(path)
+    return nil, tostring(write_error)
+  end
+  return path
+end
+
+function M.temp_image_file()
+  local value = M.image()
+  if value == nil then
+    return nil, "clipboard does not contain a supported image"
+  end
+  return M.write_temp_image(value)
 end
 
 function M.register_uses_system_clipboard(register)
