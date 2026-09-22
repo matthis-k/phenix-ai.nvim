@@ -1,7 +1,7 @@
 -- Exercise delayed UI/auth callbacks independently of transport timing.
 local listeners, deferred = {}, {}
 local active = {}
-local auth_calls, selection_calls = 0, 0
+local auth_calls, selection_calls, resume_calls = 0, 0, 0
 local runtime = {
   on_event = function(listener) listeners[#listeners + 1] = listener end,
   active_session_object = function() return active end,
@@ -17,6 +17,13 @@ local runtime = {
   end,
   select = function(_, callback)
     selection_calls = selection_calls + 1
+    callback({})
+  end,
+  list_sessions = function(callback)
+    callback({ sessions = { { session_id = "session-a", title = "A" } } })
+  end,
+  resume_session = function(_, callback)
+    resume_calls = resume_calls + 1
     callback({})
   end,
 }
@@ -57,4 +64,17 @@ assert(selection_calls == 0, "stale routing picker changed a different session")
 actions.choose_selection()
 picked(items[1])
 assert(selection_calls == 1)
+
+-- A delayed session picker must not resume a session on a replacement connection.
+local sessions = require("phenix_nvim.sessions")
+sessions.choose()
+local stale_items, stale_pick = items, picked
+status("failed")
+status("connecting")
+status("ready")
+stale_pick(stale_items[1])
+assert(resume_calls == 0, "stale session picker reached replacement connection")
+sessions.choose()
+picked(items[1])
+assert(resume_calls == 1)
 print("action lifecycle regressions passed")
