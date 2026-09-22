@@ -42,6 +42,24 @@ local function host_matches(layout)
   return layout ~= nil and window_matches(layout.host_win, layout.tab, ensure_host_buffer())
 end
 
+local function repair_host(layout)
+  if layout == nil
+    or not valid_tab(layout.tab)
+    or not valid_window(layout.host_win)
+    or vim.api.nvim_win_get_tabpage(layout.host_win) ~= layout.tab
+  then
+    return false
+  end
+  local target = ensure_host_buffer()
+  if vim.api.nvim_win_get_buf(layout.host_win) ~= target then
+    local ok = pcall(vim.api.nvim_win_set_buf, layout.host_win, target)
+    if not ok then
+      return false
+    end
+  end
+  return host_matches(layout)
+end
+
 local function sidebar_width(value)
   if value <= 1 then
     return math.max(20, math.floor(vim.o.columns * value))
@@ -118,7 +136,7 @@ local function remove_layout(tab, close_host)
 end
 
 local function resize_host(layout)
-  if not host_matches(layout) then
+  if not repair_host(layout) then
     return
   end
   apply_host_options(layout.host_win)
@@ -176,7 +194,7 @@ local function ensure_float(layout, role, target)
 end
 
 local function sync_layout(layout)
-  if layout == nil or layout.closing or not host_matches(layout) then
+  if layout == nil or layout.closing or not repair_host(layout) then
     return false
   end
   resize_host(layout)
@@ -193,7 +211,7 @@ local function reconcile(tab)
   if layout == nil or layout.closing then
     return nil
   end
-  if not valid_tab(tab) or not host_matches(layout) then
+  if not valid_tab(tab) or not repair_host(layout) then
     remove_layout(tab, false)
     return nil
   end
@@ -238,7 +256,7 @@ local function redirect_host_focus(layout)
   layout.redirecting_host_focus = true
   vim.schedule(function()
     layout.redirecting_host_focus = false
-    if layouts[layout.tab] ~= layout or not host_matches(layout) then
+    if layouts[layout.tab] ~= layout or not repair_host(layout) then
       return
     end
     if vim.api.nvim_get_current_win() ~= layout.host_win then
@@ -376,7 +394,7 @@ vim.api.nvim_create_autocmd("BufWinLeave", {
     vim.schedule(function()
       for tab, layout in pairs(layouts) do
         if not layout.closing then
-          if not host_matches(layout) then
+          if not repair_host(layout) then
             remove_layout(tab, false)
           else
             sync_layout(layout)
