@@ -296,6 +296,8 @@ local function create_surface(host_win, surface_state)
     closing = false,
   }
   vim.api.nvim_win_set_buf(host_win, ensure_host_buffer(surface))
+  surface.compose = surface.state.compose
+  surface.session_id = surface.state.session_id
   surfaces[surface.id] = surface
   hosts[host_win] = surface
   apply_host_options(surface)
@@ -319,6 +321,19 @@ function M.current()
   return current_surface()
 end
 
+function M.current_surface()
+  return current_surface()
+end
+
+function M.surface_for_document(document)
+  for _, surface in pairs(surfaces) do
+    if not surface.closing and surface.compose == document then
+      return surface
+    end
+  end
+  return nil
+end
+
 function M.surface_for_window(win)
   return surface_for_window(win or vim.api.nvim_get_current_win())
 end
@@ -332,12 +347,12 @@ function M.open()
   if surface ~= nil and reconcile_surface(surface) ~= nil then
     winbar.refresh()
     focus_child(surface, "compose")
-    return surface.compose_win
+    return surface
   end
 
   surface = create_surface(create_default_host())
   focus_child(surface, "compose")
-  return surface.compose_win
+  return surface
 end
 
 function M.new_window(options)
@@ -366,6 +381,28 @@ function M.close_window()
   M.close()
 end
 
+function M.move_window(direction)
+  local surface = current_surface()
+  if surface == nil then
+    return nil
+  end
+  local commands = {
+    left = "wincmd H",
+    right = "wincmd L",
+    top = "wincmd K",
+    bottom = "wincmd J",
+  }
+  local command = commands[direction] or direction
+  if type(command) ~= "string" or command == "" then
+    return nil
+  end
+  vim.api.nvim_win_call(surface.host_win, function()
+    vim.cmd(command)
+  end)
+  M.reconcile()
+  return surface
+end
+
 function M.toggle()
   local surface = current_surface()
   if surface ~= nil then
@@ -375,8 +412,9 @@ function M.toggle()
   end
 end
 
-function M.focus_compose(document)
-  local surface = current_surface()
+function M.focus_compose(target)
+  local surface = type(target) == "table" and target.id ~= nil and target or current_surface()
+  local document = type(target) == "table" and target.id == nil and target or nil
   if document ~= nil and (surface == nil or surface.state.compose ~= document) then
     for _, candidate in pairs(surfaces) do
       if candidate.state.compose == document then
@@ -394,12 +432,13 @@ function M.focus_compose(document)
   return surface and surface.compose_win or nil
 end
 
-function M.bind_session(surface, session_id)
+function M.bind_session(session_id, surface)
   surface = surface or current_surface()
   if surface == nil then
     return nil
   end
   surface.state.session_id = session_id
+  surface.session_id = session_id
   transcript_controller.bind(surface, session_id)
   sync_surface(surface)
   return surface
