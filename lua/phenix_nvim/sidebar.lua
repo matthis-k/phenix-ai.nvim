@@ -258,8 +258,14 @@ local function install_window_actions(surface, target)
   end
 
   map("<C-w>n", function()
-    M.new_window(surface)
+    M.new_window(surface, "vertical")
   end, "Phenix: new chat window")
+  map("<C-w>v", function()
+    M.new_window(surface, "vertical")
+  end, "Phenix: split to a new chat window")
+  map("<C-w>s", function()
+    M.new_window(surface, "horizontal")
+  end, "Phenix: split below to a new chat window")
   map("<C-w>c", function()
     M.close_window(surface)
   end, "Phenix: close chat window")
@@ -472,14 +478,15 @@ function M.open(surface)
   return open_surface(surface)
 end
 
-function M.new_window(origin)
+function M.new_window(origin, orientation)
   local tab = vim.api.nvim_get_current_tabpage()
   origin = origin or current_surface_exact() or M.current_surface()
   local source = origin and origin.host_win or vim.api.nvim_get_current_win()
   local surface = create_surface(tab, false)
+  local horizontal = orientation == "horizontal"
   return open_surface(surface, {
     source = source,
-    command = "rightbelow vsplit",
+    command = horizontal and "belowright split" or "rightbelow vsplit",
     default_width = false,
   })
 end
