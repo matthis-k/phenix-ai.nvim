@@ -58,6 +58,9 @@ The plugin exposes one command namespace instead of many top-level commands:
 :Phenix session new
 :Phenix session close
 :Phenix session select
+:Phenix window new
+:Phenix window close
+:Phenix window move <left|right|up|down>
 :Phenix auth
 :Phenix select
 ```
