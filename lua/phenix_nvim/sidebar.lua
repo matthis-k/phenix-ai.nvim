@@ -212,30 +212,51 @@ local function sync_surface(surface)
   transcript.attach_window(surface.transcript_key, transcript_win)
   compose.attach_window(surface.state.compose, compose_win)
   winbar.attach(transcript_win, compose_win, surface)
-  for _, win in ipairs({ transcript_win, compose_win }) do
-    local target = vim.api.nvim_win_get_buf(win)
-    vim.keymap.set("n", "<C-w>n", function()
-      local current = children[vim.api.nvim_get_current_win()] or surface
-      if current ~= nil and not current.closing then
-        M.new_window()
-      end
-    end, { buffer = target, silent = true, desc = "Open a new Phenix chat window" })
+  local function map_children(key, callback, description)
+    for _, win in ipairs({ transcript_win, compose_win }) do
+      vim.keymap.set("n", key, callback, {
+        buffer = vim.api.nvim_win_get_buf(win),
+        silent = true,
+        desc = description,
+      })
+    end
   end
+
+  map_children("<C-w>n", function()
+    M.new_window(surface, { command = "rightbelow vsplit" })
+  end, "Open a new Phenix chat beside this one")
+  map_children("<C-w>v", function()
+    M.new_window(surface, { command = "rightbelow vsplit" })
+  end, "Open a new Phenix chat beside this one")
+  map_children("<C-w>s", function()
+    M.new_window(surface, { command = "rightbelow split" })
+  end, "Open a new Phenix chat below this one")
+
   for key, direction in pairs({
     ["<C-w>H"] = "left",
     ["<C-w>L"] = "right",
-    ["<C-w>K"] = "top",
-    ["<C-w>J"] = "bottom",
+    ["<C-w>K"] = "up",
+    ["<C-w>J"] = "down",
+    ["<C-w>T"] = "tab",
   }) do
-    for _, win in ipairs({ transcript_win, compose_win }) do
-      local target = vim.api.nvim_win_get_buf(win)
-      vim.keymap.set("n", key, function()
-        local current = children[vim.api.nvim_get_current_win()] or surface
-        if current ~= nil and not current.closing then
-          M.move_window(direction)
-        end
-      end, { buffer = target, silent = true, desc = "Move Phenix chat " .. direction })
-    end
+    map_children(key, function()
+      M.move_window(direction, surface)
+    end, "Move Phenix chat " .. direction)
+  end
+
+  for key, command in pairs({
+    ["<C-w>r"] = "wincmd r",
+    ["<C-w>R"] = "wincmd R",
+    ["<C-w>x"] = "wincmd x",
+    ["<C-w>="] = "wincmd =",
+    ["<C-w>+"] = "wincmd +",
+    ["<C-w>-"] = "wincmd -",
+    ["<C-w><"] = "wincmd <",
+    ["<C-w>>"] = "wincmd >",
+  }) do
+    map_children(key, function()
+      M.host_command(command, surface)
+    end, "Apply window operation to Phenix chat host")
   end
   return true
 end
@@ -440,6 +461,22 @@ function M.close_window()
   M.close()
 end
 
+function M.host_command(command, surface)
+  surface = surface or current_surface()
+  if surface == nil or type(command) ~= "string" or command == "" then
+    return nil
+  end
+  vim.api.nvim_win_call(surface.host_win, function()
+    vim.cmd(command)
+  end)
+  if valid_window(surface.host_win) then
+    surface.tab = vim.api.nvim_win_get_tabpage(surface.host_win)
+  end
+  sync_surface(surface)
+  M.reconcile()
+  return true
+end
+
 function M.move_window(direction, surface)
   surface = surface or current_surface()
   if surface == nil then
@@ -454,18 +491,11 @@ function M.move_window(direction, surface)
     bottom = "wincmd J",
     tab = "wincmd T",
   }
-  local command = commands[direction] or direction
-  if type(command) ~= "string" or command == "" then
+  local command = commands[direction]
+  if command == nil then
     return nil
   end
-  vim.api.nvim_win_call(surface.host_win, function()
-    vim.cmd(command)
-  end)
-  if valid_window(surface.host_win) then
-    surface.tab = vim.api.nvim_win_get_tabpage(surface.host_win)
-  end
-  sync_surface(surface)
-  return true
+  return M.host_command(command, surface)
 end
 
 function M.toggle()
