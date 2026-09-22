@@ -108,6 +108,18 @@ local function remember_cursor(surface)
   end
 end
 
+local function untrack_child(win)
+  if win ~= nil then
+    children[win] = nil
+  end
+end
+
+local function untrack_host(win)
+  if win ~= nil then
+    hosts[win] = nil
+  end
+end
+
 local function detach_children(surface)
   if surface == nil then
     return
@@ -115,8 +127,8 @@ local function detach_children(surface)
   winbar.detach(surface.transcript_win, surface.compose_win)
   compose.detach_window(surface.compose_win)
   transcript.detach_window(surface.transcript_win)
-  children[surface.transcript_win] = nil
-  children[surface.compose_win] = nil
+  untrack_child(surface.transcript_win)
+  untrack_child(surface.compose_win)
 end
 
 local function close_window(win)
@@ -127,9 +139,9 @@ end
 
 local function unregister(surface)
   surfaces[surface.id] = nil
-  hosts[surface.host_win] = nil
-  children[surface.transcript_win] = nil
-  children[surface.compose_win] = nil
+  untrack_host(surface.host_win)
+  untrack_child(surface.transcript_win)
+  untrack_child(surface.compose_win)
 end
 
 local host_option_names = {
@@ -248,7 +260,7 @@ local function ensure_float(surface, role, target)
     return win
   end
 
-  children[win] = nil
+  untrack_child(win)
   close_window(win)
   win = vim.api.nvim_open_win(target, false, float_config(surface, role))
   surface[field] = win
