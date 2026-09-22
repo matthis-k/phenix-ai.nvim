@@ -377,7 +377,14 @@ assert(transcript_view.is_following_tail(), "returning to the end must re-enable
 sidebar.close()
 
 local review = require("phenix_nvim.review")
-local review_buffer = assert(review.open({
+local original_decide_review = runtime.decide_review
+local review_decisions = {}
+local review_callbacks = {}
+runtime.decide_review = function(value, decision, callback)
+  table.insert(review_decisions, { review = value, decision = decision })
+  table.insert(review_callbacks, callback)
+end
+local review_value = {
   id = "review-1",
   revision = 1,
   files = {
@@ -388,7 +395,26 @@ local review_buffer = assert(review.open({
       },
     },
   },
-}))
+  state = { kind = "Pending" },
+}
+local review_buffer = assert(review.open(review_value))
 assert(vim.bo[review_buffer].filetype == "diff")
 assert(table.concat(vim.api.nvim_buf_get_lines(review_buffer, 0, -1, false), "\n"):find("%+new"))
+local accept
+for _, mapping in ipairs(vim.api.nvim_buf_get_keymap(review_buffer, "n")) do
+  if mapping.lhs == "a" then
+    accept = mapping.callback
+    break
+  end
+end
+assert(type(accept) == "function")
+accept()
+accept()
+assert(#review_decisions == 1, "pending review decision must be single-flight")
+local accepted = vim.deepcopy(review_value)
+accepted.state = { kind = "Accepted" }
+review_callbacks[1](accepted, nil)
+accept()
+assert(#review_decisions == 1, "settled review must not accept a second decision")
+runtime.decide_review = original_decide_review
 vim.cmd("tabclose")
