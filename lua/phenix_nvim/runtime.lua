@@ -561,6 +561,33 @@ function M.resume_session(session_id, callback)
   end)
 end
 
+function M.activate_session(session_id, callback)
+  if session_id == nil then
+    state.active_session = nil
+    state.context_generation = state.context_generation + 1
+    emit("status", M.status())
+    util.safe_call(callback, nil, nil)
+    return
+  end
+  if active_id() == session_id then
+    util.safe_call(callback, state.session_state.sessions[session_id], nil)
+    return
+  end
+  ensure_ready(callback, function()
+    local cached_ok, session = pcall(state.sessions.cached, state.sessions, session_id)
+    if not cached_ok then
+      util.safe_call(callback, nil, { message = tostring(session) })
+      return
+    end
+    if session == nil then
+      M.resume_session(session_id, callback)
+      return
+    end
+    set_active(session)
+    util.safe_call(callback, state.session_state.sessions[session_id], nil)
+  end)
+end
+
 function M.list_sessions(callback)
   ensure_ready(callback, function()
     local ok, request = pcall(state.sessions.list, state.sessions, {})
