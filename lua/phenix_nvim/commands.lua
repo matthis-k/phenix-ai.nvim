@@ -122,12 +122,12 @@ function M.execute(options)
     end
     if subcommand == "move" and #args == 1 then
       local direction = args[1]
-      if direction == "left" or direction == "right" or direction == "top" or direction == "bottom" then
+      if direction == "left" or direction == "right" or direction == "up" or direction == "down" or direction == "tab" then
         actions.move_window(direction)
         return
       end
     end
-    usage("Usage: Phenix window <new|close|move <left|right|top|bottom>>")
+    usage("Usage: Phenix window <new|close|move <left|right|up|down|tab>>")
     return
   end
 
@@ -225,7 +225,7 @@ function M.complete(arglead, cmdline, cursorpos)
       return matches({ "close", "move", "new" }, arglead)
     end
     if args[2] == "move" and #args == 2 then
-      return matches({ "bottom", "left", "right", "top" }, arglead)
+      return matches({ "down", "left", "right", "tab", "up" }, arglead)
     end
   end
   if args[1] == "window" then
