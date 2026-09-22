@@ -19,4 +19,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: cachix/install-nix-action@v31
-      - run: nix flake check --no-update-lock-file --show-trace
+      - run: |
+          nix flake lock --update-input phenix-ai
+          echo "===FLAKE_LOCK_BEGIN==="
+          cat flake.lock
+          echo "===FLAKE_LOCK_END==="
+          nix flake check --no-update-lock-file --show-trace
