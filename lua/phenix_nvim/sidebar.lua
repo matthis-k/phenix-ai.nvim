@@ -400,7 +400,11 @@ function M.open()
   end
 
   local tab = vim.api.nvim_get_current_tabpage()
-  surface = create_surface(create_default_host(), primary_state(tab))
+  local surface_state = primary_state(tab)
+  if surface_state.session_id == nil then
+    surface_state.session_id = runtime.active_session()
+  end
+  surface = create_surface(create_default_host(), surface_state)
   focus_child(surface, "compose")
   return surface
 end
