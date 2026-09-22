@@ -1,0 +1,165 @@
+local actions = require("phenix_nvim.actions")
+local util = require("phenix_nvim.util")
+
+local M = {}
+
+local roots = {
+  "auth",
+  "cancel",
+  "image",
+  "reference",
+  "select",
+  "send",
+  "session",
+  "toggle",
+}
+
+local function join(args, first)
+  return table.concat(args, " ", first or 1)
+end
+
+local function usage(message)
+  util.notify(message, vim.log.levels.ERROR)
+end
+
+function M.execute(options)
+  local args = vim.deepcopy(options.fargs or {})
+  local command = table.remove(args, 1)
+  if command == nil then
+    actions.toggle()
+    return
+  end
+
+  if command == "toggle" then
+    actions.toggle()
+    return
+  end
+  if command == "send" then
+    actions.send()
+    return
+  end
+  if command == "cancel" then
+    actions.cancel()
+    return
+  end
+  if command == "auth" then
+    actions.authenticate()
+    return
+  end
+  if command == "select" then
+    actions.choose_selection()
+    return
+  end
+
+  if command == "reference" then
+    local subcommand = table.remove(args, 1)
+    if subcommand == nil then
+      actions.reference()
+      return
+    end
+    if subcommand == "pick" and #args == 0 then
+      actions.reference_picker()
+      return
+    end
+    if subcommand == "at" and #args > 0 then
+      actions.reference_at(join(args))
+      return
+    end
+    usage("Usage: Phenix reference [pick|at <path>]")
+    return
+  end
+
+  if command == "image" then
+    local source = table.remove(args, 1)
+    if source == nil or source == "clipboard" then
+      if #args ~= 0 then
+        usage("Usage: Phenix image [clipboard|file <path>]")
+        return
+      end
+      actions.attach_image("clipboard")
+      return
+    end
+    if source == "file" and #args > 0 then
+      actions.attach_image(join(args))
+      return
+    end
+    usage("Usage: Phenix image [clipboard|file <path>]")
+    return
+  end
+
+  if command == "session" then
+    local subcommand = table.remove(args, 1)
+    if #args ~= 0 then
+      usage("Usage: Phenix session <new|close|select>")
+      return
+    end
+    if subcommand == "new" then
+      actions.new_session()
+      return
+    end
+    if subcommand == "close" then
+      actions.close_session()
+      return
+    end
+    if subcommand == "select" then
+      actions.choose_session()
+      return
+    end
+    usage("Usage: Phenix session <new|close|select>")
+    return
+  end
+
+  usage("Unknown Phenix subcommand: " .. tostring(command))
+end
+
+local function matches(values, lead)
+  local result = {}
+  for _, value in ipairs(values) do
+    if lead == "" or value:sub(1, #lead) == lead then
+      table.insert(result, value)
+    end
+  end
+  return result
+end
+
+local function completed_args(cmdline, cursorpos)
+  local prefix = cmdline:sub(1, cursorpos)
+  local body = prefix:gsub("^%s*Phenix%s*", "", 1)
+  local trailing_space = body:match("%s$") ~= nil
+  local parts = vim.split(body, "%s+", { trimempty = true })
+  if not trailing_space and #parts > 0 then
+    table.remove(parts)
+  end
+  return parts
+end
+
+function M.complete(arglead, cmdline, cursorpos)
+  local args = completed_args(cmdline, cursorpos)
+  if #args == 0 then
+    return matches(roots, arglead)
+  end
+  if args[1] == "reference" then
+    if #args == 1 then
+      return matches({ "at", "pick" }, arglead)
+    end
+    if args[2] == "at" then
+      return vim.fn.getcompletion(arglead, "file")
+    end
+    return {}
+  end
+  if args[1] == "image" then
+    if #args == 1 then
+      return matches({ "clipboard", "file" }, arglead)
+    end
+    if args[2] == "file" then
+      return vim.fn.getcompletion(arglead, "file")
+    end
+    return {}
+  end
+  if args[1] == "session" and #args == 1 then
+    return matches({ "close", "new", "select" }, arglead)
+  end
+  return {}
+end
+
+return M
