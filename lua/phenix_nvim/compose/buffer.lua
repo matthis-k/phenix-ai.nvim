@@ -194,10 +194,13 @@ function M.ensure(document)
   end
   buffer_document = document
   buffer = vim.api.nvim_create_buf(false, true)
+  vim.bo[buffer].buflisted = false
   vim.bo[buffer].buftype = "acwrite"
   vim.bo[buffer].bufhidden = "hide"
   vim.bo[buffer].swapfile = false
   vim.bo[buffer].filetype = "markdown"
+  vim.b[buffer].phenix_internal = true
+  vim.b[buffer].phenix_role = "compose"
   vim.api.nvim_buf_set_name(buffer, "phenix://compose")
   vim.keymap.set("n", "<CR>", function()
     require("phenix_nvim.actions").send()
@@ -250,14 +253,25 @@ function M.ensure(document)
   vim.api.nvim_create_autocmd("BufWipeout", {
     buffer = buffer,
     callback = function()
+      local document = buffer_document
       close_previews()
       markers = {}
       attached_windows = {}
-      if buffer_document ~= nil then
-        model.clear(buffer_document)
+      if document ~= nil then
+        model.clear(document)
       end
       buffer_document = nil
       buffer = nil
+
+      -- A forced external wipe is an explicit draft reset, but it must not leave
+      -- the plugin without its canonical internal compose buffer.
+      if document ~= nil then
+        vim.schedule(function()
+          if buffer == nil then
+            M.ensure(document)
+          end
+        end)
+      end
     end,
   })
   return buffer
@@ -430,23 +444,6 @@ function M.clear(document)
   vim.api.nvim_buf_set_lines(target, 0, -1, false, { "" })
   model.clear(document)
   vim.bo[target].modified = false
-end
-
-function M.discard(document)
-  local target = buffer
-  if target ~= nil and vim.api.nvim_buf_is_valid(target) then
-    vim.bo[target].modified = false
-    vim.api.nvim_buf_delete(target, { force = true })
-    return
-  end
-  close_previews()
-  markers = {}
-  attached_windows = {}
-  if document ~= nil then
-    model.clear(document)
-  end
-  buffer_document = nil
-  buffer = nil
 end
 
 vim.api.nvim_create_autocmd({ "WinScrolled", "WinResized", "VimResized" }, {
