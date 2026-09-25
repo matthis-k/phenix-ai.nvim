@@ -1,0 +1,34 @@
+name: Refresh phenix-ai lock
+
+on:
+  push:
+    branches:
+      - test/model-surface-introspection
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: test/model-surface-introspection
+      - uses: cachix/install-nix-action@v31
+      - name: Refresh exact phenix-ai input
+        run: |
+          set -euo pipefail
+          nix flake lock --override-input phenix-ai github:matthis-k/phenix-ai/91385e94cc715487c6e177bd38fef371da178b67
+          jq -e '.nodes["phenix-ai"].locked.rev == "91385e94cc715487c6e177bd38fef371da178b67"' flake.lock >/dev/null
+      - name: Commit lock
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add flake.lock
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: update phenix-ai lock"
+            git push origin HEAD:test/model-surface-introspection
+          fi
