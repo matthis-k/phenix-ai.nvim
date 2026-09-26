@@ -187,6 +187,7 @@ local function compose_text(text)
   local _, compose_buffer = sidebar.buffers()
   vim.api.nvim_set_current_win(compose_win)
   vim.api.nvim_buf_set_lines(compose_buffer, 0, -1, false, { text })
+  vim.api.nvim_exec_autocmds("TextChanged", { buffer = compose_buffer })
   return compose_buffer
 end
 
