@@ -192,11 +192,10 @@ local function compose_text(text)
 end
 
 local function assert_compose_cleared(compose_buffer)
-  assert(
-    vim.deep_equal(vim.api.nvim_buf_get_lines(compose_buffer, 0, -1, false), { "" }),
-    "successful send did not clear the compose buffer"
-  )
-  assert(not vim.bo[compose_buffer].modified, "successful send left the compose buffer modified")
+  assert(vim.wait(10000, function()
+    return vim.deep_equal(vim.api.nvim_buf_get_lines(compose_buffer, 0, -1, false), { "" })
+      and not vim.bo[compose_buffer].modified
+  end, 10), "successful send did not clear the compose buffer")
 end
 
 local function assert_transcript(execution_id)
