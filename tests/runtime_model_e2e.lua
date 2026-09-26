@@ -62,13 +62,16 @@ end, 10), "deterministic fixture selection discovery timed out")
 assert(selection_error == nil, vim.inspect(selection_error))
 
 local fixture = nil
+local introspection_fixture = nil
 for _, item in ipairs(selections.available or {}) do
   if item.id == "fixture.deterministic" then
     fixture = item
-    break
+  elseif item.id == "fixture.introspection" then
+    introspection_fixture = item
   end
 end
 assert(fixture ~= nil, "deterministic fixture route was not exposed by the packaged runtime")
+assert(introspection_fixture ~= nil, "introspection fixture route was not exposed by the packaged runtime")
 
 local selected = nil
 local select_error = nil
@@ -97,6 +100,28 @@ local function text_content(content_items)
     end
   end
   return table.concat(parts)
+end
+
+local function find_assistant_after(user_text, predicate)
+  local projection = runtime.session_state().sessions[session_id]
+  if projection == nil then
+    return nil
+  end
+
+  local saw_user = false
+  for _, entry in ipairs(projection.updates or {}) do
+    local change = entry.update or {}
+    if normalized_kind(change.kind) == "message" and change.message ~= nil then
+      local role = normalized_kind(change.message.role)
+      local text = text_content(change.message.content)
+      if role == "user" then
+        saw_user = text == user_text
+      elseif saw_user and role == "assistant" and predicate(text) then
+        return text
+      end
+    end
+  end
+  return nil
 end
 
 local function find_completed_turn(user_text, excluded)
@@ -162,15 +187,15 @@ local function compose_text(text)
   local _, compose_buffer = sidebar.buffers()
   vim.api.nvim_set_current_win(compose_win)
   vim.api.nvim_buf_set_lines(compose_buffer, 0, -1, false, { text })
+  vim.api.nvim_exec_autocmds("TextChanged", { buffer = compose_buffer })
   return compose_buffer
 end
 
 local function assert_compose_cleared(compose_buffer)
-  assert(
-    vim.deep_equal(vim.api.nvim_buf_get_lines(compose_buffer, 0, -1, false), { "" }),
-    "successful send did not clear the compose buffer"
-  )
-  assert(not vim.bo[compose_buffer].modified, "successful send left the compose buffer modified")
+  assert(vim.wait(10000, function()
+    return vim.deep_equal(vim.api.nvim_buf_get_lines(compose_buffer, 0, -1, false), { "" })
+      and not vim.bo[compose_buffer].modified
+  end, 10), "successful send did not clear the compose buffer")
 end
 
 local function assert_transcript(execution_id)
@@ -285,5 +310,73 @@ for _, mapping in ipairs(vim.api.nvim_buf_get_keymap(compose_buffer, "i")) do
   assert(mapping.lhs ~= "<CR>", "insert-mode Enter must remain available for newlines")
 end
 
+local introspection_selected = nil
+local introspection_select_error = nil
+runtime.select(introspection_fixture.id, function(result, err)
+  introspection_selected = result
+  introspection_select_error = err
+end)
+assert(vim.wait(10000, function()
+  return introspection_selected ~= nil or introspection_select_error ~= nil
+end, 10), "introspection fixture selection timed out")
+assert(introspection_select_error == nil, vim.inspect(introspection_select_error))
+assert(
+  introspection_selected.selected == introspection_fixture.id,
+  "introspection fixture route was not selected"
+)
+
+local introspection_text = marker .. " introspection"
+compose_buffer = compose_text(introspection_text)
+vim.cmd("Phenix send")
+assert_compose_cleared(compose_buffer)
+
+local introspection_report = nil
+assert(vim.wait(10000, function()
+  local response = find_assistant_after(introspection_text, function(text)
+    local ok, decoded = pcall(vim.json.decode, text)
+    if not ok or type(decoded) ~= "table" or decoded.model ~= "fixture-introspection" then
+      return false
+    end
+    introspection_report = decoded
+    return true
+  end)
+  return response ~= nil and introspection_report ~= nil
+end, 10), "introspection model turn timed out")
+
+assert(type(introspection_report.tools) == "table", "introspection report omitted tools")
+local bash_tool = nil
+for _, tool in ipairs(introspection_report.tools) do
+  if tool.id == "bash" then
+    bash_tool = tool
+    break
+  end
+end
+assert(bash_tool ~= nil, "default runtime bash tool did not reach the model boundary")
+assert(
+  vim.inspect(bash_tool.input_schema):find("command", 1, true) ~= nil,
+  "model-visible bash schema omitted the command field"
+)
+assert(type(introspection_report.skills) == "table", "introspection report omitted skills")
+assert(
+  type(introspection_report.instructions) == "table" and #introspection_report.instructions > 0,
+  "normal Phenix instruction context did not reach the model boundary"
+)
+assert(
+  type(introspection_report.request) == "string"
+    and introspection_report.request:find(introspection_text, 1, true) ~= nil,
+  "introspection report did not preserve the user request"
+)
+
+transcript.refresh()
+local introspection_rendered = table.concat(vim.api.nvim_buf_get_lines(rendered_buffer, 0, -1, false), "\n")
+assert(
+  introspection_rendered:find('"fixture-introspection"', 1, true) ~= nil,
+  "rendered transcript omitted the introspection model report"
+)
+assert(
+  introspection_rendered:find('"bash"', 1, true) ~= nil,
+  "rendered transcript omitted the model-visible bash tool"
+)
+
 frontend.disconnect()
-print("phenix-ai.nvim command, write, normal Enter, model pipeline and restart passed")
+print("phenix-ai.nvim command, write, normal Enter, model pipeline, introspection and restart passed")
