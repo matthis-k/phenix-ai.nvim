@@ -19,14 +19,26 @@ local runtime = {
     table.insert(prompt_callbacks, callback)
   end,
   list_authentication_methods = function(callback)
-    callback({ methods = { { id = "oauth", name = "OAuth" } } })
+    callback({ methods = { { id = "oauth", provider = "provider-a", kind = "oauth", name = "OAuth" } } })
   end,
-  authenticate = function(_, callback)
+  authenticate = function(_, _, callback)
     auth_calls = auth_calls + 1
     callback({ kind = "external", uri = "https://example.invalid/oauth" })
   end,
   list_selections = function(callback)
-    callback({ available = { { id = "router.test" } } })
+    callback({
+      selected = "model.provider-a.model-a.high",
+      available = {
+        {
+          id = "model.provider-a.model-a.high",
+          provider = "provider-a",
+          model = "model-a",
+          thinking = "high",
+          authenticated = true,
+          presentation = "Model",
+        },
+      },
+    })
   end,
   select = function(_, callback)
     selection_calls = selection_calls + 1
@@ -69,14 +81,20 @@ status("ready")
 picked(items[1])
 assert(auth_calls == 1, "stale authentication picker reached replacement connection")
 
--- A model picker may only change the session it queried.
+-- A model picker is application-scoped, but a stale picker may not mutate a replacement connection.
 actions.choose_selection()
-active = {}
-picked(items[1])
-assert(selection_calls == 0, "stale routing picker changed a different session")
+local stale_model_items, stale_model_pick = items, picked
+status("failed")
+status("connecting")
+status("ready")
+stale_model_pick(stale_model_items[1])
+assert(selection_calls == 0, "stale model picker reached replacement connection")
+
 actions.choose_selection()
-picked(items[1])
-assert(selection_calls == 1)
+picked(items[1]) -- provider
+picked(items[1]) -- model
+picked(items[1]) -- thinking
+assert(selection_calls == 1, "provider/model/thinking flow did not select the model")
 
 -- A delayed session picker must not resume a session on a replacement connection.
 local sessions = require("phenix_nvim.sessions")
