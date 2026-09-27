@@ -580,33 +580,6 @@ end
 
 local unpack_args = table.unpack or unpack
 
-local function active_session_request(method, callback, ...)
-  local args = { n = select("#", ...), ... }
-  ensure_ready(callback, function()
-    local session = state.active_session
-    if session == nil then
-      util.safe_call(callback, nil, { message = "no active Phenix session" })
-      return
-    end
-    local callable = session[method]
-    if type(callable) ~= "function" then
-      util.safe_call(callback, nil, { message = "Phenix session does not support " .. method })
-      return
-    end
-    local ok, request = pcall(callable, session, unpack_args(args, 1, args.n))
-    if not ok then
-      util.safe_call(callback, nil, { message = tostring(request) })
-      return
-    end
-    M.track(request, function(result, error)
-      if error == nil then
-        emit("status", M.status())
-      end
-      util.safe_call(callback, result, error)
-    end)
-  end)
-end
-
 local function client_request(method, callback, ...)
   local args = { n = select("#", ...), ... }
   ensure_ready(callback, function()
