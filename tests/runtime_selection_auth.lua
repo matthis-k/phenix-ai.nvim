@@ -3,186 +3,151 @@ local runtime = require("phenix_nvim.runtime")
 
 frontend.setup({ auto_connect = false })
 
-local connected = false
-local connection_error = nil
-frontend.connect(function(_, err)
-  connection_error = err
-  connected = true
-end)
-assert(vim.wait(10000, function()
-  return connected
-end, 10), "packaged Phenix connection timed out")
-assert(connection_error == nil, vim.inspect(connection_error))
+local function await(invoke, label)
+  local value = nil
+  local failure = nil
+  invoke(function(result, error)
+    value = result
+    failure = error
+  end)
+  assert(vim.wait(10000, function()
+    return value ~= nil or failure ~= nil
+  end, 10), label .. " timed out")
+  assert(failure == nil, vim.inspect(failure))
+  return value
+end
 
-frontend.new_session()
-assert(vim.wait(10000, function()
-  return runtime.active_session() ~= nil
-end, 10), "packaged Phenix session creation timed out")
-
-local selections = nil
-local selection_error = nil
-runtime.list_selections(function(result, err)
-  selections = result
-  selection_error = err
-end)
-assert(vim.wait(10000, function()
-  return selections ~= nil or selection_error ~= nil
-end, 10), "routing selection discovery timed out")
-assert(selection_error == nil, vim.inspect(selection_error))
-assert(type(selections.available) == "table" and #selections.available > 0, "no routing selections exposed")
-assert(
-  selections.selected == "router.chatgpt-plus",
-  "new Neovim sessions must prefer ChatGPT OAuth when no API-key environment is configured"
-)
+local function connect()
+  local connected = false
+  local failure = nil
+  frontend.connect(function(_, error)
+    failure = error
+    connected = true
+  end)
+  assert(vim.wait(10000, function()
+    return connected
+  end, 10), "packaged Phenix connection timed out")
+  assert(failure == nil, vim.inspect(failure))
+end
 
 local function presentation_kind(item)
-  local presentation = item.presentation
+  local presentation = item and item.presentation
   if type(presentation) == "table" then
     return string.lower(tostring(presentation.kind or ""))
   end
   return string.lower(tostring(presentation or ""))
 end
 
-local codex_model = nil
-local api_model = nil
-local router = nil
-for _, item in ipairs(selections.available) do
-  local kind = presentation_kind(item)
-  assert(type(item.provider) == "string" and item.provider ~= "", "routing provider metadata missing")
-  if kind == "model" then
-    if item.provider == "openai-codex" and codex_model == nil then
-      codex_model = item
-    elseif item.provider == "openai-api" and api_model == nil then
-      api_model = item
+local function selections()
+  return await(function(callback)
+    runtime.list_selections(callback)
+  end, "application model discovery")
+end
+
+local function auth_methods()
+  return await(function(callback)
+    runtime.list_authentication_methods(callback)
+  end, "authentication discovery")
+end
+
+local function find_model(result, provider, model, thinking)
+  for _, item in ipairs(result.available or {}) do
+    if presentation_kind(item) == "model"
+      and item.provider == provider
+      and (model == nil or item.model == model)
+      and (thinking == nil or item.thinking == thinking)
+    then
+      return item
     end
-  elseif kind == "router" and router == nil then
-    router = item
   end
-end
-assert(codex_model ~= nil, "packaged runtime must expose an OpenAI Codex fixed model route")
-assert(api_model ~= nil, "packaged runtime must expose an OpenAI API fixed model route")
-assert(router ~= nil, "packaged runtime must expose at least one router")
-
-local function select_route(selection_id)
-  local selected = nil
-  local select_error = nil
-  runtime.select(selection_id, function(result, err)
-    selected = result
-    select_error = err
-  end)
-  assert(vim.wait(10000, function()
-    return selected ~= nil or select_error ~= nil
-  end, 10), "routing selection update timed out")
-  assert(select_error == nil, vim.inspect(select_error))
-  assert(selected.selected == selection_id, "selection response did not retain selected route")
+  return nil
 end
 
-local function current_selection()
-  local refreshed = nil
-  local refresh_error = nil
-  runtime.list_selections(function(result, err)
-    refreshed = result
-    refresh_error = err
-  end)
-  assert(vim.wait(10000, function()
-    return refreshed ~= nil or refresh_error ~= nil
-  end, 10), "routing selection refresh timed out")
-  assert(refresh_error == nil, vim.inspect(refresh_error))
-  return refreshed.selected
-end
-
-local function reconnect_and_resume(session_id)
-  frontend.disconnect()
-
-  local reconnected = false
-  local reconnect_error = nil
-  frontend.connect(function(_, err)
-    reconnect_error = err
-    reconnected = true
-  end)
-  assert(vim.wait(10000, function()
-    return reconnected
-  end, 10), "packaged Phenix reconnect timed out")
-  assert(reconnect_error == nil, vim.inspect(reconnect_error))
-
-  local resumed = nil
-  local resume_error = nil
-  runtime.resume_session(session_id, function(result, err)
-    resumed = result
-    resume_error = err
-  end)
-  assert(vim.wait(10000, function()
-    return resumed ~= nil or resume_error ~= nil
-  end, 10), "packaged Phenix resume timed out")
-  assert(resume_error == nil, vim.inspect(resume_error))
-end
-
-local session_id = assert(runtime.active_session(), "active session disappeared")
-
-select_route(codex_model.id)
-assert(current_selection() == codex_model.id, "compatible fixed model selection was not persisted")
-reconnect_and_resume(session_id)
-assert(
-  current_selection() == codex_model.id,
-  "compatible OpenAI Codex fixed model must survive resume"
-)
-
-select_route(api_model.id)
-assert(current_selection() == api_model.id, "incompatible fixed model setup failed")
-reconnect_and_resume(session_id)
-assert(
-  current_selection() == "router.chatgpt-plus",
-  "resumed OpenAI API fixed model must migrate to the ChatGPT OAuth route when no API key is configured"
-)
-
-local methods = nil
-local methods_error = nil
-runtime.list_authentication_methods(function(result, err)
-  methods = result
-  methods_error = err
-end)
-assert(vim.wait(10000, function()
-  return methods ~= nil or methods_error ~= nil
-end, 10), "authentication discovery timed out")
-assert(methods_error == nil, vim.inspect(methods_error))
-assert(type(methods.methods) == "table", "authentication methods result is malformed")
-
-local codex = nil
-for _, method in ipairs(methods.methods) do
-  if method.name == "OpenAI Codex (ChatGPT OAuth)" then
-    codex = method
-    break
+local function find_auth(result, provider, kind)
+  for _, method in ipairs(result.methods or {}) do
+    if method.provider == provider and (kind == nil or method.kind == kind) then
+      return method
+    end
   end
+  return nil
 end
-assert(codex ~= nil, "packaged runtime did not expose OpenAI Codex OAuth")
 
-local auth = nil
-local auth_error = nil
-runtime.authenticate(codex.id, function(result, err)
-  auth = result
-  auth_error = err
-end)
-assert(vim.wait(10000, function()
-  return auth ~= nil or auth_error ~= nil
-end, 10), "authentication start timed out")
-assert(auth_error == nil, vim.inspect(auth_error))
-local auth_kind = string.lower(tostring(auth.kind or ""))
-assert(auth_kind == "external" or auth_kind == "authenticated", "unexpected authentication state: " .. vim.inspect(auth))
-if auth_kind == "external" then
-  assert(type(auth.uri) == "string" and auth.uri:match("^https://"), "OAuth did not return an HTTPS authorization URI")
+connect()
 
-  local polled = nil
-  local poll_error = nil
-  runtime.authenticate(codex.id, function(result, err)
-    polled = result
-    poll_error = err
-  end)
-  assert(vim.wait(10000, function()
-    return polled ~= nil or poll_error ~= nil
-  end, 10), "authentication poll timed out")
-  assert(poll_error == nil, vim.inspect(poll_error))
-  assert(string.lower(tostring(polled.kind or "")) == "external", "pending OAuth flow was not preserved")
-  assert(polled.uri == auth.uri, "authentication polling started a different OAuth flow")
+-- Model discovery and selection are application-scoped. No session exists yet.
+assert(runtime.active_session() == nil, "model discovery test must start without a session")
+local initial = selections()
+assert(type(initial.available) == "table" and #initial.available > 0, "no model selections exposed")
+assert(type(initial.selected) == "string" and initial.selected ~= "", "default selection is missing")
+
+local xai = assert(find_model(initial, "xai", "grok-4.6", "high"), "xAI grok-4.6/high route is missing")
+local open_router = assert(
+  find_model(initial, "open-router", "openrouter/auto", "high"),
+  "OpenRouter auto/high route is missing"
+)
+assert(type(xai.model) == "string" and type(xai.thinking) == "string", "structured model metadata is missing")
+assert(type(xai.authenticated) == "boolean", "model authentication state is missing")
+assert(type(open_router.authenticated) == "boolean", "OpenRouter authentication state is missing")
+
+local methods = auth_methods()
+local expected_api_providers = {
+  "anthropic",
+  "deepseek",
+  "fireworks",
+  "gemini",
+  "groq",
+  "mistral",
+  "open-router",
+  "openai-api",
+  "opencode-go",
+  "opencode-zen",
+  "together",
+  "xai",
+}
+for _, provider in ipairs(expected_api_providers) do
+  local method = assert(find_auth(methods, provider, "api_token"), provider .. " API-key auth is not discoverable")
+  assert(type(method.id) == "string" and method.id ~= "", provider .. " auth method id is missing")
 end
+assert(find_auth(methods, "openai-codex", "oauth") ~= nil, "ChatGPT OAuth is not discoverable")
+
+-- API keys are submitted to Phenix, not installed in the Neovim child environment.
+local xai_auth = assert(find_auth(methods, "xai", "api_token"))
+local authenticated = await(function(callback)
+  runtime.authenticate(xai_auth.id, "test-xai-key", callback)
+end, "xAI API-key authentication")
+assert(string.lower(tostring(authenticated.kind or "")) == "authenticated", "xAI API key was not accepted")
+
+local after_auth = selections()
+xai = assert(find_model(after_auth, "xai", "grok-4.6", "high"))
+assert(xai.authenticated == true, "stored xAI credential was not reflected in discovery")
+
+-- Persist the default before a session exists.
+local selected = await(function(callback)
+  runtime.select(xai.id, callback)
+end, "default model selection")
+assert(selected.selected == xai.id, "application default selection did not update")
+assert(runtime.active_session() == nil, "model selection must not create a session")
+
+-- Both the selected model and provider credential survive a process reconnect.
+frontend.disconnect()
+connect()
+local restored = selections()
+assert(restored.selected == xai.id, "persistent model selection did not survive reconnect")
+local restored_xai = assert(find_model(restored, "xai", "grok-4.6", "high"))
+assert(restored_xai.authenticated == true, "provider credential did not survive reconnect")
+
+-- A new session inherits the persistent application default.
+local created = await(function(callback)
+  runtime.new_session(callback)
+end, "session creation")
+assert(created.session_id ~= nil, "new session did not return an id")
+local session = assert(runtime.active_session_object(), "new session did not become active")
+local session_selections = await(function(callback)
+  local ok, request = pcall(session.selections, session)
+  assert(ok, tostring(request))
+  runtime.track(request, callback)
+end, "session model discovery")
+assert(session_selections.selected == xai.id, "new session did not inherit the persistent model selection")
 
 frontend.disconnect()
+print("persistent model and provider authentication regressions passed")
