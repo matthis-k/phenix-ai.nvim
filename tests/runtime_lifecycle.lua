@@ -51,7 +51,7 @@ end } }
 local runtime = require("phenix_nvim.runtime")
 local frontend = require("phenix_nvim")
 local config = require("phenix_nvim.config")
-runtime.configure(config.setup({ auto_connect = false, selection = false, poll_interval_ms = 60000 }))
+runtime.configure(config.setup({ auto_connect = false, poll_interval_ms = 60000 }))
 
 local function result()
   local value = { calls = 0 }
@@ -186,47 +186,18 @@ assert(info_error.calls == 1 and info_error.error.message:find("info failed"))
 assert(next_client.session_closes == 1 and runtime.active_session() == nil)
 runtime.disconnect()
 
--- Session activation waits until route reconciliation is complete.
+-- Session creation no longer waits on frontend routing reconciliation.
 next_client = client()
-next_client.features_value = { selection = true }
-local selection_complete = false
-next_client.session.selections = function()
-  return completed({ selected = "default", available = { { id = "router.test" } } })
-end
-next_client.session.select = function()
-  return { poll = function() return selection_complete, {}, nil end }
-end
-runtime.set_preferred_selection("router.test")
 runtime.connect()
 next_client:status_event("ready")
 runtime.tick()
-local routed = result()
-runtime.new_session(routed.callback)
+local created = result()
+runtime.new_session(created.callback)
 runtime.tick()
-runtime.tick()
-assert(runtime.active_session() == nil and routed.calls == 0)
-selection_complete = true
-runtime.tick()
-assert(runtime.active_session() == "session.test" and routed.calls == 1 and routed.error == nil)
+assert(created.calls == 1 and created.error == nil)
+assert(runtime.active_session() == "session.test")
 runtime.disconnect()
--- Missing preferred routes must fail bootstrap instead of activating a default.
-next_client = client()
-next_client.features_value = { selection = true }
-next_client.session.selections = function()
-  return completed({ selected = "default", available = { { id = "default" } } })
-end
-runtime.configure(config.setup({ selection = "auto", poll_interval_ms = 60000 }))
-runtime.connect()
-next_client:status_event("ready")
-runtime.tick()
-local missing = result()
-runtime.new_session(missing.callback)
-runtime.tick()
-runtime.tick()
-runtime.tick()
-assert(missing.calls == 1 and missing.error.message:find("unavailable"))
-assert(runtime.active_session() == nil and next_client.session_closes == 1)
-runtime.disconnect()
+
 -- Advance a monotonic clock without sleeping or relying on test-runner limits.
 -- Provider identity comes from typed metadata even when descriptions contradict it.
 for _, same_provider in ipairs({ false, true }) do
@@ -261,7 +232,7 @@ local uv = vim.uv or vim.loop
 local original_hrtime = uv.hrtime
 local clock = 0
 uv.hrtime = function() return clock * 1000000 end
-runtime.configure(config.setup({ selection = false, poll_interval_ms = 60000,
+runtime.configure(config.setup({ poll_interval_ms = 60000,
   connect_timeout_ms = 100, request_timeout_ms = 200, prompt_timeout_ms = 1000 }))
 next_client = client()
 local timed_connect, timed_create = result(), result()
