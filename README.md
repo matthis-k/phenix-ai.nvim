@@ -30,8 +30,10 @@ provider -> model -> thinking
 ```
 
 The plugin does not keep a provider or model allow-list. Phenix reports each
-fixed model route with its provider, model id, thinking level, and current
-authentication state. This includes packaged xAI and OpenRouter routes.
+fixed model selection with its provider, model id, thinking level, and current
+authentication state. The plugin does not know whether a model came from
+standards-based provider discovery, a provider-declared catalog, or another
+Phenix catalog source.
 
 If the selected provider needs authentication and no usable credential is
 available, the plugin asks for one of the authentication methods reported by
@@ -45,6 +47,19 @@ that session so the visible chat switches immediately.
 
 Environment credentials remain valid inputs to provider discovery. They are
 resolved by Phenix, not interpreted by the Neovim plugin.
+
+The ownership boundary is strict:
+
+- Phenix AI owns provider definitions, model catalog production, authentication,
+  credential persistence, default selection persistence, and routing.
+- Provider plugins may discover models through a supported protocol standard or
+  declare models when no discovery standard exists.
+- Phenix AI.nvim owns presentation and interaction only. It groups the normalized
+  catalog as `provider -> model -> thinking`, asks for credentials when Phenix
+  reports that authentication is required, and submits the chosen IDs back to
+  Phenix.
+- Phenix AI.nvim does not contain discovery URLs, provider-specific model names,
+  API-key environment mappings, or provider compatibility tables.
 
 ## Persistence
 
