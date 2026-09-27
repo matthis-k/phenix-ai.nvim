@@ -6,6 +6,9 @@ frontend.setup({ auto_connect = false })
 local config = require("phenix_nvim.config")
 local configured = config.get()
 assert(configured.state_directory == nil, "Phenix must own its default state location")
+assert(configured.selection == nil, "Neovim must not own the default model selection")
+assert(configured.api_key_providers == nil, "Neovim must not own a provider authentication list")
+assert(configured.models == nil, "Neovim must not own a model catalog")
 local state_env = config.runtime_env({
   env = {},
   state_directory = "/tmp/phenix-state",
