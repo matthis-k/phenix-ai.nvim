@@ -605,6 +605,63 @@ local function choose_model(result, models, provider, generation)
   end)
 end
 
+local function provider_authentication_methods(methods, provider)
+  local matches = {}
+  for _, method in ipairs(methods or {}) do
+    if method.provider == provider then
+      table.insert(matches, method)
+    end
+  end
+  return matches
+end
+
+local function provider_choices(models, methods)
+  local providers = distinct(models, "provider")
+  local seen = {}
+  for _, provider in ipairs(providers) do
+    seen[provider] = true
+  end
+  for _, method in ipairs(methods or {}) do
+    local provider = method.provider
+    if type(provider) == "string" and provider ~= "" and not seen[provider] then
+      seen[provider] = true
+      table.insert(providers, provider)
+    end
+  end
+  table.sort(providers)
+  return providers
+end
+
+local function provider_needs_authentication(models)
+  if #models == 0 then
+    return true
+  end
+  for _, item in ipairs(models) do
+    if item.authenticated ~= false then
+      return false
+    end
+  end
+  return true
+end
+
+local function continue_provider_selection(provider, generation)
+  runtime.list_selections(function(result, error)
+    if generation ~= selection_generation then
+      return
+    end
+    if error ~= nil then
+      util.notify(vim.inspect(error), vim.log.levels.ERROR)
+      return
+    end
+    local models = filter_models(model_selections(result), "provider", provider)
+    if #models == 0 then
+      util.notify("Phenix did not discover any models for " .. provider, vim.log.levels.WARN)
+      return
+    end
+    choose_model(result, models, provider, generation)
+  end)
+end
+
 function M.choose_selection()
   local generation = selection_generation
   runtime.list_selections(function(result, error)
@@ -615,35 +672,60 @@ function M.choose_selection()
       util.notify(vim.inspect(error), vim.log.levels.ERROR)
       return
     end
-    local models = model_selections(result)
-    if #models == 0 then
-      util.notify("No Phenix model selections are available", vim.log.levels.WARN)
-      return
-    end
-    local providers = distinct(models, "provider")
-    vim.ui.select(providers, {
-      prompt = "Phenix provider",
-      format_item = function(provider)
-        local candidates = filter_models(models, "provider", provider)
-        local requires_auth = false
-        for _, item in ipairs(candidates) do
-          if item.authenticated == false then
-            requires_auth = true
-            break
-          end
-        end
-        local suffix = requires_auth and "  ·  authentication required" or ""
-        return selected_marker(result, candidates) .. provider .. suffix
-      end,
-    }, function(provider)
+    runtime.list_authentication_methods(function(auth_result, auth_error)
       if generation ~= selection_generation then
         return
       end
-      if provider ~= nil then
-        choose_model(result, models, provider, generation)
+      if auth_error ~= nil then
+        util.notify(vim.inspect(auth_error), vim.log.levels.ERROR)
+        return
       end
+
+      local models = model_selections(result)
+      local methods = auth_result and auth_result.methods or {}
+      local providers = provider_choices(models, methods)
+      if #providers == 0 then
+        util.notify("No Phenix model providers are available", vim.log.levels.WARN)
+        return
+      end
+
+      vim.ui.select(providers, {
+        prompt = "Phenix provider",
+        format_item = function(provider)
+          local candidates = filter_models(models, "provider", provider)
+          local auth_methods = provider_authentication_methods(methods, provider)
+          local requires_auth = #auth_methods > 0 and provider_needs_authentication(candidates)
+          local suffix = requires_auth and "  ·  authentication required" or ""
+          return selected_marker(result, candidates) .. provider .. suffix
+        end,
+      }, function(provider)
+        if generation ~= selection_generation or provider == nil then
+          return
+        end
+        local candidates = filter_models(models, "provider", provider)
+        local auth_methods = provider_authentication_methods(methods, provider)
+        if #auth_methods > 0 and provider_needs_authentication(candidates) then
+          choose_authentication_method(auth_methods, "Authenticate " .. provider, function(_, auth_error_value)
+            if generation ~= selection_generation then
+              return
+            end
+            if auth_error_value ~= nil then
+              if auth_error_value.kind ~= "cancelled" then
+                util.notify(vim.inspect(auth_error_value), vim.log.levels.ERROR)
+              end
+              return
+            end
+            continue_provider_selection(provider, generation)
+          end)
+          return
+        end
+        if #candidates == 0 then
+          util.notify("Phenix did not discover any models for " .. provider, vim.log.levels.WARN)
+          return
+        end
+        choose_model(result, models, provider, generation)
+      end)
     end)
   end)
 end
-
 return M
