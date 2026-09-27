@@ -96,6 +96,63 @@ picked(items[1]) -- model
 picked(items[1]) -- thinking
 assert(selection_calls == 1, "provider/model/thinking flow did not select the model")
 
+-- Providers exposed only through Phenix auth discovery can authenticate first,
+-- refresh their catalog, and continue through model/thinking selection.
+local original_list_authentication_methods = runtime.list_authentication_methods
+local original_authenticate = runtime.authenticate
+local original_list_selections = runtime.list_selections
+local util = require("phenix_nvim.util")
+local original_input_secret = util.input_secret
+local catalog_ready = false
+runtime.list_authentication_methods = function(callback)
+  callback({
+    methods = {
+      {
+        id = "provider-b-token",
+        provider = "provider-b",
+        kind = "api_token",
+        name = "API key",
+      },
+    },
+  })
+end
+runtime.authenticate = function(method, secret, callback)
+  assert(method == "provider-b-token")
+  assert(secret == "provider-b-secret")
+  catalog_ready = true
+  callback({ kind = "authenticated" })
+end
+runtime.list_selections = function(callback)
+  callback({
+    selected = nil,
+    available = catalog_ready and {
+      {
+        id = "model.provider-b.model-b.default",
+        provider = "provider-b",
+        model = "model-b",
+        thinking = nil,
+        authenticated = true,
+        presentation = "Model",
+      },
+    } or {},
+  })
+end
+util.input_secret = function(_, callback)
+  callback("provider-b-secret", nil)
+end
+
+actions.choose_selection()
+assert(items[1] == "provider-b", "auth-only provider was not offered by the model picker")
+picked(items[1]) -- provider; authentication happens and the catalog is refreshed
+picked(items[1]) -- model
+picked(items[1]) -- default thinking
+assert(selection_calls == 2, "authenticated provider did not continue into model selection")
+
+runtime.list_authentication_methods = original_list_authentication_methods
+runtime.authenticate = original_authenticate
+runtime.list_selections = original_list_selections
+util.input_secret = original_input_secret
+
 -- A delayed session picker must not resume a session on a replacement connection.
 local sessions = require("phenix_nvim.sessions")
 sessions.choose()
