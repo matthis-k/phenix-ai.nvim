@@ -8,7 +8,6 @@ local uv = vim.uv or vim.loop
 
 local state = {
   config = nil,
-  preferred_selection = nil,
   client = nil,
   sessions = nil,
   active_session = nil,
@@ -225,7 +224,6 @@ end
 
 function M.configure(config)
   state.config = vim.deepcopy(config)
-  state.preferred_selection = config_api.preferred_selection(state.config)
 end
 
 function M.on_event(listener)
@@ -315,9 +313,6 @@ function M.connect(callback)
 
   local config = state.config or require("phenix_nvim.config").get()
   state.config = config
-  if state.preferred_selection == nil then
-    state.preferred_selection = config_api.preferred_selection(config)
-  end
   state.connection = "connecting"
   state.connect_deadline = now_ms() + config.connect_timeout_ms
   state.error = nil
@@ -399,88 +394,6 @@ local function ensure_ready(callback, continuation)
   end)
 end
 
-local function selection_presentation(item)
-  local presentation = item and item.presentation
-  if type(presentation) == "table" then
-    return string.lower(tostring(presentation.kind or ""))
-  end
-  return string.lower(tostring(presentation or ""))
-end
-
-local function apply_preferred_selection(session, callback)
-  local selection = state.preferred_selection
-  if selection == nil then
-    util.safe_call(callback, session, nil)
-    return
-  end
-  local features = state.client and state.client:features() or {}
-  if not features.selection then
-    util.safe_call(callback, session, nil)
-    return
-  end
-  local ok, request = pcall(session.selections, session)
-  if not ok then
-    util.safe_call(callback, nil, { message = tostring(request) })
-    return
-  end
-  M.track(request, function(result, error)
-    if error ~= nil then
-      util.safe_call(callback, nil, error)
-      return
-    end
-
-    local preferred = nil
-    local selected = nil
-    for _, item in ipairs(result and result.available or {}) do
-      if item.id == selection then
-        preferred = item
-      end
-      if result and item.id == result.selected then
-        selected = item
-      end
-    end
-
-    if preferred == nil then
-      util.safe_call(callback, nil, { message = "configured Phenix routing selection is unavailable: " .. selection })
-      return
-    end
-    if result and result.selected == selection then
-      util.safe_call(callback, session, nil)
-      return
-    end
-
-    local should_reconcile = result == nil
-      or result.selected == nil
-      or result.selected == "default"
-      or selected == nil
-
-    if not should_reconcile
-      and selection_presentation(selected) == "model"
-      and selection_presentation(preferred) == "router"
-    then
-      local selected_provider = selected.provider
-      local preferred_provider = preferred.provider
-      should_reconcile = selected_provider ~= nil
-        and preferred_provider ~= nil
-        and selected_provider ~= preferred_provider
-    end
-
-    if not should_reconcile then
-      util.safe_call(callback, session, nil)
-      return
-    end
-
-    local select_ok, select_request = pcall(session.select, session, selection)
-    if not select_ok then
-      util.safe_call(callback, nil, { message = tostring(select_request) })
-      return
-    end
-    M.track(select_request, function(_, select_error)
-      util.safe_call(callback, select_error == nil and session or nil, select_error)
-    end)
-  end)
-end
-
 local function close_created_session(session, error, callback)
   local ok, request = pcall(session.close, session)
   if not ok then
@@ -507,19 +420,13 @@ function M.new_session(callback)
         util.safe_call(callback, nil, error)
         return
       end
-      apply_preferred_selection(session, function(_, selection_error)
-        if selection_error ~= nil then
-          close_created_session(session, selection_error, callback)
-          return
-        end
-        local info_ok, info = pcall(session.info, session)
-        if not info_ok then
-          close_created_session(session, { message = tostring(info) }, callback)
-          return
-        end
-        set_active(session)
-        util.safe_call(callback, info, nil)
-      end)
+      local info_ok, info = pcall(session.info, session)
+      if not info_ok then
+        close_created_session(session, { message = tostring(info) }, callback)
+        return
+      end
+      set_active(session)
+      util.safe_call(callback, info, nil)
     end)
   end)
 end
@@ -536,27 +443,21 @@ function M.resume_session(session_id, callback)
         util.safe_call(callback, nil, error)
         return
       end
-      apply_preferred_selection(session, function(_, selection_error)
-        if selection_error ~= nil then
-          util.safe_call(callback, nil, selection_error)
+      local projection_ok, projection = pcall(session.projection, session)
+      if not projection_ok then
+        util.safe_call(callback, nil, { message = tostring(projection) })
+        return
+      end
+      if projection == nil then
+        local info_ok, info = pcall(session.info, session)
+        if not info_ok then
+          util.safe_call(callback, nil, { message = tostring(info) })
           return
         end
-        local projection_ok, projection = pcall(session.projection, session)
-        if not projection_ok then
-          util.safe_call(callback, nil, { message = tostring(projection) })
-          return
-        end
-        if projection == nil then
-          local info_ok, info = pcall(session.info, session)
-          if not info_ok then
-            util.safe_call(callback, nil, { message = tostring(info) })
-            return
-          end
-          projection = info
-        end
-        set_active(session)
-        util.safe_call(callback, projection, nil)
-      end)
+        projection = info
+      end
+      set_active(session)
+      util.safe_call(callback, projection, nil)
     end)
   end)
 end
@@ -729,79 +630,38 @@ local function client_request(method, callback, ...)
   end)
 end
 
-function M.has_environment(name)
-  if type(name) ~= "string" or name == "" then
-    return false
-  end
-  local configured = state.config and state.config.env and state.config.env[name]
-  if type(configured) == "string" and configured ~= "" then
-    return true
-  end
-  local inherited = vim.env[name]
-  return type(inherited) == "string" and inherited ~= ""
-end
-
-function M.set_preferred_selection(selection_id)
-  state.preferred_selection = selection_id
-end
-
-function M.reconnect_with_env(name, value, selection_id, callback)
-  if type(name) ~= "string" or name == "" then
-    util.safe_call(callback, nil, { message = "environment variable name must not be empty" })
-    return
-  end
-  if type(value) ~= "string" or value == "" then
-    util.safe_call(callback, nil, { message = "API key must not be empty" })
-    return
-  end
-  local session_id = active_id()
-  state.config = state.config or config_api.get()
-  state.config.env = state.config.env or {}
-  state.config.env[name] = value
-  if selection_id ~= nil then
-    state.preferred_selection = selection_id
-  end
-
-  M.disconnect()
-  M.connect(function(_, connect_error)
-    if connect_error ~= nil then
-      util.safe_call(callback, nil, connect_error)
-      return
-    end
-    if session_id == nil then
-      util.safe_call(callback, { selection = state.preferred_selection }, nil)
-      return
-    end
-    M.resume_session(session_id, function(result, resume_error)
-      if resume_error ~= nil then
-        util.safe_call(callback, nil, resume_error)
-        return
-      end
-      if selection_id == nil then
-        util.safe_call(callback, result, nil)
-        return
-      end
-      M.select(selection_id, function(selected, select_error)
-        util.safe_call(callback, select_error == nil and selected or nil, select_error)
-      end)
-    end)
-  end)
-end
-
 function M.list_authentication_methods(callback)
   client_request("authentication_methods", callback)
 end
 
-function M.authenticate(method_id, callback)
-  client_request("authenticate", callback, method_id)
+function M.authenticate(method_id, secret, callback)
+  client_request("authenticate", callback, method_id, secret)
 end
 
 function M.list_selections(callback)
-  active_session_request("selections", callback)
+  client_request("selections", callback)
 end
 
 function M.select(selection_id, callback)
-  active_session_request("select", callback, selection_id)
+  client_request("select", function(global_result, global_error)
+    if global_error ~= nil then
+      util.safe_call(callback, nil, global_error)
+      return
+    end
+    local session = state.active_session
+    if session == nil then
+      util.safe_call(callback, global_result, nil)
+      return
+    end
+    local ok, request = pcall(session.select, session, selection_id)
+    if not ok then
+      util.safe_call(callback, nil, { message = tostring(request) })
+      return
+    end
+    M.track(request, function(session_result, session_error)
+      util.safe_call(callback, session_error == nil and session_result or nil, session_error)
+    end)
+  end)
 end
 
 function M.cancel_active()
