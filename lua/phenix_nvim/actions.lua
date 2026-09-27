@@ -293,9 +293,11 @@ local function open_external_auth(result)
 end
 
 local auth_generation = 0
+local selection_generation = 0
 runtime.on_event(function(kind, status)
   if kind == "status" and status.connection ~= "ready" then
     auth_generation = auth_generation + 1
+    selection_generation = selection_generation + 1
   end
 end)
 
@@ -566,7 +568,7 @@ local function apply_model_selection(item)
   end)
 end
 
-local function choose_thinking(result, models, provider, model)
+local function choose_thinking(result, models, provider, model, generation)
   local variants = filter_models(filter_models(models, "provider", provider), "model", model)
   vim.ui.select(variants, {
     prompt = "Thinking for " .. model,
@@ -575,13 +577,16 @@ local function choose_thinking(result, models, provider, model)
       return (item.id == result.selected and "✓ " or "  ") .. label
     end,
   }, function(item)
+    if generation ~= selection_generation then
+      return
+    end
     if item ~= nil then
       apply_model_selection(item)
     end
   end)
 end
 
-local function choose_model(result, models, provider)
+local function choose_model(result, models, provider, generation)
   local provider_models = filter_models(models, "provider", provider)
   local names = distinct(provider_models, "model")
   vim.ui.select(names, {
@@ -591,14 +596,21 @@ local function choose_model(result, models, provider)
       return selected_marker(result, variants) .. model
     end,
   }, function(model)
+    if generation ~= selection_generation then
+      return
+    end
     if model ~= nil then
-      choose_thinking(result, models, provider, model)
+      choose_thinking(result, models, provider, model, generation)
     end
   end)
 end
 
 function M.choose_selection()
+  local generation = selection_generation
   runtime.list_selections(function(result, error)
+    if generation ~= selection_generation then
+      return
+    end
     if error ~= nil then
       util.notify(vim.inspect(error), vim.log.levels.ERROR)
       return
@@ -624,8 +636,11 @@ function M.choose_selection()
         return selected_marker(result, candidates) .. provider .. suffix
       end,
     }, function(provider)
+      if generation ~= selection_generation then
+        return
+      end
       if provider ~= nil then
-        choose_model(result, models, provider)
+        choose_model(result, models, provider, generation)
       end
     end)
   end)
