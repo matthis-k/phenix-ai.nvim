@@ -51,13 +51,17 @@ resolved by Phenix, not interpreted by the Neovim plugin.
 The ownership boundary is strict:
 
 - Phenix AI owns provider definitions, model catalog production, authentication,
-  credential persistence, default selection persistence, and routing.
+  credential persistence, default selection persistence, derived direct-model
+  routes, and explicit routing policy.
 - Provider plugins may discover models through a supported protocol standard or
   declare models when no discovery standard exists.
 - Phenix AI.nvim owns presentation and interaction only. It groups the normalized
   catalog as `provider -> model -> thinking`, asks for credentials when Phenix
   reports that authentication is required, and submits the chosen IDs back to
   Phenix.
+- A provider discovered only through authentication is still shown. After
+  authentication, the plugin reloads Phenix selections and continues into the
+  model picker.
 - Phenix AI.nvim does not contain discovery URLs, provider-specific model names,
   API-key environment mappings, or provider compatibility tables.
 
