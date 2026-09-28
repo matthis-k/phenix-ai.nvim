@@ -8,8 +8,18 @@ end
 local function completed(value)
   return { poll = function() return true, value, nil end }
 end
+local function failed(error)
+  return { poll = function() return true, nil, error end }
+end
 local function client()
-  local value = { events = {}, closed = 0, creates = 0, session_closes = 0 }
+  local value = {
+    events = {},
+    closed = 0,
+    creates = 0,
+    session_closes = 0,
+    default_selection = "model.old",
+    default_selection_calls = {},
+  }
   value.session = {
     id = function() return "session.test" end,
     info = function() return { session_id = "session.test" } end,
@@ -28,6 +38,14 @@ local function client()
     list = function() return pending() end,
   }
   function value:sessions() return self.sessions_api end
+  function value:selections()
+    return completed({ selected = self.default_selection, available = {} })
+  end
+  function value:select(selection_id)
+    self.default_selection = selection_id
+    table.insert(self.default_selection_calls, selection_id)
+    return completed({ selected = selection_id, available = {} })
+  end
   function value:features() return self.features_value or {} end
   function value:status() return { state = self.phase or "connecting" } end
   function value:pump()
@@ -196,6 +214,32 @@ runtime.new_session(created.callback)
 runtime.tick()
 assert(created.calls == 1 and created.error == nil)
 assert(runtime.active_session() == "session.test")
+runtime.disconnect()
+
+-- An active-session selection restores the persistent default if the session update fails.
+next_client = client()
+next_client.features_value = { selection = true }
+next_client.session.selections = function()
+  return completed({ selected = "model.old", available = {} })
+end
+local session_selection_error = { kind = "failed", message = "session selection rejected" }
+next_client.session.select = function()
+  return failed(session_selection_error)
+end
+runtime.connect()
+next_client:status_event("ready")
+runtime.tick()
+runtime.new_session()
+runtime.tick()
+local selection_result = result()
+runtime.select("model.new", selection_result.callback)
+for _ = 1, 6 do runtime.tick() end
+assert(selection_result.calls == 1 and selection_result.error == session_selection_error)
+assert(next_client.default_selection == "model.old", "failed session selection changed the persistent default")
+assert(
+  table.concat(next_client.default_selection_calls, ",") == "model.new,model.old",
+  "failed session selection did not compensate the default mutation"
+)
 runtime.disconnect()
 
 -- Advance a monotonic clock without sleeping or relying on test-runner limits.

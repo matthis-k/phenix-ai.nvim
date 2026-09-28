@@ -22,12 +22,16 @@ Startup and ordinary requests default to 30-second deadlines. Prompts default to
 
 ## Models and authentication
 
-`:Phenix select` works before a session exists. The model picker is built from
-Phenix discovery data and has three steps:
+`:Phenix select` works before a session exists. The model picker is built from Phenix discovery data. Phenix owns provider
+display names, so the UI does not expose internal provider ids as labels. The
+flow is:
 
 ```text
-provider -> model -> thinking
+provider -> model -> thinking, when Phenix exposes multiple thinking variants
 ```
+
+When a model has one effective variant, selecting the model applies it directly
+instead of opening a one-item "default" thinking picker.
 
 The plugin does not keep a provider or model allow-list. Phenix reports each
 fixed model selection with its provider, model id, thinking level, and current
@@ -56,9 +60,9 @@ The ownership boundary is strict:
 - Provider plugins may discover models through a supported protocol standard or
   declare models when no discovery standard exists.
 - Phenix AI.nvim owns presentation and interaction only. It groups the normalized
-  catalog as `provider -> model -> thinking`, asks for credentials when Phenix
-  reports that authentication is required, and submits the chosen IDs back to
-  Phenix.
+  catalog as `provider -> model -> thinking` when thinking variants exist, asks
+  for credentials when Phenix reports that authentication is required, and
+  submits the chosen IDs back to Phenix. Provider labels also come from Phenix.
 - A provider discovered only through authentication is still shown. After
   authentication, the plugin reloads Phenix selections and continues into the
   model picker.

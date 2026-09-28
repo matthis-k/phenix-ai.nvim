@@ -19,7 +19,13 @@ local runtime = {
     table.insert(prompt_callbacks, callback)
   end,
   list_authentication_methods = function(callback)
-    callback({ methods = { { id = "oauth", provider = "provider-a", kind = "oauth", name = "OAuth" } } })
+    callback({ methods = { {
+      id = "oauth",
+      provider = "provider-a",
+      provider_name = "Provider A",
+      kind = "oauth",
+      name = "OAuth",
+    } } })
   end,
   authenticate = function(_, _, callback)
     auth_calls = auth_calls + 1
@@ -53,8 +59,10 @@ local runtime = {
   end,
 }
 package.loaded["phenix_nvim.runtime"] = runtime
-local picked, items
-vim.ui.select = function(values, _, callback) items, picked = values, callback end
+local picked, items, select_options
+vim.ui.select = function(values, options, callback)
+  items, picked, select_options = values, callback, options
+end
 vim.ui.open = function() return {} end
 vim.defer_fn = function(callback) deferred[#deferred + 1] = callback end
 vim.notify = function() end
@@ -91,10 +99,10 @@ stale_model_pick(stale_model_items[1])
 assert(selection_calls == 0, "stale model picker reached replacement connection")
 
 actions.choose_selection()
+assert(select_options.format_item(items[1]):find("Provider A", 1, true), "provider display name was not rendered")
 picked(items[1]) -- provider
-picked(items[1]) -- model
-picked(items[1]) -- thinking
-assert(selection_calls == 1, "provider/model/thinking flow did not select the model")
+picked(items[1]) -- model; the single thinking variant is selected directly
+assert(selection_calls == 1, "provider/model flow did not select the only thinking variant")
 
 -- Providers exposed only through Phenix auth discovery can authenticate first,
 -- refresh their catalog, and continue through model/thinking selection.
@@ -110,6 +118,7 @@ runtime.list_authentication_methods = function(callback)
       {
         id = "provider-b-token",
         provider = "provider-b",
+        provider_name = "Provider B",
         kind = "api_token",
         name = "API key",
       },
@@ -143,9 +152,9 @@ end
 
 actions.choose_selection()
 assert(items[1] == "provider-b", "auth-only provider was not offered by the model picker")
+assert(select_options.format_item(items[1]):find("Provider B", 1, true), "auth-only provider name was not rendered")
 picked(items[1]) -- provider; authentication happens and the catalog is refreshed
-picked(items[1]) -- model
-picked(items[1]) -- default thinking
+picked(items[1]) -- model; no unsupported thinking picker is shown
 assert(selection_calls == 2, "authenticated provider did not continue into model selection")
 
 runtime.list_authentication_methods = original_list_authentication_methods

@@ -615,25 +615,64 @@ function M.list_selections(callback)
   client_request("selections", callback)
 end
 
+local function restore_default_selection(previous_selection, original_error, callback)
+  if previous_selection == nil then
+    util.safe_call(callback, nil, original_error)
+    return
+  end
+  client_request("select", function(_, rollback_error)
+    if rollback_error == nil then
+      util.safe_call(callback, nil, original_error)
+      return
+    end
+    util.safe_call(callback, nil, {
+      kind = "partial_failure",
+      code = "selection_rollback_failed",
+      message = "session model selection failed and the previous default could not be restored",
+      cause = original_error,
+      rollback_error = rollback_error,
+    })
+  end, previous_selection)
+end
+
 function M.select(selection_id, callback)
-  client_request("select", function(global_result, global_error)
-    if global_error ~= nil then
-      util.safe_call(callback, nil, global_error)
+  local session = state.active_session
+  if session == nil then
+    client_request("select", callback, selection_id)
+    return
+  end
+
+  client_request("selections", function(before, discovery_error)
+    if discovery_error ~= nil then
+      util.safe_call(callback, nil, discovery_error)
       return
     end
-    local session = state.active_session
-    if session == nil then
-      util.safe_call(callback, global_result, nil)
-      return
-    end
-    local ok, request = pcall(session.select, session, selection_id)
-    if not ok then
-      util.safe_call(callback, nil, { message = tostring(request) })
-      return
-    end
-    M.track(request, function(session_result, session_error)
-      util.safe_call(callback, session_error == nil and session_result or nil, session_error)
-    end)
+    local previous_selection = before and before.selected or nil
+    client_request("select", function(global_result, global_error)
+      if global_error ~= nil then
+        util.safe_call(callback, nil, global_error)
+        return
+      end
+      if state.active_session ~= session then
+        restore_default_selection(previous_selection, {
+          kind = "cancelled",
+          message = "active Phenix session changed during model selection",
+        }, callback)
+        return
+      end
+      local ok, request = pcall(session.select, session, selection_id)
+      if not ok then
+        restore_default_selection(previous_selection, { message = tostring(request) }, callback)
+        return
+      end
+      M.track(request, function(session_result, session_error)
+        if session_error == nil then
+          util.safe_call(callback, session_result or global_result, nil)
+          return
+        end
+        restore_default_selection(previous_selection, session_error, callback)
+      end)
+    end, selection_id)
   end)
 end
 

@@ -384,7 +384,7 @@ local function authenticate_method(method, callback)
     start_authentication(method, nil, callback)
     return
   end
-  local provider = method.provider or method.name or "provider"
+  local provider = method.provider_name or method.provider or method.name or "provider"
   util.input_secret(provider .. " API key: ", function(secret, input_error)
     if input_error ~= nil then
       finish_authentication(callback, nil, input_error)
@@ -403,7 +403,7 @@ local function authenticate_method(method, callback)
 end
 
 local function authentication_label(method)
-  local provider = method.provider or "provider"
+  local provider = method.provider_name or method.provider or "provider"
   local name = method.name or method.id or "authentication"
   local label = provider .. " / " .. name
   if method.description ~= nil and method.description ~= "" then
@@ -537,19 +537,23 @@ local function authenticate_provider(provider, callback)
         table.insert(methods, method)
       end
     end
-    choose_authentication_method(methods, "Authenticate " .. provider, callback)
+    local provider_name = methods[1] and methods[1].provider_name or provider
+    choose_authentication_method(methods, "Authenticate " .. provider_name, callback)
   end)
 end
 
-local function apply_model_selection(item)
+local function apply_model_selection(item, provider_name)
   local function select_now()
     runtime.select(item.id, function(result, error)
       if error ~= nil then
         util.notify(vim.inspect(error), vim.log.levels.ERROR)
         return
       end
-      local thinking = item.thinking or "default"
-      util.notify(item.provider .. " / " .. item.model .. " / " .. thinking, vim.log.levels.INFO)
+      local label = (provider_name or item.provider) .. " / " .. item.model
+      if item.thinking ~= nil and item.thinking ~= "" then
+        label = label .. " / " .. item.thinking
+      end
+      util.notify(label, vim.log.levels.INFO)
     end)
   end
 
@@ -568,8 +572,12 @@ local function apply_model_selection(item)
   end)
 end
 
-local function choose_thinking(result, models, provider, model, generation)
+local function choose_thinking(result, models, provider, provider_name, model, generation)
   local variants = filter_models(filter_models(models, "provider", provider), "model", model)
+  if #variants == 1 then
+    apply_model_selection(variants[1], provider_name)
+    return
+  end
   vim.ui.select(variants, {
     prompt = "Thinking for " .. model,
     format_item = function(item)
@@ -581,16 +589,16 @@ local function choose_thinking(result, models, provider, model, generation)
       return
     end
     if item ~= nil then
-      apply_model_selection(item)
+      apply_model_selection(item, provider_name)
     end
   end)
 end
 
-local function choose_model(result, models, provider, generation)
+local function choose_model(result, models, provider, provider_name, generation)
   local provider_models = filter_models(models, "provider", provider)
   local names = distinct(provider_models, "model")
   vim.ui.select(names, {
-    prompt = "Model for " .. provider,
+    prompt = "Model for " .. provider_name,
     format_item = function(model)
       local variants = filter_models(provider_models, "model", model)
       return selected_marker(result, variants) .. model
@@ -600,7 +608,7 @@ local function choose_model(result, models, provider, generation)
       return
     end
     if model ~= nil then
-      choose_thinking(result, models, provider, model, generation)
+      choose_thinking(result, models, provider, provider_name, model, generation)
     end
   end)
 end
@@ -613,6 +621,18 @@ local function provider_authentication_methods(methods, provider)
     end
   end
   return matches
+end
+
+local function provider_display_name(methods, provider)
+  for _, method in ipairs(methods or {}) do
+    if method.provider == provider
+      and type(method.provider_name) == "string"
+      and method.provider_name ~= ""
+    then
+      return method.provider_name
+    end
+  end
+  return provider
 end
 
 local function provider_choices(models, methods)
@@ -644,7 +664,7 @@ local function provider_needs_authentication(models)
   return true
 end
 
-local function continue_provider_selection(provider, generation)
+local function continue_provider_selection(provider, provider_name, generation)
   runtime.list_selections(function(result, error)
     if generation ~= selection_generation then
       return
@@ -655,10 +675,10 @@ local function continue_provider_selection(provider, generation)
     end
     local models = filter_models(model_selections(result), "provider", provider)
     if #models == 0 then
-      util.notify("Phenix did not discover any models for " .. provider, vim.log.levels.WARN)
+      util.notify("Phenix did not discover any models for " .. provider_name, vim.log.levels.WARN)
       return
     end
-    choose_model(result, models, provider, generation)
+    choose_model(result, models, provider, provider_name, generation)
   end)
 end
 
@@ -696,7 +716,7 @@ function M.choose_selection()
           local auth_methods = provider_authentication_methods(methods, provider)
           local requires_auth = #auth_methods > 0 and provider_needs_authentication(candidates)
           local suffix = requires_auth and "  ·  authentication required" or ""
-          return selected_marker(result, candidates) .. provider .. suffix
+          return selected_marker(result, candidates) .. provider_display_name(methods, provider) .. suffix
         end,
       }, function(provider)
         if generation ~= selection_generation or provider == nil then
@@ -704,8 +724,9 @@ function M.choose_selection()
         end
         local candidates = filter_models(models, "provider", provider)
         local auth_methods = provider_authentication_methods(methods, provider)
+        local provider_name = provider_display_name(methods, provider)
         if #auth_methods > 0 and provider_needs_authentication(candidates) then
-          choose_authentication_method(auth_methods, "Authenticate " .. provider, function(_, auth_error_value)
+          choose_authentication_method(auth_methods, "Authenticate " .. provider_name, function(_, auth_error_value)
             if generation ~= selection_generation then
               return
             end
@@ -715,15 +736,15 @@ function M.choose_selection()
               end
               return
             end
-            continue_provider_selection(provider, generation)
+            continue_provider_selection(provider, provider_name, generation)
           end)
           return
         end
         if #candidates == 0 then
-          util.notify("Phenix did not discover any models for " .. provider, vim.log.levels.WARN)
+          util.notify("Phenix did not discover any models for " .. provider_name, vim.log.levels.WARN)
           return
         end
-        choose_model(result, models, provider, generation)
+        choose_model(result, models, provider, provider_name, generation)
       end)
     end)
   end)
