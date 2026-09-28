@@ -669,7 +669,7 @@ end
 
 function M.select(selection_id, callback)
   if state.selection_inflight then
-    finish( nil, {
+    util.safe_call(callback, nil, {
       kind = "busy",
       code = "selection_in_progress",
       message = "another Phenix model selection is still in progress",
@@ -684,7 +684,7 @@ function M.select(selection_id, callback)
     end
     settled = true
     state.selection_inflight = false
-    finish( value, error)
+    util.safe_call(callback, value, error)
   end
 
   local session = state.active_session
