@@ -80,14 +80,10 @@ local initial = selections()
 assert(type(initial.available) == "table" and #initial.available > 0, "no model selections exposed")
 assert(type(initial.selected) == "string" and initial.selected ~= "", "default selection is missing")
 
-local xai = assert(find_model(initial, "xai", "grok-4.6", "high"), "xAI grok-4.6/high route is missing")
-local open_router = assert(
-  find_model(initial, "open-router", "openrouter/auto", "high"),
-  "OpenRouter auto/high route is missing"
+assert(
+  find_model(initial, "opencode-go", "qwen3.7-plus", nil) == nil,
+  "unauthenticated provider catalog must not leak router targets into direct model selections"
 )
-assert(type(xai.model) == "string" and type(xai.thinking) == "string", "structured model metadata is missing")
-assert(type(xai.authenticated) == "boolean", "model authentication state is missing")
-assert(type(open_router.authenticated) == "boolean", "OpenRouter authentication state is missing")
 
 local methods = auth_methods()
 local expected_api_providers = {
@@ -111,30 +107,39 @@ end
 assert(find_auth(methods, "openai-codex", "oauth") ~= nil, "ChatGPT OAuth is not discoverable")
 
 -- API keys are submitted to Phenix, not installed in the Neovim child environment.
-local xai_auth = assert(find_auth(methods, "xai", "api_token"))
+-- OpenCode Go has a provider-declared catalog, so this deterministic test does not
+-- depend on a live remote model-list endpoint.
+local provider_auth = assert(find_auth(methods, "opencode-go", "api_token"))
 local authenticated = await(function(callback)
-  runtime.authenticate(xai_auth.id, "test-xai-key", callback)
-end, "xAI API-key authentication")
-assert(string.lower(tostring(authenticated.kind or "")) == "authenticated", "xAI API key was not accepted")
+  runtime.authenticate(provider_auth.id, "test-opencode-key", callback)
+end, "OpenCode Go API-key authentication")
+assert(
+  string.lower(tostring(authenticated.kind or "")) == "authenticated",
+  "OpenCode Go API key was not accepted"
+)
 
 local after_auth = selections()
-xai = assert(find_model(after_auth, "xai", "grok-4.6", "high"))
-assert(xai.authenticated == true, "stored xAI credential was not reflected in discovery")
+local direct = assert(
+  find_model(after_auth, "opencode-go", "qwen3.7-plus", nil),
+  "provider-declared OpenCode Go model did not appear after authentication"
+)
+assert(direct.authenticated == true, "stored provider credential was not reflected in discovery")
+assert(direct.thinking == nil, "provider catalog must not invent unsupported thinking metadata")
 
 -- Persist the default before a session exists.
 local selected = await(function(callback)
-  runtime.select(xai.id, callback)
+  runtime.select(direct.id, callback)
 end, "default model selection")
-assert(selected.selected == xai.id, "application default selection did not update")
+assert(selected.selected == direct.id, "application default selection did not update")
 assert(runtime.active_session() == nil, "model selection must not create a session")
 
 -- Both the selected model and provider credential survive a process reconnect.
 frontend.disconnect()
 connect()
 local restored = selections()
-assert(restored.selected == xai.id, "persistent model selection did not survive reconnect")
-local restored_xai = assert(find_model(restored, "xai", "grok-4.6", "high"))
-assert(restored_xai.authenticated == true, "provider credential did not survive reconnect")
+assert(restored.selected == direct.id, "persistent model selection did not survive reconnect")
+local restored_direct = assert(find_model(restored, "opencode-go", "qwen3.7-plus", nil))
+assert(restored_direct.authenticated == true, "provider credential did not survive reconnect")
 
 -- A new session inherits the persistent application default.
 local created = await(function(callback)
@@ -147,7 +152,7 @@ local session_selections = await(function(callback)
   assert(ok, tostring(request))
   runtime.track(request, callback)
 end, "session model discovery")
-assert(session_selections.selected == xai.id, "new session did not inherit the persistent model selection")
+assert(session_selections.selected == direct.id, "new session did not inherit the persistent model selection")
 
 frontend.disconnect()
 print("persistent model and provider authentication regressions passed")
