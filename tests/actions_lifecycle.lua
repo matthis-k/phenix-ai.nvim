@@ -26,6 +26,7 @@ local runtime = {
       provider_name = "Provider A",
       kind = "oauth",
       name = "OAuth",
+      authenticated = true,
     } } })
   end,
   authenticate = function(_, _, callback)
