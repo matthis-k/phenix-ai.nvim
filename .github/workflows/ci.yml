@@ -19,7 +19,4 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: cachix/install-nix-action@v31
-      - name: Refresh stacked core input
-        run: nix flake update phenix-ai
-      - name: Check flake
-        run: nix flake check
+      - run: nix flake check --no-update-lock-file --show-trace
