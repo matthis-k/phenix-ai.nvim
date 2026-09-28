@@ -19,6 +19,7 @@ local state = {
   listeners = {},
   connect_callbacks = {},
   context_generation = 0,
+  selection_inflight = false,
   connect_deadline = nil,
 }
 
@@ -667,22 +668,41 @@ local function restore_default_selection(previous_selection, original_error, cal
 end
 
 function M.select(selection_id, callback)
+  if state.selection_inflight then
+    finish( nil, {
+      kind = "busy",
+      code = "selection_in_progress",
+      message = "another Phenix model selection is still in progress",
+    })
+    return
+  end
+  state.selection_inflight = true
+  local settled = false
+  local function finish(value, error)
+    if settled then
+      return
+    end
+    settled = true
+    state.selection_inflight = false
+    finish( value, error)
+  end
+
   local session = state.active_session
   if session == nil then
-    client_request("select", callback, selection_id)
+    client_request("select", finish, selection_id)
     return
   end
 
   client_request("selections", function(before, discovery_error)
     if discovery_error ~= nil then
-      util.safe_call(callback, nil, discovery_error)
+      finish( nil, discovery_error)
       return
     end
     local previous_selection = before and before.selected or nil
     local transaction_client = state.client
     client_request("select", function(global_result, global_error)
       if global_error ~= nil then
-        util.safe_call(callback, nil, global_error)
+        finish( nil, global_error)
         return
       end
       if state.client ~= transaction_client or state.active_session ~= session then
@@ -691,20 +711,20 @@ function M.select(selection_id, callback)
           message = state.client ~= transaction_client
             and "Phenix connection changed during model selection"
             or "active Phenix session changed during model selection",
-        }, callback, transaction_client)
+        }, finish, transaction_client)
         return
       end
       local ok, request = pcall(session.select, session, selection_id)
       if not ok then
-        restore_default_selection(previous_selection, { message = tostring(request) }, callback, transaction_client)
+        restore_default_selection(previous_selection, { message = tostring(request) }, finish, transaction_client)
         return
       end
       M.track(request, function(session_result, session_error)
         if session_error == nil then
-          util.safe_call(callback, session_result or global_result, nil)
+          finish( session_result or global_result, nil)
           return
         end
-        restore_default_selection(previous_selection, session_error, callback, transaction_client)
+        restore_default_selection(previous_selection, session_error, finish, transaction_client)
       end)
     end, selection_id)
   end)
