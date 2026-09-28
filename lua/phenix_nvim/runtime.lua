@@ -695,14 +695,14 @@ function M.select(selection_id, callback)
 
   client_request("selections", function(before, discovery_error)
     if discovery_error ~= nil then
-      finish( nil, discovery_error)
+      finish(nil, discovery_error)
       return
     end
     local previous_selection = before and before.selected or nil
     local transaction_client = state.client
     client_request("select", function(global_result, global_error)
       if global_error ~= nil then
-        finish( nil, global_error)
+        finish(nil, global_error)
         return
       end
       if state.client ~= transaction_client or state.active_session ~= session then
@@ -721,7 +721,7 @@ function M.select(selection_id, callback)
       end
       M.track(request, function(session_result, session_error)
         if session_error == nil then
-          finish( session_result or global_result, nil)
+          finish(session_result or global_result, nil)
           return
         end
         restore_default_selection(previous_selection, session_error, finish, transaction_client)
