@@ -34,6 +34,7 @@ function M.close(session_id, callback)
 end
 
 function M.choose(callback)
+  generation = generation + 1
   local picker_generation = generation
   runtime.list_sessions(function(result, error)
     if picker_generation ~= generation then
