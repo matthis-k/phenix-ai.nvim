@@ -104,6 +104,13 @@ status("ready")
 picked(items[1])
 assert(auth_calls == 1, "stale authentication picker reached replacement connection")
 
+-- A newer authentication picker supersedes an older picker on the same connection.
+actions.authenticate()
+local superseded_auth_items, superseded_auth_pick = items, picked
+actions.authenticate()
+superseded_auth_pick(superseded_auth_items[1])
+assert(auth_calls == 1, "superseded authentication picker remained live")
+
 -- A delayed API-key prompt must not authenticate a replacement connection.
 local stale_auth_methods = runtime.list_authentication_methods
 local stale_input_secret = util.input_secret
@@ -130,6 +137,13 @@ secret_callback("stale-secret", nil)
 assert(auth_calls == 1, "stale API-key prompt reached replacement connection")
 runtime.list_authentication_methods = stale_auth_methods
 util.input_secret = stale_input_secret
+
+-- A newer model picker supersedes an older picker on the same connection.
+actions.choose_selection()
+local superseded_model_items, superseded_model_pick = items, picked
+actions.choose_selection()
+superseded_model_pick(superseded_model_items[1])
+assert(selection_calls == 0, "superseded model picker remained live")
 
 -- A model picker is application-scoped, but a stale picker may not mutate a replacement connection.
 actions.choose_selection()
@@ -211,6 +225,11 @@ util.input_secret = original_input_secret
 
 -- A delayed session picker must not resume a session on a replacement connection.
 local sessions = require("phenix_nvim.sessions")
+sessions.choose()
+local superseded_session_items, superseded_session_pick = items, picked
+sessions.choose()
+superseded_session_pick(superseded_session_items[1])
+assert(resume_calls == 0, "superseded session picker remained live")
 sessions.choose()
 local stale_items, stale_pick = items, picked
 status("failed")
