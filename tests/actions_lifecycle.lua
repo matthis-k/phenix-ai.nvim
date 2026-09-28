@@ -75,6 +75,7 @@ vim.ui.open = function() return {} end
 vim.defer_fn = function(callback) deferred[#deferred + 1] = callback end
 vim.notify = function() end
 local actions = require("phenix_nvim.actions")
+local util = require("phenix_nvim.util")
 local function status(connection)
   for _, listener in ipairs(listeners) do listener("status", { connection = connection }) end
 end
@@ -96,6 +97,33 @@ status("connecting")
 status("ready")
 picked(items[1])
 assert(auth_calls == 1, "stale authentication picker reached replacement connection")
+
+-- A delayed API-key prompt must not authenticate a replacement connection.
+local stale_auth_methods = runtime.list_authentication_methods
+local stale_input_secret = util.input_secret
+local secret_callback = nil
+runtime.list_authentication_methods = function(callback)
+  callback({ methods = { {
+    id = "api-token",
+    provider = "provider-a",
+    provider_name = "Provider A",
+    kind = "api_token",
+    name = "API key",
+  } } })
+end
+util.input_secret = function(_, callback)
+  secret_callback = callback
+end
+actions.authenticate()
+picked(items[1])
+assert(secret_callback ~= nil, "API-key prompt was not opened")
+status("failed")
+status("connecting")
+status("ready")
+secret_callback("stale-secret", nil)
+assert(auth_calls == 1, "stale API-key prompt reached replacement connection")
+runtime.list_authentication_methods = stale_auth_methods
+util.input_secret = stale_input_secret
 
 -- A model picker is application-scoped, but a stale picker may not mutate a replacement connection.
 actions.choose_selection()
@@ -120,7 +148,6 @@ assert(selection_calls == 1, "provider/model/thinking flow did not select the mo
 local original_list_authentication_methods = runtime.list_authentication_methods
 local original_authenticate = runtime.authenticate
 local original_list_selections = runtime.list_selections
-local util = require("phenix_nvim.util")
 local original_input_secret = util.input_secret
 local catalog_ready = false
 runtime.list_authentication_methods = function(callback)
