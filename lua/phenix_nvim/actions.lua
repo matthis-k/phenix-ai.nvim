@@ -294,11 +294,17 @@ end
 
 local auth_generation = 0
 local selection_generation = 0
+local connection_state = runtime.status().connection
 runtime.on_event(function(kind, status)
-  if kind == "status" and status.connection ~= "ready" then
+  if kind ~= "status" then
+    return
+  end
+  local next_state = status.connection
+  if connection_state == "ready" and next_state ~= "ready" then
     auth_generation = auth_generation + 1
     selection_generation = selection_generation + 1
   end
+  connection_state = next_state
 end)
 
 local AUTH_POLL_INTERVAL_MS = 1000
