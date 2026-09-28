@@ -129,6 +129,7 @@ local direct = assert(
   "provider-declared OpenCode Go model did not appear after authentication"
 )
 assert(direct.authenticated == true, "stored provider credential was not reflected in discovery")
+assert(direct.provider_name == "OpenCode Go", "provider display name was not projected from Phenix")
 assert(direct.thinking == nil, "provider-default route must remain available")
 
 local qwen_thinking = {}
@@ -158,6 +159,7 @@ local restored = selections()
 assert(restored.selected == direct.id, "persistent model selection did not survive reconnect")
 local restored_direct = assert(find_model(restored, "opencode-go", "qwen3.7-plus", nil))
 assert(restored_direct.authenticated == true, "provider credential did not survive reconnect")
+assert(restored_direct.provider_name == "OpenCode Go", "provider display name did not survive reconnect")
 
 -- A new session inherits the persistent application default.
 local created = await(function(callback)
