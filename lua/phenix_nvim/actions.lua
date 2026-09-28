@@ -652,12 +652,12 @@ local function provider_choices(models, methods)
   return providers
 end
 
-local function provider_needs_authentication(models)
-  if #models == 0 then
-    return true
+local function provider_needs_authentication(methods)
+  if #methods == 0 then
+    return false
   end
-  for _, item in ipairs(models) do
-    if item.authenticated ~= false then
+  for _, method in ipairs(methods) do
+    if method.authenticated == true then
       return false
     end
   end
@@ -714,7 +714,7 @@ function M.choose_selection()
         format_item = function(provider)
           local candidates = filter_models(models, "provider", provider)
           local auth_methods = provider_authentication_methods(methods, provider)
-          local requires_auth = #auth_methods > 0 and provider_needs_authentication(candidates)
+          local requires_auth = provider_needs_authentication(auth_methods)
           local suffix = requires_auth and "  ·  authentication required" or ""
           return selected_marker(result, candidates) .. provider_display_name(methods, provider) .. suffix
         end,
@@ -725,7 +725,7 @@ function M.choose_selection()
         local candidates = filter_models(models, "provider", provider)
         local auth_methods = provider_authentication_methods(methods, provider)
         local provider_name = provider_display_name(methods, provider)
-        if #auth_methods > 0 and provider_needs_authentication(candidates) then
+        if provider_needs_authentication(auth_methods) then
           choose_authentication_method(auth_methods, "Authenticate " .. provider_name, function(_, auth_error_value)
             if generation ~= selection_generation then
               return
