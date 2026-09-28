@@ -384,8 +384,12 @@ local function authenticate_method(method, callback)
     start_authentication(method, nil, callback)
     return
   end
+  local generation = auth_generation
   local provider = method.provider_name or method.provider or method.name or "provider"
   util.input_secret(provider .. " API key: ", function(secret, input_error)
+    if generation ~= auth_generation then
+      return
+    end
     if input_error ~= nil then
       finish_authentication(callback, nil, input_error)
       return
