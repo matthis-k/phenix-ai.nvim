@@ -124,7 +124,20 @@ local direct = assert(
   "provider-declared OpenCode Go model did not appear after authentication"
 )
 assert(direct.authenticated == true, "stored provider credential was not reflected in discovery")
-assert(direct.thinking == nil, "provider catalog must not invent unsupported thinking metadata")
+assert(direct.thinking == nil, "provider-default route must remain available")
+
+local qwen_thinking = {}
+for _, item in ipairs(after_auth.available or {}) do
+  if presentation_kind(item) == "model"
+    and item.provider == "opencode-go"
+    and item.model == "qwen3.7-plus"
+  then
+    qwen_thinking[item.thinking or "default"] = true
+  end
+end
+assert(qwen_thinking.default == true, "provider-default model variant is missing")
+assert(qwen_thinking.medium == true, "declared medium thinking variant is missing")
+assert(qwen_thinking.high == true, "declared high thinking variant is missing")
 
 -- Persist the default before a session exists.
 local selected = await(function(callback)

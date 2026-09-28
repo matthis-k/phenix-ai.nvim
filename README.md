@@ -35,9 +35,11 @@ instead of opening a one-item "default" thinking picker.
 
 The plugin does not keep a provider or model allow-list. Phenix reports each
 fixed model selection with its provider, model id, thinking level, and current
-authentication state. The plugin does not know whether a model came from
-standards-based provider discovery, a provider-declared catalog, or another
-Phenix catalog source.
+authentication state. Provider catalogs may attach thinking metadata to known
+model ids without declaring those ids as available. This keeps remote model
+enumeration dynamic while allowing provider-owned capability metadata. The
+plugin does not know whether a model came from standards-based provider
+discovery, a provider-declared catalog, or another Phenix catalog source.
 
 If the selected provider needs authentication and no usable credential is
 available, the plugin asks for one of the authentication methods reported by

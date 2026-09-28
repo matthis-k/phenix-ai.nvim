@@ -43,6 +43,14 @@ local runtime = {
           authenticated = true,
           presentation = "Model",
         },
+        {
+          id = "model.provider-a.model-a.low",
+          provider = "provider-a",
+          model = "model-a",
+          thinking = "low",
+          authenticated = true,
+          presentation = "Model",
+        },
       },
     })
   end,
@@ -101,8 +109,11 @@ assert(selection_calls == 0, "stale model picker reached replacement connection"
 actions.choose_selection()
 assert(select_options.format_item(items[1]):find("Provider A", 1, true), "provider display name was not rendered")
 picked(items[1]) -- provider
-picked(items[1]) -- model; the single thinking variant is selected directly
-assert(selection_calls == 1, "provider/model flow did not select the only thinking variant")
+picked(items[1]) -- model
+assert(#items == 2, "known thinking variants did not reach the thinking picker")
+assert(select_options.prompt == "Thinking for model-a", "thinking picker prompt is incorrect")
+picked(items[1]) -- thinking
+assert(selection_calls == 1, "provider/model/thinking flow did not select the model")
 
 -- Providers exposed only through Phenix auth discovery can authenticate first,
 -- refresh their catalog, and continue through model/thinking selection.
