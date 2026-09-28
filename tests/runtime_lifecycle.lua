@@ -257,6 +257,14 @@ runtime.select("model.new", interrupted_selection.callback)
 runtime.tick() -- selection discovery
 runtime.tick() -- persistent default update; session update remains pending
 assert(next_client.default_selection == "model.new")
+local overlapping_selection = result()
+runtime.select("model.other", overlapping_selection.callback)
+assert(overlapping_selection.calls == 1)
+assert(overlapping_selection.error.code == "selection_in_progress")
+assert(
+  table.concat(next_client.default_selection_calls, ",") == "model.new",
+  "overlapping selection mutated the persistent default"
+)
 local connects_before_disconnect = connect_count
 runtime.disconnect()
 assert(interrupted_selection.calls == 1)
