@@ -438,7 +438,11 @@ function M.authenticate()
     util.notify("The installed Phenix runtime does not expose application authentication yet", vim.log.levels.WARN)
     return
   end
+  local generation = auth_generation
   runtime.list_authentication_methods(function(result, error)
+    if generation ~= auth_generation then
+      return
+    end
     if error ~= nil then
       util.notify(vim.inspect(error), vim.log.levels.ERROR)
       return
@@ -452,9 +456,10 @@ function M.authenticate()
       prompt = "Phenix authentication",
       format_item = authentication_label,
     }, function(method)
-      if method ~= nil then
-        authenticate_method(method)
+      if generation ~= auth_generation or method == nil then
+        return
       end
+      authenticate_method(method)
     end)
   end)
 end
