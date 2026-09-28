@@ -623,7 +623,15 @@ local function provider_authentication_methods(methods, provider)
   return matches
 end
 
-local function provider_display_name(methods, provider)
+local function provider_display_name(methods, models, provider)
+  for _, item in ipairs(models or {}) do
+    if item.provider == provider
+      and type(item.provider_name) == "string"
+      and item.provider_name ~= ""
+    then
+      return item.provider_name
+    end
+  end
   for _, method in ipairs(methods or {}) do
     if method.provider == provider
       and type(method.provider_name) == "string"
@@ -716,7 +724,7 @@ function M.choose_selection()
           local auth_methods = provider_authentication_methods(methods, provider)
           local requires_auth = provider_needs_authentication(auth_methods)
           local suffix = requires_auth and "  ·  authentication required" or ""
-          return selected_marker(result, candidates) .. provider_display_name(methods, provider) .. suffix
+          return selected_marker(result, candidates) .. provider_display_name(auth_methods, candidates, provider) .. suffix
         end,
       }, function(provider)
         if generation ~= selection_generation or provider == nil then
@@ -724,7 +732,7 @@ function M.choose_selection()
         end
         local candidates = filter_models(models, "provider", provider)
         local auth_methods = provider_authentication_methods(methods, provider)
-        local provider_name = provider_display_name(methods, provider)
+        local provider_name = provider_display_name(auth_methods, candidates, provider)
         if provider_needs_authentication(auth_methods) then
           choose_authentication_method(auth_methods, "Authenticate " .. provider_name, function(_, auth_error_value)
             if generation ~= selection_generation then
