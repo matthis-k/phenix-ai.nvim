@@ -134,16 +134,15 @@
         "phenix-stitch": "phenix-stitch"
       },
       "locked": {
-        "lastModified": 1790559308,
-        "narHash": "sha256-bZ+hyHSi9ZeETgl+QMaNa1GCErbdtV2xWPHjZWWdtvs=",
+        "lastModified": 1790628893,
+        "narHash": "sha256-rRjJxHrkE7zLxbYHcLnFgFsHypBC7Y94lEudnqo/Vm8=",
         "owner": "matthis-k",
         "repo": "phenix-ai",
-        "rev": "a55ad6e3b42c05d2da6c0fc635c361899c8a9686",
+        "rev": "bd92861f47b5eb818ffff41b8ea47d37142b73ea",
         "type": "github"
       },
       "original": {
         "owner": "matthis-k",
-        "ref": "feature/application-model-auth-preferences",
         "repo": "phenix-ai",
         "type": "github"
       }
