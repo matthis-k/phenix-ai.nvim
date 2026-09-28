@@ -110,6 +110,7 @@ assert(find_auth(methods, "openai-codex", "oauth") ~= nil, "ChatGPT OAuth is not
 -- OpenCode Go has a provider-declared catalog, so this deterministic test does not
 -- depend on a live remote model-list endpoint.
 local provider_auth = assert(find_auth(methods, "opencode-go", "api_token"))
+assert(provider_auth.authenticated == false, "unauthenticated provider must report auth state")
 local authenticated = await(function(callback)
   runtime.authenticate(provider_auth.id, "test-opencode-key", callback)
 end, "OpenCode Go API-key authentication")
@@ -117,6 +118,10 @@ assert(
   string.lower(tostring(authenticated.kind or "")) == "authenticated",
   "OpenCode Go API key was not accepted"
 )
+
+local refreshed_methods = auth_methods()
+local refreshed_provider_auth = assert(find_auth(refreshed_methods, "opencode-go", "api_token"))
+assert(refreshed_provider_auth.authenticated == true, "stored provider credential was not reflected in auth discovery")
 
 local after_auth = selections()
 local direct = assert(
