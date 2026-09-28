@@ -242,6 +242,32 @@ assert(
 )
 runtime.disconnect()
 
+-- A stale selection rollback must not reconnect and mutate a replacement client.
+next_client = client()
+next_client.session.select = function()
+  return pending()
+end
+runtime.connect()
+next_client:status_event("ready")
+runtime.tick()
+runtime.new_session()
+runtime.tick()
+local interrupted_selection = result()
+runtime.select("model.new", interrupted_selection.callback)
+runtime.tick() -- selection discovery
+runtime.tick() -- persistent default update; session update remains pending
+assert(next_client.default_selection == "model.new")
+local connects_before_disconnect = connect_count
+runtime.disconnect()
+assert(interrupted_selection.calls == 1)
+assert(interrupted_selection.error.kind == "partial_failure")
+assert(interrupted_selection.error.code == "selection_rollback_connection_changed")
+assert(connect_count == connects_before_disconnect, "stale rollback reconnected Phenix")
+assert(
+  table.concat(next_client.default_selection_calls, ",") == "model.new",
+  "stale rollback mutated the disconnected client"
+)
+
 local uv = vim.uv or vim.loop
 local original_hrtime = uv.hrtime
 local clock = 0
