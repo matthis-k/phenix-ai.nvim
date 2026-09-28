@@ -615,24 +615,55 @@ function M.list_selections(callback)
   client_request("selections", callback)
 end
 
-local function restore_default_selection(previous_selection, original_error, callback)
+local function selection_rollback_failure(original_error, rollback_error, code, message)
+  return {
+    kind = "partial_failure",
+    code = code or "selection_rollback_failed",
+    message = message or "session model selection failed and the previous default could not be restored",
+    cause = original_error,
+    rollback_error = rollback_error,
+  }
+end
+
+local function restore_default_selection(previous_selection, original_error, callback, expected_client)
   if previous_selection == nil then
     util.safe_call(callback, nil, original_error)
     return
   end
-  client_request("select", function(_, rollback_error)
+  if state.client ~= expected_client or not is_ready() then
+    util.safe_call(callback, nil, selection_rollback_failure(
+      original_error,
+      { kind = "cancelled", message = "Phenix connection changed before selection rollback" },
+      "selection_rollback_connection_changed",
+      "session model selection did not settle and the previous default was not restored because the Phenix connection changed"
+    ))
+    return
+  end
+  local callable = expected_client.select
+  if type(callable) ~= "function" then
+    util.safe_call(callback, nil, selection_rollback_failure(
+      original_error,
+      { message = "Phenix client does not support select" }
+    ))
+    return
+  end
+  local ok, request = pcall(callable, expected_client, previous_selection)
+  if not ok then
+    util.safe_call(callback, nil, selection_rollback_failure(
+      original_error,
+      { message = tostring(request) }
+    ))
+    return
+  end
+  M.track(request, function(_, rollback_error)
     if rollback_error == nil then
+      refresh_active_context()
+      emit("status", M.status())
       util.safe_call(callback, nil, original_error)
       return
     end
-    util.safe_call(callback, nil, {
-      kind = "partial_failure",
-      code = "selection_rollback_failed",
-      message = "session model selection failed and the previous default could not be restored",
-      cause = original_error,
-      rollback_error = rollback_error,
-    })
-  end, previous_selection)
+    util.safe_call(callback, nil, selection_rollback_failure(original_error, rollback_error))
+  end)
 end
 
 function M.select(selection_id, callback)
@@ -648,21 +679,24 @@ function M.select(selection_id, callback)
       return
     end
     local previous_selection = before and before.selected or nil
+    local transaction_client = state.client
     client_request("select", function(global_result, global_error)
       if global_error ~= nil then
         util.safe_call(callback, nil, global_error)
         return
       end
-      if state.active_session ~= session then
+      if state.client ~= transaction_client or state.active_session ~= session then
         restore_default_selection(previous_selection, {
           kind = "cancelled",
-          message = "active Phenix session changed during model selection",
-        }, callback)
+          message = state.client ~= transaction_client
+            and "Phenix connection changed during model selection"
+            or "active Phenix session changed during model selection",
+        }, callback, transaction_client)
         return
       end
       local ok, request = pcall(session.select, session, selection_id)
       if not ok then
-        restore_default_selection(previous_selection, { message = tostring(request) }, callback)
+        restore_default_selection(previous_selection, { message = tostring(request) }, callback, transaction_client)
         return
       end
       M.track(request, function(session_result, session_error)
@@ -670,7 +704,7 @@ function M.select(selection_id, callback)
           util.safe_call(callback, session_result or global_result, nil)
           return
         end
-        restore_default_selection(previous_selection, session_error, callback)
+        restore_default_selection(previous_selection, session_error, callback, transaction_client)
       end)
     end, selection_id)
   end)
