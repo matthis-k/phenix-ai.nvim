@@ -1,6 +1,7 @@
 -- Exercise delayed UI/auth callbacks independently of transport timing.
 local listeners, deferred = {}, {}
 local active = {}
+local connection = "ready"
 local auth_calls, selection_calls, resume_calls = 0, 0, 0
 local prompt_callbacks = {}
 local runtime = {
@@ -9,7 +10,7 @@ local runtime = {
   active_session = function() return "session-send" end,
   activate_session = function() end,
   status = function()
-    return { connection = "ready", session_id = "session-send" }
+    return { connection = connection, session_id = "session-send" }
   end,
   session_state = function()
     return { sessions = {} }
@@ -76,12 +77,17 @@ vim.defer_fn = function(callback) deferred[#deferred + 1] = callback end
 vim.notify = function() end
 local actions = require("phenix_nvim.actions")
 local util = require("phenix_nvim.util")
-local function status(connection)
-  for _, listener in ipairs(listeners) do listener("status", { connection = connection }) end
+local function status(value)
+  connection = value
+  for _, listener in ipairs(listeners) do listener("status", { connection = value }) end
 end
 
--- A delayed OAuth poll must not authenticate a replacement connection.
+-- Authentication started before the first connection survives the normal
+-- disconnected -> connecting -> ready transition.
+status("disconnected")
 actions.authenticate()
+status("connecting")
+status("ready")
 picked(items[1])
 assert(auth_calls == 1 and #deferred == 1)
 status("disconnected")
@@ -134,7 +140,10 @@ status("ready")
 stale_model_pick(stale_model_items[1])
 assert(selection_calls == 0, "stale model picker reached replacement connection")
 
+status("disconnected")
 actions.choose_selection()
+status("connecting")
+status("ready")
 assert(select_options.format_item(items[1]):find("Provider A", 1, true), "provider display name was not rendered")
 picked(items[1]) -- provider
 picked(items[1]) -- model
@@ -209,7 +218,10 @@ status("connecting")
 status("ready")
 stale_pick(stale_items[1])
 assert(resume_calls == 0, "stale session picker reached replacement connection")
+status("disconnected")
 sessions.choose()
+status("connecting")
+status("ready")
 picked(items[1])
 assert(resume_calls == 1)
 
