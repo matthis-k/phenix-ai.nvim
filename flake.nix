@@ -2,7 +2,7 @@
   description = "Phenix AI Neovim client";
 
   inputs = {
-    phenix-ai.url = "github:matthis-k/phenix-ai/fix/provider-auth-single-source";
+    phenix-ai.url = "github:matthis-k/phenix-ai/feature/application-model-auth-preferences";
     nixpkgs.follows = "phenix-ai/nixpkgs";
   };
 
