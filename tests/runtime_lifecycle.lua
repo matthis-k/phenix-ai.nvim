@@ -8,8 +8,18 @@ end
 local function completed(value)
   return { poll = function() return true, value, nil end }
 end
+local function failed(error)
+  return { poll = function() return true, nil, error end }
+end
 local function client()
-  local value = { events = {}, closed = 0, creates = 0, session_closes = 0 }
+  local value = {
+    events = {},
+    closed = 0,
+    creates = 0,
+    session_closes = 0,
+    default_selection = "model.old",
+    default_selection_calls = {},
+  }
   value.session = {
     id = function() return "session.test" end,
     info = function() return { session_id = "session.test" } end,
@@ -28,6 +38,14 @@ local function client()
     list = function() return pending() end,
   }
   function value:sessions() return self.sessions_api end
+  function value:selections()
+    return completed({ selected = self.default_selection, available = {} })
+  end
+  function value:select(selection_id)
+    self.default_selection = selection_id
+    table.insert(self.default_selection_calls, selection_id)
+    return completed({ selected = selection_id, available = {} })
+  end
   function value:features() return self.features_value or {} end
   function value:status() return { state = self.phase or "connecting" } end
   function value:pump()
@@ -51,7 +69,7 @@ end } }
 local runtime = require("phenix_nvim.runtime")
 local frontend = require("phenix_nvim")
 local config = require("phenix_nvim.config")
-runtime.configure(config.setup({ auto_connect = false, selection = false, poll_interval_ms = 60000 }))
+runtime.configure(config.setup({ auto_connect = false, poll_interval_ms = 60000 }))
 
 local function result()
   local value = { calls = 0 }
@@ -186,82 +204,83 @@ assert(info_error.calls == 1 and info_error.error.message:find("info failed"))
 assert(next_client.session_closes == 1 and runtime.active_session() == nil)
 runtime.disconnect()
 
--- Session activation waits until route reconciliation is complete.
+-- Session creation no longer waits on frontend routing reconciliation.
+next_client = client()
+runtime.connect()
+next_client:status_event("ready")
+runtime.tick()
+local created = result()
+runtime.new_session(created.callback)
+runtime.tick()
+assert(created.calls == 1 and created.error == nil)
+assert(runtime.active_session() == "session.test")
+runtime.disconnect()
+
+-- An active-session selection restores the persistent default if the session update fails.
 next_client = client()
 next_client.features_value = { selection = true }
-local selection_complete = false
 next_client.session.selections = function()
-  return completed({ selected = "default", available = { { id = "router.test" } } })
+  return completed({ selected = "model.old", available = {} })
 end
+local session_selection_error = { kind = "failed", message = "session selection rejected" }
 next_client.session.select = function()
-  return { poll = function() return selection_complete, {}, nil end }
+  return failed(session_selection_error)
 end
-runtime.set_preferred_selection("router.test")
 runtime.connect()
 next_client:status_event("ready")
 runtime.tick()
-local routed = result()
-runtime.new_session(routed.callback)
+runtime.new_session()
 runtime.tick()
-runtime.tick()
-assert(runtime.active_session() == nil and routed.calls == 0)
-selection_complete = true
-runtime.tick()
-assert(runtime.active_session() == "session.test" and routed.calls == 1 and routed.error == nil)
+local selection_result = result()
+runtime.select("model.new", selection_result.callback)
+for _ = 1, 6 do runtime.tick() end
+assert(selection_result.calls == 1 and selection_result.error == session_selection_error)
+assert(next_client.default_selection == "model.old", "failed session selection changed the persistent default")
+assert(
+  table.concat(next_client.default_selection_calls, ",") == "model.new,model.old",
+  "failed session selection did not compensate the default mutation"
+)
 runtime.disconnect()
--- Missing preferred routes must fail bootstrap instead of activating a default.
+
+-- A stale selection rollback must not reconnect and mutate a replacement client.
 next_client = client()
-next_client.features_value = { selection = true }
-next_client.session.selections = function()
-  return completed({ selected = "default", available = { { id = "default" } } })
+next_client.session.select = function()
+  return pending()
 end
-runtime.configure(config.setup({ selection = "auto", poll_interval_ms = 60000 }))
 runtime.connect()
 next_client:status_event("ready")
 runtime.tick()
-local missing = result()
-runtime.new_session(missing.callback)
+runtime.new_session()
 runtime.tick()
-runtime.tick()
-runtime.tick()
-assert(missing.calls == 1 and missing.error.message:find("unavailable"))
-assert(runtime.active_session() == nil and next_client.session_closes == 1)
+local interrupted_selection = result()
+runtime.select("model.new", interrupted_selection.callback)
+runtime.tick() -- selection discovery
+runtime.tick() -- persistent default update; session update remains pending
+assert(next_client.default_selection == "model.new")
+local overlapping_selection = result()
+runtime.select("model.other", overlapping_selection.callback)
+assert(overlapping_selection.calls == 1)
+assert(overlapping_selection.error.code == "selection_in_progress")
+assert(
+  table.concat(next_client.default_selection_calls, ",") == "model.new",
+  "overlapping selection mutated the persistent default"
+)
+local connects_before_disconnect = connect_count
 runtime.disconnect()
--- Advance a monotonic clock without sleeping or relying on test-runner limits.
--- Provider identity comes from typed metadata even when descriptions contradict it.
-for _, same_provider in ipairs({ false, true }) do
-  next_client = client()
-  next_client.features_value = { selection = true }
-  local selected_count = 0
-  next_client.session.selections = function()
-    return completed({ selected = "fixed", available = {
-      { id = "fixed", presentation = "model", provider = same_provider and "codex" or "api", description = "codex misleading display text" },
-      { id = "router.test", presentation = "router", provider = "codex", description = "api other display text" },
-    } })
-  end
-  next_client.session.select = function()
-    selected_count = selected_count + 1
-    return completed({})
-  end
-  runtime.set_preferred_selection("router.test")
-  runtime.connect()
-  next_client:status_event("ready")
-  runtime.tick()
-  local routed = result()
-  runtime.new_session(routed.callback)
-  runtime.tick()
-  runtime.tick()
-  runtime.tick()
-  assert(routed.calls == 1 and routed.error == nil)
-  assert(selected_count == (same_provider and 0 or 1))
-  runtime.disconnect()
-end
+assert(interrupted_selection.calls == 1)
+assert(interrupted_selection.error.kind == "partial_failure")
+assert(interrupted_selection.error.code == "selection_rollback_connection_changed")
+assert(connect_count == connects_before_disconnect, "stale rollback reconnected Phenix")
+assert(
+  table.concat(next_client.default_selection_calls, ",") == "model.new",
+  "stale rollback mutated the disconnected client"
+)
 
 local uv = vim.uv or vim.loop
 local original_hrtime = uv.hrtime
 local clock = 0
 uv.hrtime = function() return clock * 1000000 end
-runtime.configure(config.setup({ selection = false, poll_interval_ms = 60000,
+runtime.configure(config.setup({ poll_interval_ms = 60000,
   connect_timeout_ms = 100, request_timeout_ms = 200, prompt_timeout_ms = 1000 }))
 next_client = client()
 local timed_connect, timed_create = result(), result()

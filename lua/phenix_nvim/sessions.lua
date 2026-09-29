@@ -3,11 +3,17 @@ local util = require("phenix_nvim.util")
 
 local M = {}
 local generation = 0
+local connection_state = runtime.status().connection
 
 runtime.on_event(function(kind, status)
-  if kind == "status" and status.connection ~= "ready" then
+  if kind ~= "status" then
+    return
+  end
+  local next_state = status.connection
+  if connection_state == "ready" and next_state ~= "ready" then
     generation = generation + 1
   end
+  connection_state = next_state
 end)
 
 function M.new(callback)
@@ -28,6 +34,7 @@ function M.close(session_id, callback)
 end
 
 function M.choose(callback)
+  generation = generation + 1
   local picker_generation = generation
   runtime.list_sessions(function(result, error)
     if picker_generation ~= generation then

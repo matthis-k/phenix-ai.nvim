@@ -16,30 +16,77 @@ The flake follows `github:matthis-k/phenix-ai`, and `flake.lock` pins the exact 
 
 ## Connection lifecycle
 
-Requests made while connecting wait for readiness. `new_session(callback)` completes only after preferred routing is applied; a missing preferred route returns an error. `disconnect()` cancels queued and pending callbacks and closes the owned runtime. Runtime failure settles pending work with its cause; call `connect()` explicitly to retry. Delayed authentication and selection UI callbacks cannot affect a replacement connection or session.
+Requests made while connecting wait for readiness. `new_session(callback)` completes after the durable session is created. Model and authentication preferences are owned by Phenix and do not need a session. `disconnect()` cancels queued and pending callbacks and closes the owned runtime. Runtime failure settles pending work with its cause; call `connect()` explicitly to retry. Delayed authentication and selection UI callbacks cannot affect a replacement connection or session.
 
 Startup and ordinary requests default to 30-second deadlines. Prompts default to 10 minutes, including time spent waiting for user interaction. Configure `connect_timeout_ms`, `request_timeout_ms`, and `prompt_timeout_ms` with finite positive durations. A timeout closes the connection and settles outstanding callbacks with a structured `timeout` error. Timed-out mutations may have completed remotely, so the client never retries them automatically. Reconnect and inspect the durable session before repeating a mutation.
 
-## Authentication
+## Models and authentication
 
-Routing defaults to `auto`: when a configured API-key environment variable is
-present, the client prefers that provider's route; otherwise it prefers
-`router.chatgpt-plus` and the existing ChatGPT OAuth flow. Set `selection`
-explicitly to override this behavior, or to `false` to leave routing entirely
-to the runtime. Resume reconciliation uses typed provider metadata from the
-runtime, so changes to route descriptions do not change routing behavior.
+`:Phenix select` works before a session exists. The model picker is built from Phenix discovery data. Phenix owns provider
+display names, so the UI does not expose internal provider ids as labels. The
+flow is:
 
-API-key routes can be supplied directly in the environment:
-
-```sh
-OPENAI_API_KEY=... nvim
-# or
-OPENCODE_API_KEY=... nvim
+```text
+provider -> model -> thinking, when Phenix exposes multiple thinking variants
 ```
 
-The automatic route follows the configured credential: OpenAI selects
-`router.openai-api`; OpenCode selects `router.opencode-go`. If neither is
-present, ChatGPT OAuth remains the preferred route.
+When a model has one effective variant, selecting the model applies it directly
+instead of opening a one-item "default" thinking picker.
+
+The plugin does not keep a provider or model allow-list. Phenix reports each
+fixed model selection with its provider, model id, thinking level, and current
+authentication state. Provider catalogs may attach thinking metadata to known
+model ids without declaring those ids as available. This keeps remote model
+enumeration dynamic while allowing provider-owned capability metadata. The
+plugin does not know whether a model came from standards-based provider
+discovery, a provider-declared catalog, or another Phenix catalog source.
+
+If the selected provider needs authentication and no usable credential is
+available, the plugin asks for one of the authentication methods reported by
+Phenix. API-token providers use a secret input and Phenix stores the token in
+its credential store. OAuth providers keep their provider-owned external flow.
+`:Phenix auth` exposes the same discovered methods directly.
+
+The selected model is stored as Phenix's global `model.default` option. New
+sessions inherit it. Selecting a model while a session is active also updates
+that session so the visible chat switches immediately.
+
+Environment credentials remain valid inputs to provider discovery. They are
+resolved by Phenix, not interpreted by the Neovim plugin.
+
+The ownership boundary is strict:
+
+- Phenix AI owns provider definitions, model catalog production, authentication,
+  credential persistence, default selection persistence, derived direct-model
+  routes, and explicit routing policy.
+- Provider plugins may discover models through a supported protocol standard or
+  declare models when no discovery standard exists.
+- Phenix AI.nvim owns presentation and interaction only. It groups the normalized
+  catalog as `provider -> model -> thinking` when thinking variants exist, asks
+  for credentials when Phenix reports that authentication is required, and
+  submits the chosen IDs back to Phenix. Provider labels also come from Phenix.
+- A provider discovered only through authentication is still shown. After
+  authentication, the plugin reloads Phenix selections and continues into the
+  model picker.
+- Phenix AI.nvim does not contain discovery URLs, provider-specific model names,
+  API-key environment mappings, or provider compatibility tables.
+
+## Persistence
+
+Phenix owns the persistence formats and defaults. With no client setting it
+uses its normal XDG state location. The client may choose only the root
+directory:
+
+```lua
+require("phenix_nvim").setup({
+  state_directory = vim.fn.stdpath("state") .. "/phenix",
+})
+```
+
+That setting is passed as `PHENIX_STATE_DIR`. The runtime currently places its
+application database, provider credential store, and OAuth credential store
+under that root. Set `state_directory = false` to leave location selection
+entirely to the inherited environment and Phenix defaults.
 
 ## Commands
 
@@ -79,37 +126,6 @@ image file, snapshotted into the prompt attachment, and the temporary file is
 removed.
 
 
-or only to the Phenix child process:
-
-```lua
-require("phenix_nvim").setup({
-  env = {
-    OPENAI_API_KEY = "...",
-  },
-})
-```
-
-`:Phenix auth` exposes both runtime authentication methods and frontend API-key
-providers. If the selected API key is not already available through its
-environment variable, the client opens a secret input field, reconnects the
-Phenix ACP child with the entered value, resumes the active session, and selects
-the provider's route. The entered key is kept in the client runtime environment;
-it is not added to Phenix log records or written into the Neovim configuration.
-
-Additional API-key providers can use the same frontend mechanism:
-
-```lua
-require("phenix_nvim").setup({
-  api_key_providers = {
-    {
-      id = "example",
-      name = "Example API key",
-      env = "EXAMPLE_API_KEY",
-      selection = "router.example",
-    },
-  },
-})
-```
 
 ## Logging
 
