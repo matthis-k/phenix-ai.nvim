@@ -124,6 +124,9 @@
                   -l ${source}/tests/runtime_lifecycle.lua
                 nvim --headless -u NONE \
                   --cmd ${pkgs.lib.escapeShellArg "set rtp^=${plugin}"} \
+                  -l ${source}/tests/client_context_tools.lua
+                nvim --headless -u NONE \
+                  --cmd ${pkgs.lib.escapeShellArg "set rtp^=${plugin}"} \
                   -l ${source}/tests/actions_lifecycle.lua
                 nvim --headless -u NONE \
                   --cmd ${pkgs.lib.escapeShellArg "set rtp^=${plugin}"} \
