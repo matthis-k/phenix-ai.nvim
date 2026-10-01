@@ -335,7 +335,7 @@ local default_tools = {
       description = "Return a bounded snapshot of the current or named loaded Neovim buffer.",
       input = record({
         uri = option(string_type),
-        max_bytes = u64,
+        max_bytes = option(u64),
       }),
       output = buffer_snapshot,
       requires_permission = false,
@@ -358,7 +358,7 @@ local default_tools = {
       description = "Return bounded diagnostics for the current or named loaded Neovim buffer.",
       input = record({
         uri = option(string_type),
-        limit = u64,
+        limit = option(u64),
       }),
       output = list(diagnostic),
       requires_permission = false,
@@ -370,7 +370,7 @@ local default_tools = {
       id = "nvim.context.quickfix",
       description = "Return bounded Neovim quickfix entries.",
       input = record({
-        limit = u64,
+        limit = option(u64),
       }),
       output = list(quickfix_item),
       requires_permission = false,
@@ -382,7 +382,7 @@ local default_tools = {
       id = "nvim.context.viewport",
       description = "Return a bounded snapshot of the visible Neovim viewport.",
       input = record({
-        max_bytes = u64,
+        max_bytes = option(u64),
       }),
       output = viewport,
       requires_permission = false,
