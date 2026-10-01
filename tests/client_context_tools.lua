@@ -95,6 +95,10 @@ end
 assert(by_id["nvim.context.current_location"].definition.input.type == "unit")
 assert(by_id["nvim.context.selection"].definition.output.type == "option")
 assert(by_id["nvim.context.buffer"].definition.input.type == "table")
+assert(by_id["nvim.context.buffer"].definition.input.value.max_bytes.type == "option")
+assert(by_id["nvim.context.diagnostics"].definition.input.value.limit.type == "option")
+assert(by_id["nvim.context.quickfix"].definition.input.value.limit.type == "option")
+assert(by_id["nvim.context.viewport"].definition.input.value.max_bytes.type == "option")
 assert(by_id["nvim.context.buffers"].definition.output.type == "list")
 
 local buffer = vim.api.nvim_get_current_buf()
@@ -111,7 +115,6 @@ assert(buffer_result.changedtick == vim.api.nvim_buf_get_changedtick(buffer))
 
 local full_buffer = by_id["nvim.context.buffer"].handler({
   uri = nil,
-  max_bytes = 65536,
 })
 assert(full_buffer.text == "éx\nsecond")
 assert(full_buffer.truncated == false)
@@ -138,7 +141,6 @@ vim.diagnostic.set(namespace, buffer, {
 })
 local diagnostics = by_id["nvim.context.diagnostics"].handler({
   uri = nil,
-  limit = 10,
 })
 assert(#diagnostics == 1)
 assert(diagnostics[1].severity == "error")
@@ -156,8 +158,11 @@ vim.fn.setqflist({}, "r", {
     },
   },
 })
-local quickfix = by_id["nvim.context.quickfix"].handler({ limit = 10 })
+local quickfix = by_id["nvim.context.quickfix"].handler({})
 assert(#quickfix == 1 and quickfix[1].text == "fixture quickfix")
+
+local viewport = by_id["nvim.context.viewport"].handler({})
+assert(viewport.truncated == false)
 
 runtime.connect()
 client:ready()
