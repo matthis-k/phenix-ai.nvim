@@ -3,7 +3,7 @@ local M = {}
 local function uri(buffer)
   local name = vim.api.nvim_buf_get_name(buffer)
   if name == "" then
-    return nil
+    return "nvim://buffer/" .. tostring(buffer)
   end
   return vim.uri_from_fname(vim.fn.fnamemodify(name, ":p"))
 end
@@ -23,6 +23,65 @@ local function reference_uri(value)
     return text
   end
   return vim.uri_from_fname(vim.fn.fnamemodify(text, ":p"))
+end
+
+local function visual_selection_snapshot()
+  local mode = vim.fn.mode(1)
+  if mode == "\22" or (mode ~= "v" and mode ~= "V") then
+    return nil
+  end
+
+  local buffer = vim.api.nvim_get_current_buf()
+  local start = vim.fn.getpos("v")
+  local finish = vim.fn.getpos(".")
+  if start[2] > finish[2] or (start[2] == finish[2] and start[3] > finish[3]) then
+    start, finish = finish, start
+  end
+
+  local start_row = start[2] - 1
+  local end_row = finish[2] - 1
+  local start_col = mode == "V" and 0 or start[3] - 1
+  local end_col
+  local lines
+  if mode == "V" then
+    lines = vim.api.nvim_buf_get_lines(buffer, start_row, end_row + 1, false)
+    end_col = #(lines[#lines] or "")
+  else
+    end_col = finish[3]
+    lines = vim.api.nvim_buf_get_text(buffer, start_row, start_col, end_row, end_col, {})
+  end
+
+  return {
+    location = {
+      uri = uri(buffer),
+      range = {
+        start = { line = start_row, column = start_col },
+        ["end"] = { line = end_row, column = end_col },
+      },
+    },
+    text = table.concat(lines, "\n"),
+  }
+end
+
+function M.snapshot()
+  local window = vim.api.nvim_get_current_win()
+  local buffer = vim.api.nvim_win_get_buf(window)
+  local cursor = vim.api.nvim_win_get_cursor(window)
+  return {
+    window = window,
+    buffer = buffer,
+    uri = uri(buffer),
+    mode = vim.fn.mode(1),
+    cursor = {
+      line = cursor[1] - 1,
+      column = cursor[2],
+    },
+    selection = visual_selection_snapshot(),
+  }
+end
+
+function M.buffer_uri(buffer)
+  return uri(buffer)
 end
 
 function M.typed_reference(value)
@@ -67,57 +126,36 @@ function M.line_selection(start_line, end_line)
 end
 
 function M.current_location()
-  local buffer = vim.api.nvim_get_current_buf()
-  local cursor = vim.api.nvim_win_get_cursor(0)
+  local snapshot = M.snapshot()
   return {
     kind = "location",
     source = {
-      uri = uri(buffer),
-      line = cursor[1] - 1,
-      column = cursor[2],
+      uri = snapshot.uri,
+      line = snapshot.cursor.line,
+      column = snapshot.cursor.column,
     },
   }
 end
 
 function M.visual_selection()
-  local mode = vim.fn.mode(1)
-  if mode == "\22" then
-    return nil, "blockwise references are not supported yet"
-  end
-  if mode ~= "v" and mode ~= "V" then
+  local snapshot = visual_selection_snapshot()
+  if snapshot == nil then
+    if vim.fn.mode(1) == "\22" then
+      return nil, "blockwise references are not supported yet"
+    end
     return nil, "Reference requires an active visual selection"
   end
-
-  local buffer = vim.api.nvim_get_current_buf()
-  local start = vim.fn.getpos("v")
-  local finish = vim.fn.getpos(".")
-  if start[2] > finish[2] or (start[2] == finish[2] and start[3] > finish[3]) then
-    start, finish = finish, start
-  end
-
-  local start_row = start[2] - 1
-  local end_row = finish[2] - 1
-  local start_col = mode == "V" and 0 or start[3] - 1
-  local end_col
-  local lines
-  if mode == "V" then
-    lines = vim.api.nvim_buf_get_lines(buffer, start_row, end_row + 1, false)
-    end_col = #(lines[#lines] or "")
-  else
-    end_col = finish[3]
-    lines = vim.api.nvim_buf_get_text(buffer, start_row, start_col, end_row, end_col, {})
-  end
-
+  local range = snapshot.location.range
   return {
     kind = "selection",
     source = {
-      uri = uri(buffer),
-      start_line = start_row,
-      start_column = start_col,
-      end_line = end_row,
-      end_column = end_col,
+      uri = snapshot.location.uri,
+      start_line = range.start.line,
+      start_column = range.start.column,
+      end_line = range["end"].line,
+      end_column = range["end"].column,
     },
-    snapshot = table.concat(lines, "\n"),
+    snapshot = snapshot.text,
   }
 end
 

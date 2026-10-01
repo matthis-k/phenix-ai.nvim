@@ -1,6 +1,7 @@
 local native = require("phenix")
 local config_api = require("phenix_nvim.config")
 local interaction = require("phenix_nvim.interaction")
+local tool_templates = require("phenix_nvim.tools")
 local util = require("phenix_nvim.util")
 
 local M = {}
@@ -21,6 +22,11 @@ local state = {
   context_generation = 0,
   selection_inflight = false,
   connect_deadline = nil,
+  tool_session = nil,
+  tool_revision = -1,
+  tool_stops = {},
+  tool_syncing = false,
+  tool_waiters = {},
 }
 
 local function now_ms()
@@ -63,12 +69,18 @@ local function terminate(connection, error)
   local client = state.client
   local pending = state.pending
   local callbacks = state.connect_callbacks
+  local tool_waiters = state.tool_waiters
   state.client = nil
   state.sessions = nil
   state.active_session = nil
   state.session_state = { sessions = {} }
   state.pending = {}
   state.connect_callbacks = {}
+  state.tool_session = nil
+  state.tool_revision = -1
+  state.tool_stops = {}
+  state.tool_syncing = false
+  state.tool_waiters = {}
   state.context_generation = state.context_generation + 1
   state.connection = connection
   state.connect_deadline = nil
@@ -83,6 +95,9 @@ local function terminate(connection, error)
   end
   for _, item in ipairs(pending) do
     util.safe_call(item.callback, nil, error)
+  end
+  for _, waiter in ipairs(tool_waiters) do
+    util.safe_call(waiter.callback, nil, error)
   end
 end
 
@@ -109,6 +124,151 @@ local function active_id()
   end
   local ok, id = pcall(state.active_session.id, state.active_session)
   return ok and id or nil
+end
+
+local function remove_tool_admissions(stops, callback)
+  local pending = {}
+  for _, stop in pairs(stops or {}) do
+    table.insert(pending, stop)
+  end
+  if #pending == 0 then
+    callback(nil)
+    return
+  end
+
+  local remaining = #pending
+  local first_error
+  local function settled(error)
+    first_error = first_error or error
+    remaining = remaining - 1
+    if remaining == 0 then
+      callback(first_error)
+    end
+  end
+
+  for _, stop in ipairs(pending) do
+    local ok, request = pcall(stop)
+    if not ok then
+      settled({ message = tostring(request) })
+    elseif request == nil then
+      settled(nil)
+    else
+      M.track(request, function(_, error)
+        settled(error)
+      end)
+    end
+  end
+end
+
+local function register_tool_templates(client, session_id, templates, callback)
+  local tools_method = client and client.tools
+  if type(tools_method) ~= "function" then
+    callback({}, nil)
+    return
+  end
+
+  local ok, native_tools = pcall(tools_method, client)
+  if not ok or type(native_tools) ~= "table" or type(native_tools.register) ~= "function" then
+    callback({}, nil)
+    return
+  end
+
+  local stops = {}
+  local index = 1
+  local function register_next()
+    local template = templates[index]
+    if template == nil then
+      callback(stops, nil)
+      return
+    end
+
+    local definition = vim.deepcopy(template.definition)
+    definition.session_id = session_id
+    local registered, request = pcall(native_tools.register, definition, template.handler)
+    if not registered then
+      remove_tool_admissions(stops, function()
+        callback(nil, { message = tostring(request) })
+      end)
+      return
+    end
+    M.track(request, function(stop, error)
+      if error ~= nil then
+        remove_tool_admissions(stops, function()
+          callback(nil, error)
+        end)
+        return
+      end
+      if type(stop) ~= "function" then
+        remove_tool_admissions(stops, function()
+          callback(nil, { message = "Phenix client tool registration returned no removal handle" })
+        end)
+        return
+      end
+      stops[template.id] = stop
+      index = index + 1
+      register_next()
+    end)
+  end
+
+  register_next()
+end
+
+local function ensure_client_tools(session_id, callback)
+  local revision = tool_templates._revision()
+  if state.tool_session == session_id
+    and state.tool_revision == revision
+    and not state.tool_syncing
+  then
+    util.safe_call(callback, true, nil)
+    return
+  end
+
+  if state.tool_syncing then
+    table.insert(state.tool_waiters, { session_id = session_id, callback = callback })
+    return
+  end
+
+  state.tool_syncing = true
+  local client = state.client
+  local previous_session = state.tool_session
+  local previous_stops = state.tool_stops
+  state.tool_stops = {}
+
+  local function finish(value, error)
+    if state.client == client then
+      state.tool_syncing = false
+      if error == nil then
+        state.tool_session = session_id
+        state.tool_revision = revision
+        state.tool_stops = value or {}
+      else
+        state.tool_session = nil
+        state.tool_revision = -1
+        state.tool_stops = {}
+      end
+    end
+    util.safe_call(callback, error == nil and true or nil, error)
+
+    local waiters = state.tool_waiters
+    state.tool_waiters = {}
+    for _, waiter in ipairs(waiters) do
+      ensure_client_tools(waiter.session_id, waiter.callback)
+    end
+  end
+
+  remove_tool_admissions(previous_stops, function(removal_error)
+    if state.client ~= client then
+      finish(nil, removal_error or { kind = "cancelled", message = "Phenix connection changed" })
+      return
+    end
+    if removal_error ~= nil and previous_session == session_id then
+      finish(nil, removal_error)
+      return
+    end
+    register_tool_templates(client, session_id, tool_templates._templates(), function(stops, error)
+      finish(stops, error)
+    end)
+  end)
 end
 
 local function refresh_projection(session_id)
@@ -532,6 +692,15 @@ function M.close_session(session_id, callback)
   end)
 end
 
+function M.refresh_client_tools(callback)
+  local session_id = active_id()
+  if session_id == nil then
+    util.safe_call(callback, true, nil)
+    return
+  end
+  ensure_client_tools(session_id, callback)
+end
+
 function M.active_session()
   return active_id()
 end
@@ -551,31 +720,37 @@ function M.prompt(session_id, segments, callback)
       util.safe_call(callback, nil, { message = "unknown Phenix session " .. tostring(session_id) })
       return
     end
-    local content, content_error = application_content(segments)
-    if content == nil then
-      util.safe_call(callback, nil, { message = content_error })
-      return
-    end
-    local ok, request = pcall(session.prompt, session, content)
-    if not ok then
-      util.safe_call(callback, nil, { message = tostring(request) })
-      return
-    end
-    M.track(request, function(result, error)
-      if error == nil then
-        refresh_projection(session_id)
-        local features_ok, features = pcall(state.client.features, state.client)
-        if features_ok and features.provenance and result and result.execution_id then
-          local provenance_ok, provenance = pcall(session.provenance, session, result.execution_id)
-          if provenance_ok then
-            M.track(provenance, function()
-              emit("status", M.status())
-            end)
+    ensure_client_tools(session_id, function(_, tool_error)
+      if tool_error ~= nil then
+        util.safe_call(callback, nil, tool_error)
+        return
+      end
+      local content, content_error = application_content(segments)
+      if content == nil then
+        util.safe_call(callback, nil, { message = content_error })
+        return
+      end
+      local ok, request = pcall(session.prompt, session, content)
+      if not ok then
+        util.safe_call(callback, nil, { message = tostring(request) })
+        return
+      end
+      M.track(request, function(result, error)
+        if error == nil then
+          refresh_projection(session_id)
+          local features_ok, features = pcall(state.client.features, state.client)
+          if features_ok and features.provenance and result and result.execution_id then
+            local provenance_ok, provenance = pcall(session.provenance, session, result.execution_id)
+            if provenance_ok then
+              M.track(provenance, function()
+                emit("status", M.status())
+              end)
+            end
           end
         end
-      end
-      util.safe_call(callback, result, error)
-    end, state.config.prompt_timeout_ms)
+        util.safe_call(callback, result, error)
+      end, state.config.prompt_timeout_ms)
+    end)
   end)
 end
 
