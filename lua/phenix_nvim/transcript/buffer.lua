@@ -1,3 +1,5 @@
+local disclosure = require("phenix_nvim.disclosure")
+
 local M = {}
 local namespace = vim.api.nvim_create_namespace("phenix-transcript")
 local style_namespace = vim.api.nvim_create_namespace("phenix-transcript-style")
@@ -21,7 +23,7 @@ local function store(key)
       name = nil,
       marks = {},
       attached_windows = {},
-      expanded = {},
+      disclosure = disclosure.new(),
       last_projection = nil,
     }
     stores[key] = value
@@ -63,7 +65,7 @@ local function lines_for(view, node)
   end
   if node.kind == "tool" then
     local title = "Tool · " .. tostring(node.callable_id or "unknown") .. " · " .. tostring(node.state or "running")
-    if not view.expanded[node.id] then
+    if not disclosure.is_open(view.disclosure, node.id) then
       return { title .. " · <CR> details", "" }
     end
     local lines = { title }
@@ -301,7 +303,7 @@ function M.toggle_tool(win, key)
   if node == nil or node.kind ~= "tool" then
     return false
   end
-  view.expanded[node.id] = not view.expanded[node.id]
+  disclosure.toggle(view.disclosure, node.id)
   M.render_node(node, key)
   return true
 end
