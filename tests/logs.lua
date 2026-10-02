@@ -140,6 +140,17 @@ assert(logs.category_at(buf, 5) == "write", "root semantic metadata must classif
 local marks = vim.api.nvim_buf_get_extmarks(buf, -1, 0, -1, { details = true })
 assert(#marks == #records, "each raw record must have one semantic decoration")
 assert(marks[1][4].virt_text ~= nil, "semantic view must render virtual text over raw JSONL")
+local function rendered(mark)
+  local parts = {}
+  for _, chunk in ipairs(mark[4].virt_text or {}) do
+    table.insert(parts, chunk[1])
+  end
+  return table.concat(parts)
+end
+assert(rendered(marks[1]):find("BASH", 1, true) ~= nil)
+assert(rendered(marks[3]):find("model turn 2", 1, true) ~= nil)
+assert(rendered(marks[4]):find("failed", 1, true) ~= nil)
+assert(rendered(marks[4]):find("fixture failure", 1, true) ~= nil)
 
 vim.api.nvim_win_set_cursor(0, { 1, 0 })
 assert(logs.toggle_details(buf) == true)
