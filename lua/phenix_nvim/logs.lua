@@ -81,10 +81,18 @@ local summary_keys = {
 
 local function scalar(value)
   local kind = type(value)
-  if kind == "string" or kind == "number" or kind == "boolean" then
+  if kind == "number" or kind == "boolean" then
     return tostring(value)
   end
-  return nil
+  if kind ~= "string" then
+    return nil
+  end
+  local normalized = value:gsub("%s+", " ")
+  local limit = 160
+  if vim.fn.strchars(normalized) <= limit then
+    return normalized
+  end
+  return vim.fn.strcharpart(normalized, 0, limit) .. "…"
 end
 
 local function compact_summary(payload)
@@ -332,7 +340,6 @@ local function open_reference_buffer(reference, content)
     session_id = nil,
     execution_id = nil,
   }
-  disclosure.set(view.disclosure, record_id(view.records[1]), true)
   local buffer = ensure_buffer(view)
   vim.cmd("tabnew")
   vim.api.nvim_win_set_buf(0, buffer)
