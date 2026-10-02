@@ -322,11 +322,10 @@ local function is_failure(context, kind)
     or contains_any(outcome, { "failed", "denied", "error", "cancelled" })
 end
 
-local function classify(record, store_root)
+local function classify(record, context)
   if type(record) ~= "table" then
     return "error"
   end
-  local context = normalized_context(record, store_root)
   local kind = tostring(record.kind or ""):lower()
   local event = tostring(find_field(context, { "event" }) or ""):lower()
   local callable = tostring(find_field(context, { "callable_id", "callable" }) or ""):lower()
@@ -392,9 +391,8 @@ local function first_non_empty(...)
 end
 
 local function summary(record, store_root)
-  local category = classify(record, store_root)
-  local spec = categories[category]
   if type(record) ~= "table" then
+    local spec = categories.error
     return {
       category = category,
       chunks = {
@@ -407,7 +405,9 @@ local function summary(record, store_root)
     }
   end
 
-  local context = normalized_context(record, store_root)
+  local context, detail = normalized_context(record, store_root)
+  local category = classify(record, context)
+  local spec = categories[category]
   local failure = is_failure(context, tostring(record.kind or ""):lower())
   local event = find_field(context, { "event" })
   local callable = find_field(context, { "callable_id", "callable" })
@@ -464,6 +464,7 @@ local function summary(record, store_root)
     text = text,
     references = refs,
     failure = failure,
+    detail = detail,
   }
 end
 
@@ -517,8 +518,7 @@ local function detail_lines(value, output, prefix, depth, budget)
   return output
 end
 
-local function record_detail_lines(record, store_root)
-  local detail = detail_value(record, store_root)
+local function record_detail_lines(record, detail)
   local target = detail or record
   local lines = detail_lines(target)
   if #lines == 0 then
@@ -545,11 +545,13 @@ local function decorate(buf)
   clear_decorations(buf)
   local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
   view.rows = {}
+  view.cache = view.cache or {}
   for index, line in ipairs(lines) do
     local row = index - 1
-    local record = decode_json(line)
-    local info = summary(record, view.store_root)
-    info.record = record
+    local cached = view.cache[line]
+    local record = cached and cached.record or decode_json(line)
+    local info = cached and cached.info or summary(record, view.store_root)
+    view.cache[line] = { record = record, info = info }
     view.rows[index] = info
     if view.raw then
       vim.api.nvim_buf_set_extmark(buf, namespace, row, 0, {
@@ -568,7 +570,7 @@ local function decorate(buf)
         hl_mode = "combine",
       }
       if view.expanded[index] and record ~= nil then
-        options.virt_lines = record_detail_lines(record, view.store_root)
+        options.virt_lines = record_detail_lines(record, info.detail)
       end
       vim.api.nvim_buf_set_extmark(buf, namespace, row, 0, options)
     end
@@ -742,6 +744,7 @@ local function open_source(source, options)
       raw = options.raw == true,
       expanded = {},
       rows = {},
+      cache = {},
     }
     vim.api.nvim_buf_attach(buf, false, {
       on_detach = function()
@@ -803,6 +806,7 @@ function M.refresh(buf)
     return false
   end
   local cursor = vim.api.nvim_win_get_cursor(0)
+  view.cache = {}
   set_lines(buf, split_lines(content))
   redraw(buf)
   local line_count = math.max(vim.api.nvim_buf_line_count(buf), 1)
