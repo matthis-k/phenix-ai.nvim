@@ -364,6 +364,32 @@ local function short_digest(reference)
   return reference.digest:sub(1, 19)
 end
 
+local function event_phase(event)
+  event = tostring(event or ""):lower()
+  if event:match("_started$") then
+    return "started"
+  end
+  if event:match("_completed$") then
+    return "completed"
+  end
+  if event:match("_failed$") then
+    return "failed"
+  end
+  if event:match("_cancelled$") then
+    return "cancelled"
+  end
+  return nil
+end
+
+local function compact_text(value, limit)
+  value = tostring(value or ""):gsub("\n", "\\n")
+  limit = limit or 120
+  if #value > limit then
+    return value:sub(1, limit - 3) .. "..."
+  end
+  return value
+end
+
 local function first_non_empty(...)
   for index = 1, select("#", ...) do
     local value = select(index, ...)
@@ -404,12 +430,18 @@ local function summary(record)
   local outcome = find_field(context, { "outcome", "state", "status" })
   local reason = find_field(context, { "reason", "error", "message" })
   local resource = find_field(context, { "resource", "path" })
+  local turn = find_field(context, { "turn" })
+  local phase = first_non_empty(outcome, event_phase(event))
 
   local text
   if category == "error" then
     text = first_non_empty(reason, callable, event, service, record.kind, "failure")
   elseif category == "model" then
-    text = first_non_empty(model, event, service, record.kind, "model")
+    if tostring(event or ""):lower():find("model_turn_", 1, true) ~= nil and turn ~= nil then
+      text = "model turn " .. tostring(turn)
+    else
+      text = first_non_empty(model, event, service, record.kind, "model")
+    end
     if provider ~= nil and tostring(provider) ~= "" and tostring(provider) ~= text then
       text = text .. " · " .. tostring(provider)
     end
@@ -432,10 +464,13 @@ local function summary(record)
     { string.format("%-7s", spec.label), spec.group },
     { " " .. text, "Normal" },
   }
-  if outcome ~= nil and tostring(outcome) ~= "" then
-    table.insert(chunks, { " · " .. tostring(outcome), failure and "PhenixLogError" or spec.group })
+  if phase ~= nil and phase ~= "" then
+    table.insert(chunks, { " · " .. phase, failure and "PhenixLogError" or spec.group })
   elseif failure then
     table.insert(chunks, { " · failed", "PhenixLogError" })
+  end
+  if failure and reason ~= nil and tostring(reason) ~= "" then
+    table.insert(chunks, { " · " .. compact_text(reason, 100), "PhenixLogError" })
   end
   if #refs > 0 then
     local digest = short_digest(refs[1]) or "reference"
