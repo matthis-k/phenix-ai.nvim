@@ -884,6 +884,12 @@ function M.category_at(buf, line)
   return row and row.category or nil
 end
 
+function M.failure_at(buf, line)
+  local view = state(buf)
+  local row = view and view.rows[line] or nil
+  return row and row.failure == true or false
+end
+
 function M.is_log_buffer(buf)
   return state(buf) ~= nil
 end
