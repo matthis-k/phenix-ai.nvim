@@ -788,6 +788,14 @@ local function client_request(method, callback, ...)
   end)
 end
 
+function M.logs(options, callback)
+  client_request("logs", callback, options or {})
+end
+
+function M.log_reference(reference, callback)
+  client_request("log_reference", callback, reference)
+end
+
 function M.list_authentication_methods(callback)
   client_request("authentication_methods", callback)
 end
