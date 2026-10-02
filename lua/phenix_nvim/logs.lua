@@ -304,14 +304,6 @@ local function contains_any(haystack, needles)
   return false
 end
 
-local function normalized_context(record, store_root)
-  local detail = detail_value(record, store_root)
-  if detail == nil then
-    return record, nil
-  end
-  return { record = record, detail = detail }, detail
-end
-
 local function is_failure(context, kind)
   local event = tostring(find_field(context, { "event" }) or ""):lower()
   local outcome = tostring(find_field(context, { "outcome", "state", "status" }) or ""):lower()
@@ -390,7 +382,7 @@ local function first_non_empty(...)
   return nil
 end
 
-local function summary(record, store_root)
+local function summary(record)
   if type(record) ~= "table" then
     local spec = categories.error
     return {
@@ -405,7 +397,7 @@ local function summary(record, store_root)
     }
   end
 
-  local context, detail = normalized_context(record, store_root)
+  local context = record
   local category = classify(record, context)
   local spec = categories[category]
   local failure = is_failure(context, tostring(record.kind or ""):lower())
@@ -464,7 +456,6 @@ local function summary(record, store_root)
     text = text,
     references = refs,
     failure = failure,
-    detail = detail,
   }
 end
 
@@ -550,7 +541,7 @@ local function decorate(buf)
     local row = index - 1
     local cached = view.cache[line]
     local record = cached and cached.record or decode_json(line)
-    local info = cached and cached.info or summary(record, view.store_root)
+    local info = cached and cached.info or summary(record)
     view.cache[line] = { record = record, info = info }
     view.rows[index] = info
     if view.raw then
@@ -570,6 +561,10 @@ local function decorate(buf)
         hl_mode = "combine",
       }
       if view.expanded[index] and record ~= nil then
+        if not info.detail_loaded then
+          info.detail = detail_value(record, view.store_root)
+          info.detail_loaded = true
+        end
         options.virt_lines = record_detail_lines(record, info.detail)
       end
       vim.api.nvim_buf_set_extmark(buf, namespace, row, 0, options)
