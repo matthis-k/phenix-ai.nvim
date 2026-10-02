@@ -356,25 +356,59 @@ assert(#write_handlers == 1, "compose buffer must send through exactly one BufWr
 local transcript_view = require("phenix_nvim.transcript.buffer")
 local transcript_win = vim.fn.bufwinid(transcript_buffer)
 assert(transcript_win > 0, "transcript buffer must be visible")
-vim.bo[transcript_buffer].modifiable = true
-local lines = {}
-for index = 1, 200 do
-  lines[index] = "line " .. index
+local transcript_surface = assert(sidebar.current_surface())
+
+-- Tool payloads stay out of the rendered transcript until the user opens them.
+local payload_marker = "TOOL-PAYLOAD-MUST-BE-COLLAPSED"
+transcript_view.render_projection({
+  order = { "tool" },
+  nodes = {
+    tool = {
+      id = "tool",
+      kind = "tool",
+      callable_id = "workspace.shell",
+      state = "completed",
+      input = { command = payload_marker .. string.rep("x", 4096) },
+      output = { text = payload_marker .. string.rep("y", 4096) },
+    },
+  },
+}, transcript_surface.transcript_key)
+local collapsed = table.concat(vim.api.nvim_buf_get_lines(transcript_buffer, 0, -1, false), "\n")
+assert(collapsed:find("<CR> details", 1, true), "collapsed tool must advertise disclosure")
+assert(not collapsed:find(payload_marker, 1, true), "collapsed tool must not eagerly render its payload")
+vim.api.nvim_win_set_cursor(transcript_win, { 1, 0 })
+assert(transcript_view.toggle_tool(transcript_win, transcript_surface.transcript_key))
+local expanded = table.concat(vim.api.nvim_buf_get_lines(transcript_buffer, 0, -1, false), "\n")
+assert(expanded:find(payload_marker, 1, true), "expanded tool must render its payload")
+assert(transcript_view.toggle_tool(transcript_win, transcript_surface.transcript_key))
+local collapsed_again = table.concat(vim.api.nvim_buf_get_lines(transcript_buffer, 0, -1, false), "\n")
+assert(not collapsed_again:find(payload_marker, 1, true), "collapsing a tool must remove its payload from the buffer")
+
+-- Wrapped transcript scrolling must operate on screen rows. A partial view of
+-- the final logical line is not the tail.
+if vim.fn.exists("+smoothscroll") == 1 then
+  assert(vim.wo[transcript_win].smoothscroll, "wrapped transcript must enable smoothscroll")
 end
-vim.api.nvim_buf_set_lines(transcript_buffer, 0, -1, false, lines)
+vim.bo[transcript_buffer].modifiable = true
+vim.api.nvim_buf_set_lines(transcript_buffer, 0, -1, false, { string.rep("wrapped text ", 2000) })
 vim.bo[transcript_buffer].modifiable = false
 vim.api.nvim_win_set_cursor(transcript_win, { 1, 0 })
 vim.api.nvim_win_call(transcript_win, function()
   vim.cmd("normal! zt")
 end)
 vim.api.nvim_exec_autocmds("WinScrolled", { pattern = tostring(transcript_win) })
-assert(not transcript_view.is_following_tail(), "manual scrolling away from the end must disable follow-tail")
-vim.api.nvim_win_set_cursor(transcript_win, { 200, 0 })
+assert(
+  not transcript_view.is_following_tail(transcript_win, transcript_surface.transcript_key),
+  "seeing only the start of a wrapped final line must disable follow-tail"
+)
 vim.api.nvim_win_call(transcript_win, function()
-  vim.cmd("normal! zb")
+  vim.cmd("normal! G$")
 end)
 vim.api.nvim_exec_autocmds("WinScrolled", { pattern = tostring(transcript_win) })
-assert(transcript_view.is_following_tail(), "returning to the end must re-enable follow-tail")
+assert(
+  transcript_view.is_following_tail(transcript_win, transcript_surface.transcript_key),
+  "showing the end of the wrapped final line must re-enable follow-tail"
+)
 sidebar.close()
 
 local review = require("phenix_nvim.review")
