@@ -67,8 +67,6 @@ local tools = require("phenix_nvim.tools")
 runtime.configure(config.setup({
   auto_connect = false,
   poll_interval_ms = 60000,
-  request_timeout_ms = 30000,
-  prompt_timeout_ms = 30000,
 }))
 tools.enable_defaults()
 

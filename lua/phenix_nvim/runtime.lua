@@ -21,21 +21,12 @@ local state = {
   connect_callbacks = {},
   context_generation = 0,
   selection_inflight = false,
-  connect_deadline = nil,
   tool_session = nil,
   tool_revision = -1,
   tool_stops = {},
   tool_syncing = false,
   tool_waiters = {},
 }
-
-local function now_ms()
-  return uv.hrtime() / 1000000
-end
-
-local function timeout_error(operation)
-  return { kind = "timeout", code = "timeout", message = "Phenix " .. operation .. " timed out" }
-end
 
 local function emit(kind, value)
   for _, listener in ipairs(vim.deepcopy(state.listeners)) do
@@ -83,7 +74,6 @@ local function terminate(connection, error)
   state.tool_waiters = {}
   state.context_generation = state.context_generation + 1
   state.connection = connection
-  state.connect_deadline = nil
   state.error = connection == "failed" and error or nil
   if client ~= nil then
     pcall(client.close, client)
@@ -363,7 +353,6 @@ local function handle_event(event, dirty_sessions)
     state.connection = data and data.state or state.connection
     state.error = data and data.error or nil
     if state.connection == "ready" then
-      state.connect_deadline = nil
       settle_connect_callbacks(state, nil)
     end
     emit("status", M.status())
@@ -397,7 +386,7 @@ function M.on_event(listener)
   end
 end
 
-function M.track(request, callback, timeout_ms)
+function M.track(request, callback)
   if request == nil then
     util.safe_call(callback, nil, { message = "native request was not created" })
     return
@@ -405,7 +394,6 @@ function M.track(request, callback, timeout_ms)
   table.insert(state.pending, {
     request = request,
     callback = callback,
-    deadline = now_ms() + (timeout_ms or state.config.request_timeout_ms),
   })
 end
 
@@ -413,20 +401,6 @@ function M.tick()
   local client = state.client
   if client == nil then
     return
-  end
-
-  local now = now_ms()
-  if state.connect_deadline ~= nil and now >= state.connect_deadline then
-    fail(timeout_error("connection"))
-    return
-  end
-  -- Closing the connection also stops late remote mutations and cache updates.
-  -- A timed-out mutation has an unknown outcome and must never be auto-retried.
-  for _, item in ipairs(state.pending) do
-    if now >= item.deadline then
-      fail(timeout_error("request"))
-      return
-    end
   end
 
   local ok, events = pcall(client.pump, client, state.config.poll_budget)
@@ -484,7 +458,6 @@ function M.connect(callback)
   local config = state.config or require("phenix_nvim.config").get()
   state.config = config
   state.connection = "connecting"
-  state.connect_deadline = now_ms() + config.connect_timeout_ms
   state.error = nil
 
   local facade = native.application and native.application.connect
@@ -758,7 +731,7 @@ function M.prompt(session_id, segments, callback)
           end
         end
         util.safe_call(callback, result, error)
-      end, state.config.prompt_timeout_ms)
+      end)
     end)
   end)
 end

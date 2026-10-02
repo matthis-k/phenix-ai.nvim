@@ -18,7 +18,7 @@ The flake follows `github:matthis-k/phenix-ai`, and `flake.lock` pins the exact 
 
 Requests made while connecting wait for readiness. `new_session(callback)` completes after the durable session is created. Model and authentication preferences are owned by Phenix and do not need a session. `disconnect()` cancels queued and pending callbacks and closes the owned runtime. Runtime failure settles pending work with its cause; call `connect()` explicitly to retry. Delayed authentication and selection UI callbacks cannot affect a replacement connection or session.
 
-Startup and ordinary requests default to 30-second deadlines. Prompts default to 10 minutes, including time spent waiting for user interaction. Configure `connect_timeout_ms`, `request_timeout_ms`, and `prompt_timeout_ms` with finite positive durations. A timeout closes the connection and settles outstanding callbacks with a structured `timeout` error. Timed-out mutations may have completed remotely, so the client never retries them automatically. Reconnect and inspect the durable session before repeating a mutation.
+The client does not impose execution, request, or prompt deadlines. Phenix owns model/provider failures, retries, cancellation, and any opt-in execution limits. A failed Phenix request settles only that request, so the same live connection can submit the next prompt. The client terminates the connection only when the native process or transport reports a real connection failure.
 
 ## Models and authentication
 

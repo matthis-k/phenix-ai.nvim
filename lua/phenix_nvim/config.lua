@@ -10,9 +10,6 @@ local defaults = {
   auto_connect = false,
   poll_interval_ms = 25,
   poll_budget = 32,
-  connect_timeout_ms = 30000,
-  request_timeout_ms = 30000,
-  prompt_timeout_ms = 600000,
   side = "right",
   width = 0.4,
   compose_height = 8,
@@ -31,9 +28,8 @@ end
 function M.setup(options)
   local resolved = vim.tbl_deep_extend("force", vim.deepcopy(defaults), options or {})
   for _, key in ipairs({ "connect_timeout_ms", "request_timeout_ms", "prompt_timeout_ms" }) do
-    local value = resolved[key]
-    if type(value) ~= "number" or value ~= value or value <= 0 or value == math.huge then
-      error("phenix-ai.nvim " .. key .. " must be a finite positive number")
+    if options ~= nil and options[key] ~= nil then
+      error("phenix-ai.nvim " .. key .. " is not supported; configure execution timeouts and limits in Phenix")
     end
   end
   if type(resolved.width) ~= "number"

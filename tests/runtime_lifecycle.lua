@@ -297,58 +297,68 @@ assert(
   "stale rollback mutated the disconnected client"
 )
 
-local uv = vim.uv or vim.loop
-local original_hrtime = uv.hrtime
-local clock = 0
-uv.hrtime = function() return clock * 1000000 end
-runtime.configure(config.setup({ poll_interval_ms = 60000,
-  connect_timeout_ms = 100, request_timeout_ms = 200, prompt_timeout_ms = 1000 }))
+-- A Phenix/model failure settles only that prompt. It does not poison the
+-- transport connection, and the next prompt gets a fresh request.
 next_client = client()
-local timed_connect, timed_create = result(), result()
-runtime.connect(timed_connect.callback)
-runtime.new_session(timed_create.callback)
-clock = 100
-runtime.tick()
-assert(timed_connect.calls == 1 and timed_connect.error.kind == "timeout")
-assert(timed_create.calls == 1 and timed_create.error == timed_connect.error)
-assert(next_client.closed == 1 and runtime.status().connection == "failed")
-next_client:status_event("ready")
-runtime.tick()
-assert(timed_connect.calls == 1 and runtime.status().connection == "failed")
-
-next_client = client()
+local model_failure = {
+  kind = "failed",
+  code = "provider_failed",
+  message = "model provider failed",
+}
+local prompt_calls = 0
+next_client.session.prompt = function()
+  prompt_calls = prompt_calls + 1
+  if prompt_calls == 1 then
+    return failed(model_failure)
+  end
+  return completed({ execution_id = "execution-2" })
+end
 runtime.connect()
 next_client:status_event("ready")
 runtime.tick()
-local timed_request = result()
-runtime.list_sessions(timed_request.callback)
-clock = 299
+local failed_prompt = result()
+runtime.prompt("session.test", { { kind = "text", text = "first" } }, failed_prompt.callback)
 runtime.tick()
-assert(timed_request.calls == 0)
-clock = 300
-runtime.tick()
-assert(timed_request.calls == 1 and timed_request.error.code == "timeout")
-assert(next_client.closed == 1)
-runtime.tick()
-assert(timed_request.calls == 1)
+assert(failed_prompt.calls == 1 and failed_prompt.error == model_failure)
+assert(runtime.status().connection == "ready" and next_client.closed == 0)
 
--- A fresh connection gets fresh deadlines; prompts have a separate longer limit.
+local recovered_prompt = result()
+runtime.prompt("session.test", { { kind = "text", text = "second" } }, recovered_prompt.callback)
+runtime.tick()
+assert(recovered_prompt.calls == 1 and recovered_prompt.error == nil)
+assert(prompt_calls == 2 and runtime.status().connection == "ready")
+runtime.disconnect()
+
+-- Application requests have no frontend deadline. Phenix owns execution limits
+-- and settles model/provider failures. The plugin only fails requests when the
+-- native process or transport reports a connection failure.
 next_client = client()
 next_client.session.prompt = pending
 runtime.connect()
 next_client:status_event("ready")
 runtime.tick()
-local timed_prompt = result()
-runtime.prompt("session.test", { { kind = "text", text = "test" } }, timed_prompt.callback)
-clock = 501
+local long_prompt = result()
+runtime.prompt("session.test", { { kind = "text", text = "test" } }, long_prompt.callback)
+for _ = 1, 4 do
+  runtime.tick()
+end
+assert(long_prompt.calls == 0, "frontend imposed a deadline on a pending Phenix prompt")
+assert(next_client.closed == 0 and runtime.status().connection == "ready")
+
+local process_failure = {
+  kind = "transport",
+  code = "transport",
+  message = "phenix process exited",
+}
+next_client:status_event("failed", process_failure)
 runtime.tick()
-assert(timed_prompt.calls == 0 and next_client.closed == 0)
-clock = 1300
-runtime.tick()
-assert(timed_prompt.calls == 1 and timed_prompt.error.kind == "timeout")
-runtime.disconnect()
-uv.hrtime = original_hrtime
-for _, value in ipairs({ 0, -1, math.huge, "100" }) do
-  assert(not pcall(config.setup, { request_timeout_ms = value }))
+assert(long_prompt.calls == 1 and long_prompt.error == process_failure)
+assert(next_client.closed == 1 and runtime.status().connection == "failed")
+
+for _, key in ipairs({ "connect_timeout_ms", "request_timeout_ms", "prompt_timeout_ms" }) do
+  assert(
+    not pcall(config.setup, { [key] = 100 }),
+    key .. " must be configured in Phenix rather than phenix-ai.nvim"
+  )
 end
 print("runtime lifecycle regressions passed")
