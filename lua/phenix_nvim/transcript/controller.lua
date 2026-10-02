@@ -5,6 +5,7 @@ local runtime = require("phenix_nvim.runtime")
 local M = {}
 local views = setmetatable({}, { __mode = "k" })
 local stop_listener
+local refresh_scheduled = false
 
 local function resolved_key(key)
   return key or buffer.default_key()
@@ -108,6 +109,19 @@ function M.refresh(key)
   return first_error == nil and true or nil, first_error
 end
 
+local function schedule_refresh()
+  if refresh_scheduled then
+    return
+  end
+  refresh_scheduled = true
+  vim.schedule(function()
+    refresh_scheduled = false
+    if stop_listener ~= nil then
+      M.refresh()
+    end
+  end)
+end
+
 function M.start()
   if stop_listener ~= nil then
     return
@@ -115,7 +129,7 @@ function M.start()
   entry(buffer.default_key())
   stop_listener = runtime.on_event(function(kind)
     if kind == "sessions" or kind == "status" then
-      M.refresh()
+      schedule_refresh()
     end
   end)
   M.refresh()
