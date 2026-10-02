@@ -122,7 +122,8 @@ assert(vim.deep_equal(vim.api.nvim_buf_get_lines(buf, 0, -1, false), records), "
 assert(logs.category_at(buf, 1) == "bash")
 assert(logs.category_at(buf, 2) == "read")
 assert(logs.category_at(buf, 3) == "model")
-assert(logs.category_at(buf, 4) == "error")
+assert(logs.category_at(buf, 4) == "agent")
+assert(logs.failure_at(buf, 4), "failed agent activity must retain its semantic category and failure state")
 assert(logs.category_at(buf, 5) == "write", "referenced detail must participate in semantic classification")
 
 local marks = vim.api.nvim_buf_get_extmarks(buf, -1, 0, -1, { details = true })
