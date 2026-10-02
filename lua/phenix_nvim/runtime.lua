@@ -349,7 +349,7 @@ local function application_content(segments)
   return content
 end
 
-local function handle_event(event)
+local function handle_event(event, dirty_sessions)
   if type(event) ~= "table" then
     return
   end
@@ -372,10 +372,7 @@ local function handle_event(event)
   if kind == "session_snapshot" or kind == "session_update" then
     local session_id = data and (data.session_id or (data.session and data.session.session_id))
     if session_id ~= nil then
-      refresh_projection(session_id)
-      if session_id == active_id() then
-        emit("status", M.status())
-      end
+      dirty_sessions[session_id] = true
     end
     emit("update", event)
     return
@@ -437,11 +434,23 @@ function M.tick()
     fail(events)
     return
   end
+  local dirty_sessions = {}
   for _, event in ipairs(events or {}) do
-    handle_event(event)
+    handle_event(event, dirty_sessions)
     if state.client ~= client then
       return
     end
+  end
+  local active_session_id = active_id()
+  local active_session_changed = false
+  for session_id in pairs(dirty_sessions) do
+    refresh_projection(session_id)
+    if session_id == active_session_id then
+      active_session_changed = true
+    end
+  end
+  if active_session_changed then
+    emit("status", M.status())
   end
 
   for index = #state.pending, 1, -1 do
