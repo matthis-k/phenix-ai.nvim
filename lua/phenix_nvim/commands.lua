@@ -7,6 +7,7 @@ local roots = {
   "auth",
   "cancel",
   "image",
+  "logs",
   "new",
   "reference",
   "select",
@@ -69,6 +70,15 @@ function M.execute(options)
     else
       usage("Usage: Phenix select")
     end
+    return
+  end
+
+  if command == "logs" then
+    if #args > 1 then
+      usage("Usage: Phenix logs [session|execution|all]")
+      return
+    end
+    actions.logs(args[1] or "session")
     return
   end
 
@@ -186,6 +196,9 @@ function M.complete(arglead, cmdline, cursorpos)
     local values = { "clipboard" }
     vim.list_extend(values, vim.fn.getcompletion(arglead, "file"))
     return matches(values, arglead)
+  end
+  if args[1] == "logs" and #args == 1 then
+    return matches({ "all", "execution", "session" }, arglead)
   end
   if args[1] == "session" and #args == 1 then
     return matches({ "close", "new", "select" }, arglead)
