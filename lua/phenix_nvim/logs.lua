@@ -275,26 +275,6 @@ local function find_field(value, names)
   end)
 end
 
-local function all_text(value, output, depth)
-  output = output or {}
-  depth = depth or 0
-  if depth > 8 then
-    return output
-  end
-  if type(value) == "string" then
-    table.insert(output, value:lower())
-    return output
-  end
-  if type(value) ~= "table" then
-    return output
-  end
-  for key, child in pairs(value) do
-    table.insert(output, tostring(key):lower())
-    all_text(child, output, depth + 1)
-  end
-  return output
-end
-
 local function contains_any(haystack, needles)
   for _, needle in ipairs(needles) do
     if haystack:find(needle, 1, true) ~= nil then
@@ -322,9 +302,12 @@ local function classify(record, context)
   local event = tostring(find_field(context, { "event" }) or ""):lower()
   local callable = tostring(find_field(context, { "callable_id", "callable" }) or ""):lower()
   local service = tostring(find_field(context, { "service" }) or ""):lower()
-  local text = table.concat(all_text(context), " ")
 
-  if contains_any(callable, { "shell", "bash" }) or contains_any(text, { "workspace.shell", "phx1_bash" }) then
+  if callable == "bash"
+    or callable == "phx1_bash"
+    or callable == "workspace.shell"
+    or callable:match("%.shell$") ~= nil
+  then
     return "bash"
   end
   if callable == "read" or contains_any(callable, { ".read", "workspace.read" }) then
@@ -339,10 +322,13 @@ local function classify(record, context)
   then
     return "model"
   end
-  if contains_any(event, { "tool_call", "tool_result" }) or callable ~= "" then
+  if contains_any(event, { "tool_call", "tool_result", "tool_invocation_" }) or callable ~= "" then
     return "tool"
   end
-  if contains_any(service, { "agent-loop", "execution", "delegat" }) or contains_any(text, { "execution_id", "parent_execution", "agent_loop" }) then
+  if kind == "agent_diagnostic"
+    or contains_any(event, { "run_started", "run_completed", "run_cancelled", "run_failed" })
+    or contains_any(service, { "agent-loop", "execution", "delegat" })
+  then
     return "agent"
   end
   if event == "policy_stage" or kind:find("policy", 1, true) ~= nil then
