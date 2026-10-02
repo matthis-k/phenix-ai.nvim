@@ -137,11 +137,20 @@ local function valid_window(win, key)
     and vim.api.nvim_win_get_buf(win) == M.ensure(key)
 end
 
+local function last_character_column(line)
+  if line == "" then
+    return 0
+  end
+  local characters = vim.str_utfindex(line)
+  return vim.str_byteindex(line, math.max(characters - 1, 0))
+end
+
 local function tail_visible(win, key)
   local target = M.ensure(key)
   local last = math.max(vim.api.nvim_buf_line_count(target), 1)
   local line = vim.api.nvim_buf_get_lines(target, last - 1, last, false)[1] or ""
-  local ok, position = pcall(vim.fn.screenpos, win, last, #line + 1)
+  local column = last_character_column(line) + 1
+  local ok, position = pcall(vim.fn.screenpos, win, last, column)
   return ok and type(position) == "table" and tonumber(position.row or 0) > 0
 end
 
@@ -169,10 +178,11 @@ local function scroll_to_tail(key)
   local target = M.ensure(key)
   local last = math.max(vim.api.nvim_buf_line_count(target), 1)
   local line = vim.api.nvim_buf_get_lines(target, last - 1, last, false)[1] or ""
+  local column = last_character_column(line)
   for win, state in pairs(view.attached_windows) do
     if valid_window(win, key) then
       if state.follow_tail then
-        pcall(vim.api.nvim_win_set_cursor, win, { last, #line })
+        pcall(vim.api.nvim_win_set_cursor, win, { last, column })
       end
     else
       view.attached_windows[win] = nil
