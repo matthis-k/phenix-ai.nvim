@@ -137,18 +137,113 @@ local function record_id(record)
   return "record:" .. tostring(record.cursor or "?")
 end
 
-local function headline_group(record)
+local function walk(value, callback, depth)
+  depth = depth or 0
+  if depth > 8 or type(value) ~= "table" then
+    return nil
+  end
+  local matched = callback(value)
+  if matched ~= nil then
+    return matched
+  end
+  for _, child in pairs(value) do
+    if type(child) == "table" then
+      local nested = walk(child, callback, depth + 1)
+      if nested ~= nil then
+        return nested
+      end
+    end
+  end
+  return nil
+end
+
+local function find_field(value, names)
+  return walk(value, function(object)
+    for _, key in ipairs(names) do
+      local child = object[key]
+      if type(child) == "string" or type(child) == "number" or type(child) == "boolean" then
+        return child
+      end
+    end
+  end)
+end
+
+local function contains_any(value, needles)
+  for _, needle in ipairs(needles) do
+    if value:find(needle, 1, true) ~= nil then
+      return true
+    end
+  end
+  return false
+end
+
+local function classify(record)
   local kind = string.lower(tostring(record.kind or ""))
   local payload = record.payload
-  local severity = type(payload) == "table" and string.lower(tostring(payload.severity or "")) or ""
-  if kind:find("fail", 1, true) or kind:find("error", 1, true) or severity == "error" then
+  local event = string.lower(tostring(find_field(payload, { "event" }) or ""))
+  local callable = string.lower(tostring(find_field(payload, { "callable_id", "callable" }) or ""))
+  local service = string.lower(tostring(find_field(payload, { "service" }) or ""))
+  local outcome = string.lower(tostring(find_field(payload, { "outcome", "state", "status" }) or ""))
+  local success = find_field(payload, { "success" })
+
+  if success == false
+    or contains_any(kind, { "error", "failed", "failure" })
+    or contains_any(event, { "failed", "rejected", "error" })
+    or contains_any(outcome, { "failed", "denied", "error" })
+  then
+    return "error"
+  end
+  if callable == "bash" or callable == "workspace.shell" or callable:match("%.shell$") ~= nil then
+    return "bash"
+  end
+  if callable == "read" or contains_any(callable, { ".read", "workspace.read" }) then
+    return "read"
+  end
+  if contains_any(callable, { ".write", "workspace.write", "patch", "edit" }) then
+    return "write"
+  end
+  if kind == "model_diagnostic"
+    or contains_any(event, { "model_turn_", "routing_decision", "dispatch_" })
+    or service:find("model", 1, true) ~= nil
+  then
+    return "model"
+  end
+  if contains_any(event, { "tool_call", "tool_result", "tool_invocation_" }) then
+    return "tool"
+  end
+  if kind == "agent_diagnostic"
+    or contains_any(event, { "run_started", "run_completed", "run_cancelled", "run_failed" })
+    or contains_any(service, { "agent-loop", "execution", "delegat" })
+  then
+    return "agent"
+  end
+  if callable ~= "" then
+    return "tool"
+  end
+  return "runtime"
+end
+
+local category_labels = {
+  error = "ERR",
+  agent = "AGENT",
+  model = "MODEL",
+  bash = "BASH",
+  read = "READ",
+  write = "WRITE",
+  tool = "TOOL",
+  runtime = "RUNTIME",
+}
+
+local function headline_group(record)
+  local category = classify(record)
+  if category == "error" then
     return "DiagnosticError"
   end
-  if kind:find("tool", 1, true) then
-    return "Identifier"
-  end
-  if kind:find("model", 1, true) then
+  if category == "model" then
     return "Special"
+  end
+  if category == "bash" or category == "read" or category == "write" or category == "tool" then
+    return "Identifier"
   end
   return "Title"
 end
@@ -200,7 +295,7 @@ local function render(view)
   local lines = {
     "# Phenix logs · " .. scope_title(view),
     "",
-    "<CR> details · gf/gF content · gd session/execution · ]l load more",
+    "<CR> details · gf/gF content · gd scope · ]e error · ]a agent · ]t tool · r refresh · ]l more",
     "",
   }
   local row_to_record = {}
@@ -216,6 +311,8 @@ local function render(view)
       lines,
       (open and "▼ " or "▶ ")
         .. timestamp(record.timestamp_ms)
+        .. "  "
+        .. string.format("%-7s", category_labels[classify(record)] or "LOG")
         .. "  "
         .. tostring(record.kind or "record")
         .. "  #"
@@ -423,6 +520,52 @@ attach = function(buffer)
     silent = true,
     desc = "Open correlated Phenix logs",
   })
+  local function jump(direction, wanted)
+    local view = current_view()
+    if view == nil then
+      return
+    end
+    local row = vim.api.nvim_win_get_cursor(0)[1] + direction
+    local count = vim.api.nvim_buf_line_count(buffer)
+    while row >= 1 and row <= count do
+      local id = view.row_to_record[row]
+      if id ~= nil then
+        for _, record in ipairs(view.records) do
+          if record_id(record) == id then
+            local category = classify(record)
+            if wanted[category] then
+              vim.api.nvim_win_set_cursor(0, { row, 0 })
+              return
+            end
+            break
+          end
+        end
+      end
+      row = row + direction
+    end
+  end
+  for _, spec in ipairs({
+    { "]e", 1, { error = true }, "Next Phenix log error" },
+    { "[e", -1, { error = true }, "Previous Phenix log error" },
+    { "]a", 1, { agent = true }, "Next Phenix agent event" },
+    { "[a", -1, { agent = true }, "Previous Phenix agent event" },
+    { "]t", 1, { tool = true, bash = true, read = true, write = true }, "Next Phenix tool event" },
+    { "[t", -1, { tool = true, bash = true, read = true, write = true }, "Previous Phenix tool event" },
+  }) do
+    vim.keymap.set("n", spec[1], function()
+      jump(spec[2], spec[3])
+    end, { buffer = buffer, silent = true, desc = spec[4] })
+  end
+  vim.keymap.set("n", "r", function()
+    local view = current_view()
+    if view ~= nil then
+      view.next_cursor = nil
+      load(view, false)
+    end
+  end, { buffer = buffer, silent = true, desc = "Refresh Phenix logs" })
+  vim.keymap.set("n", "q", function()
+    pcall(vim.cmd, "tabclose")
+  end, { buffer = buffer, silent = true, desc = "Close Phenix logs" })
   vim.keymap.set("n", "]l", function()
     M.more()
   end, {
