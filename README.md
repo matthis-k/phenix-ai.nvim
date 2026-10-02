@@ -102,6 +102,7 @@ The plugin exposes one command namespace instead of many top-level commands:
 :Phenix reference at <path>
 :Phenix image clipboard
 :Phenix image <path>
+:Phenix logs [raw]
 :Phenix new [sidebar|tab|curr_window|fullscreen]
 :Phenix session new
 :Phenix session close
