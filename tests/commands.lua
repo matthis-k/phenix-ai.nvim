@@ -1,5 +1,6 @@
 local commands = require("phenix_nvim.commands")
 local actions = require("phenix_nvim.actions")
+local logs = require("phenix_nvim.logs")
 
 vim.cmd.runtime("plugin/phenix.lua")
 
@@ -22,6 +23,12 @@ for _, legacy in ipairs({
 end
 
 local calls = {}
+local log_calls = {}
+local original_logs_open = logs.open
+logs.open = function(options)
+  table.insert(log_calls, options or {})
+  return true
+end
 local originals = {}
 for _, name in ipairs({
   "toggle",
@@ -59,6 +66,8 @@ execute("reference", "at", "/tmp/a", "b.txt")
 execute("image")
 execute("image", "clipboard")
 execute("image", "/tmp/a", "b.png")
+execute("logs")
+execute("logs", "raw")
 execute("session", "new")
 execute("session", "close")
 execute("session", "select")
@@ -102,6 +111,9 @@ assert(calls[6].args[1] == "/tmp/a b.txt")
 assert(calls[7].args[1] == "clipboard")
 assert(calls[8].args[1] == "clipboard")
 assert(calls[9].args[1] == "/tmp/a b.png")
+assert(#log_calls == 2)
+assert(log_calls[1].raw == nil)
+assert(log_calls[2].raw == true)
 assert(calls[13].args[1] == "sidebar")
 assert(calls[14].args[1] == "sidebar")
 assert(calls[15].args[1] == "tab")
@@ -114,14 +126,17 @@ execute("send", "unexpected")
 execute("cancel", "unexpected")
 execute("auth", "unexpected")
 execute("select", "unexpected")
+execute("logs", "unexpected")
 execute("new", "unexpected")
 execute("new", "sidebar", "extra")
 execute("window", "close")
 execute("window", "move", "left")
 assert(#calls == before_invalid, "commands with unexpected or removed arguments must not execute mutations")
+assert(#log_calls == 2, "invalid log commands must not open the inspector")
 
 local roots = commands.complete("", "Phenix ", #"Phenix ")
 assert(vim.tbl_contains(roots, "image"))
+assert(vim.tbl_contains(roots, "logs"))
 assert(vim.tbl_contains(roots, "session"))
 assert(vim.tbl_contains(roots, "reference"))
 assert(vim.tbl_contains(roots, "new"))
@@ -132,6 +147,9 @@ assert(vim.tbl_contains(presentations, "sidebar"))
 assert(vim.tbl_contains(presentations, "tab"))
 assert(vim.tbl_contains(presentations, "curr_window"))
 assert(vim.tbl_contains(presentations, "fullscreen"))
+
+local log_modes = commands.complete("", "Phenix logs ", #"Phenix logs ")
+assert(vim.tbl_contains(log_modes, "raw"))
 
 local image_sources = commands.complete("", "Phenix image ", #"Phenix image ")
 assert(vim.tbl_contains(image_sources, "clipboard"))
@@ -145,3 +163,4 @@ assert(vim.tbl_contains(sessions, "select"))
 for name, original in pairs(originals) do
   actions[name] = original
 end
+logs.open = original_logs_open
