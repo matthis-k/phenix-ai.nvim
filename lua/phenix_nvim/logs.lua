@@ -140,6 +140,13 @@ local function ensure_buffer(view)
   vim.b[buffer].phenix_role = "logs"
   vim.api.nvim_buf_set_name(buffer, "phenix://logs/" .. tostring(next_buffer_id))
   views[buffer] = view
+  vim.api.nvim_create_autocmd("BufWipeout", {
+    buffer = buffer,
+    once = true,
+    callback = function()
+      views[buffer] = nil
+    end,
+  })
   return buffer
 end
 
@@ -357,9 +364,17 @@ local function query_options(view)
 end
 
 local function load(view, append)
+  if view.loading then
+    return
+  end
+  view.loading = true
   runtime.logs(query_options(view), function(result, error)
+    view.loading = false
     if error ~= nil then
       util.notify(vim.inspect(error), vim.log.levels.ERROR)
+      return
+    end
+    if view.buffer == nil or not vim.api.nvim_buf_is_valid(view.buffer) then
       return
     end
     local records = result and result.records or {}
@@ -413,6 +428,7 @@ function M.open(scope)
     row_to_record = {},
     row_to_reference = {},
     record_starts = {},
+    loading = false,
   }
   local buffer = ensure_buffer(view)
   vim.cmd("tabnew")
