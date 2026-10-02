@@ -34,6 +34,7 @@ M.send = actions.send
 M.toggle = actions.toggle
 M.new = actions.new
 M.cancel = actions.cancel
+M.logs = actions.logs
 M.new_session = actions.new_session
 M.close_session = actions.close_session
 M.choose_session = actions.choose_session

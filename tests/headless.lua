@@ -83,6 +83,7 @@ assert(type(frontend.reference_at) == "function")
 assert(type(frontend.reference_picker) == "function")
 assert(type(frontend.send) == "function")
 assert(type(frontend.new) == "function")
+assert(type(frontend.logs) == "function")
 assert(type(frontend.choose_selection) == "function")
 assert(frontend.choose_model == nil)
 assert(frontend.choose_routing_profile == nil)
@@ -356,26 +357,173 @@ assert(#write_handlers == 1, "compose buffer must send through exactly one BufWr
 local transcript_view = require("phenix_nvim.transcript.buffer")
 local transcript_win = vim.fn.bufwinid(transcript_buffer)
 assert(transcript_win > 0, "transcript buffer must be visible")
-vim.bo[transcript_buffer].modifiable = true
-local lines = {}
-for index = 1, 200 do
-  lines[index] = "line " .. index
+local transcript_surface = assert(sidebar.current_surface())
+
+-- Tool payloads stay out of the rendered transcript until the user opens them.
+local payload_marker = "TOOL-PAYLOAD-MUST-BE-COLLAPSED"
+transcript_view.render_projection({
+  order = { "tool" },
+  nodes = {
+    tool = {
+      id = "tool",
+      kind = "tool",
+      callable_id = "workspace.shell",
+      state = "completed",
+      input = { command = payload_marker .. string.rep("x", 4096) },
+      output = { text = payload_marker .. string.rep("y", 4096) },
+    },
+  },
+}, transcript_surface.transcript_key)
+local collapsed = table.concat(vim.api.nvim_buf_get_lines(transcript_buffer, 0, -1, false), "\n")
+assert(collapsed:find("<CR> details", 1, true), "collapsed tool must advertise disclosure")
+assert(not collapsed:find(payload_marker, 1, true), "collapsed tool must not eagerly render its payload")
+vim.api.nvim_win_set_cursor(transcript_win, { 1, 0 })
+assert(transcript_view.toggle_tool(transcript_win, transcript_surface.transcript_key))
+local expanded = table.concat(vim.api.nvim_buf_get_lines(transcript_buffer, 0, -1, false), "\n")
+assert(expanded:find(payload_marker, 1, true), "expanded tool must render its payload")
+assert(transcript_view.toggle_tool(transcript_win, transcript_surface.transcript_key))
+local collapsed_again = table.concat(vim.api.nvim_buf_get_lines(transcript_buffer, 0, -1, false), "\n")
+assert(not collapsed_again:find(payload_marker, 1, true), "collapsing a tool must remove its payload from the buffer")
+
+-- Wrapped transcript scrolling must operate on screen rows. A partial view of
+-- the final logical line is not the tail.
+assert(vim.wo[transcript_win].scrolloff == 0, "transcript view must not inherit editing scrolloff")
+if vim.fn.exists("+smoothscroll") == 1 then
+  assert(vim.wo[transcript_win].smoothscroll, "wrapped transcript must enable smoothscroll")
 end
-vim.api.nvim_buf_set_lines(transcript_buffer, 0, -1, false, lines)
+vim.bo[transcript_buffer].modifiable = true
+vim.api.nvim_buf_set_lines(transcript_buffer, 0, -1, false, { string.rep("wrapped text ", 2000) })
 vim.bo[transcript_buffer].modifiable = false
 vim.api.nvim_win_set_cursor(transcript_win, { 1, 0 })
 vim.api.nvim_win_call(transcript_win, function()
   vim.cmd("normal! zt")
 end)
 vim.api.nvim_exec_autocmds("WinScrolled", { pattern = tostring(transcript_win) })
-assert(not transcript_view.is_following_tail(), "manual scrolling away from the end must disable follow-tail")
-vim.api.nvim_win_set_cursor(transcript_win, { 200, 0 })
+assert(
+  not transcript_view.is_following_tail(transcript_win, transcript_surface.transcript_key),
+  "seeing only the start of a wrapped final line must disable follow-tail"
+)
 vim.api.nvim_win_call(transcript_win, function()
-  vim.cmd("normal! zb")
+  vim.cmd("normal! G$zb")
 end)
 vim.api.nvim_exec_autocmds("WinScrolled", { pattern = tostring(transcript_win) })
-assert(transcript_view.is_following_tail(), "returning to the end must re-enable follow-tail")
+assert(
+  transcript_view.is_following_tail(transcript_win, transcript_surface.transcript_key),
+  "showing the end of the wrapped final line must re-enable follow-tail"
+)
 sidebar.close()
+
+-- Logs use the same semantic disclosure behavior as transcript tools. Hidden
+-- payloads are absent from the buffer until opened, while references remain
+-- directly navigable.
+local original_logs = runtime.logs
+local original_log_reference = runtime.log_reference
+local digest = "sha256:" .. string.rep("a", 64)
+local reference = {
+  digest = digest,
+  media_type = "application/json",
+  bytes = 18,
+  locator = { kind = "file", path = "sha256/aa/" .. string.rep("a", 64) },
+}
+runtime.logs = function(options, callback)
+  assert(options.limit == 200)
+  callback({
+    records = {
+      {
+        cursor = "0",
+        timestamp_ms = 1,
+        pid = 1,
+        kind = "runtime_trace",
+        payload = {
+          summary = {
+            event = "tool_invocation_completed",
+            callable_id = "workspace.shell",
+          },
+          hidden = "LOG-PAYLOAD-MUST-BE-COLLAPSED",
+          detail = { kind = "reference", reference = reference },
+        },
+      },
+    },
+    next_cursor = nil,
+  }, nil)
+end
+runtime.log_reference = function(value, callback)
+  assert(value.digest == digest)
+  callback({
+    reference = value,
+    content = '{"nested":"REFERENCE-PAYLOAD"}',
+  }, nil)
+end
+
+local logs = require("phenix_nvim.logs")
+logs.open("all")
+local log_buffer = vim.api.nvim_get_current_buf()
+local log_lines = vim.api.nvim_buf_get_lines(log_buffer, 0, -1, false)
+assert(vim.wo[0].scrolloff == 0, "log view must not inherit editing scrolloff")
+local collapsed_log = table.concat(log_lines, "\n")
+assert(not collapsed_log:find("LOG%-PAYLOAD%-MUST%-BE%-COLLAPSED"))
+assert(collapsed_log:find("tool_invocation_completed", 1, true))
+assert(collapsed_log:find("BASH", 1, true), "semantic log rendering must classify workspace.shell")
+assert(collapsed_log:find("sha256:", 1, true))
+
+local toggle_log
+local follow_log
+for _, mapping in ipairs(vim.api.nvim_buf_get_keymap(log_buffer, "n")) do
+  if mapping.lhs == "<CR>" then
+    toggle_log = mapping.callback
+  elseif mapping.lhs == "gf" then
+    follow_log = mapping.callback
+  end
+end
+assert(type(toggle_log) == "function")
+assert(type(follow_log) == "function")
+
+local record_row
+local reference_row
+for index, line in ipairs(log_lines) do
+  if line:find("runtime_trace", 1, true) then
+    record_row = index
+  elseif line:find("sha256:", 1, true) then
+    reference_row = index
+  end
+end
+assert(record_row ~= nil and reference_row ~= nil)
+vim.api.nvim_win_set_cursor(0, { record_row, 0 })
+toggle_log()
+local expanded_log = table.concat(vim.api.nvim_buf_get_lines(log_buffer, 0, -1, false), "\n")
+assert(expanded_log:find("LOG%-PAYLOAD%-MUST%-BE%-COLLAPSED"))
+
+-- Re-rendering can move the reference row, so resolve it again before gf.
+for index, line in ipairs(vim.api.nvim_buf_get_lines(log_buffer, 0, -1, false)) do
+  if line:find("sha256:", 1, true) then
+    reference_row = index
+    break
+  end
+end
+vim.api.nvim_win_set_cursor(0, { reference_row, 0 })
+follow_log()
+local reference_buffer = vim.api.nvim_get_current_buf()
+local reference_text = table.concat(vim.api.nvim_buf_get_lines(reference_buffer, 0, -1, false), "\n")
+assert(
+  not reference_text:find("REFERENCE%-PAYLOAD"),
+  "referenced log content must remain concealed until explicitly opened"
+)
+local reference_toggle
+for _, mapping in ipairs(vim.api.nvim_buf_get_keymap(reference_buffer, "n")) do
+  if mapping.lhs == "<CR>" then
+    reference_toggle = mapping.callback
+    break
+  end
+end
+assert(type(reference_toggle) == "function")
+vim.api.nvim_win_set_cursor(0, { 5, 0 })
+reference_toggle()
+reference_text = table.concat(vim.api.nvim_buf_get_lines(reference_buffer, 0, -1, false), "\n")
+assert(reference_text:find("REFERENCE%-PAYLOAD"))
+vim.cmd("tabclose")
+vim.cmd("tabclose")
+runtime.logs = original_logs
+runtime.log_reference = original_log_reference
 
 local review = require("phenix_nvim.review")
 local original_decide_review = runtime.decide_review

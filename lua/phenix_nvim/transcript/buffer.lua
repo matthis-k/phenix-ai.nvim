@@ -1,3 +1,5 @@
+local disclosure = require("phenix_nvim.disclosure")
+
 local M = {}
 local namespace = vim.api.nvim_create_namespace("phenix-transcript")
 local style_namespace = vim.api.nvim_create_namespace("phenix-transcript-style")
@@ -21,6 +23,7 @@ local function store(key)
       name = nil,
       marks = {},
       attached_windows = {},
+      disclosure = disclosure.new(),
       last_projection = nil,
     }
     stores[key] = value
@@ -53,7 +56,7 @@ local function append(lines, values)
   end
 end
 
-local function lines_for(node)
+local function lines_for(view, node)
   if node.kind == "message" then
     local lines = { node.role == "user" and "You" or "Assistant", "" }
     append(lines, text_lines(node.text))
@@ -62,6 +65,9 @@ local function lines_for(node)
   end
   if node.kind == "tool" then
     local title = "Tool · " .. tostring(node.callable_id or "unknown") .. " · " .. tostring(node.state or "running")
+    if not disclosure.is_open(view.disclosure, node.id) then
+      return { title .. " · <CR> details", "" }
+    end
     local lines = { title }
     local input = inspect(node.input)
     if input ~= nil and input ~= "" then
@@ -133,11 +139,21 @@ local function valid_window(win, key)
     and vim.api.nvim_win_get_buf(win) == M.ensure(key)
 end
 
-local function visible_bottom(win)
-  local ok, line = pcall(vim.api.nvim_win_call, win, function()
-    return vim.fn.line("w$")
-  end)
-  return ok and line or 0
+local function last_character_column(line)
+  if line == "" then
+    return 0
+  end
+  local characters = vim.str_utfindex(line)
+  return vim.str_byteindex(line, math.max(characters - 1, 0))
+end
+
+local function tail_visible(win, key)
+  local target = M.ensure(key)
+  local last = math.max(vim.api.nvim_buf_line_count(target), 1)
+  local line = vim.api.nvim_buf_get_lines(target, last - 1, last, false)[1] or ""
+  local column = last_character_column(line) + 1
+  local ok, position = pcall(vim.fn.screenpos, win, last, column)
+  return ok and type(position) == "table" and tonumber(position.row or 0) > 0
 end
 
 local function update_follow_tail(win)
@@ -156,16 +172,19 @@ local function update_follow_tail(win)
     window_keys[win] = nil
     return
   end
-  state.follow_tail = visible_bottom(win) >= vim.api.nvim_buf_line_count(M.ensure(key))
+  state.follow_tail = tail_visible(win, key)
 end
 
 local function scroll_to_tail(key)
   local view = store(key)
-  local last = math.max(vim.api.nvim_buf_line_count(M.ensure(key)), 1)
+  local target = M.ensure(key)
+  local last = math.max(vim.api.nvim_buf_line_count(target), 1)
+  local line = vim.api.nvim_buf_get_lines(target, last - 1, last, false)[1] or ""
+  local column = last_character_column(line)
   for win, state in pairs(view.attached_windows) do
     if valid_window(win, key) then
       if state.follow_tail then
-        pcall(vim.api.nvim_win_set_cursor, win, { last, 0 })
+        pcall(vim.api.nvim_win_set_cursor, win, { last, column })
       end
     else
       view.attached_windows[win] = nil
@@ -198,6 +217,17 @@ function M.attach_window(key, win)
   vim.wo[win].cursorline = false
   vim.wo[win].winfixwidth = true
   vim.wo[win].conceallevel = 2
+  vim.wo[win].scrolloff = 0
+  if vim.fn.exists("+smoothscroll") == 1 then
+    vim.wo[win].smoothscroll = true
+  end
+  vim.keymap.set("n", "<CR>", function()
+    M.toggle_tool(vim.api.nvim_get_current_win())
+  end, {
+    buffer = M.ensure(resolved),
+    silent = true,
+    desc = "Toggle Phenix tool details",
+  })
   update_follow_tail(win)
 end
 
@@ -244,6 +274,41 @@ function M.is_following_tail(win, key)
   return false
 end
 
+local function node_under_cursor(view, win)
+  if not valid_window(win, view.key) then
+    return nil
+  end
+  local row = vim.api.nvim_win_get_cursor(win)[1] - 1
+  local target = M.ensure(view.key)
+  for node_id, mark_id in pairs(view.marks) do
+    local position = vim.api.nvim_buf_get_extmark_by_id(target, namespace, mark_id, { details = true })
+    if #position > 0 then
+      local start_row = position[1]
+      local finish_row = (position[3] and position[3].end_row) or start_row
+      if row >= start_row and row <= finish_row then
+        return view.last_projection and view.last_projection.nodes[node_id] or nil
+      end
+    end
+  end
+  return nil
+end
+
+function M.toggle_tool(win, key)
+  win = win or vim.api.nvim_get_current_win()
+  key = key or window_keys[win]
+  if key == nil then
+    return false
+  end
+  local view = store(key)
+  local node = node_under_cursor(view, win)
+  if node == nil or node.kind ~= "tool" then
+    return false
+  end
+  disclosure.toggle(view.disclosure, node.id)
+  M.render_node(node, key)
+  return true
+end
+
 local function replace(view, start_row, finish_row, lines)
   local target = M.ensure(view.key)
   vim.bo[target].modifiable = true
@@ -271,7 +336,7 @@ function M.render_node(node, key)
   local view = store(key)
   local target = M.ensure(key)
   local existing = view.marks[node.id]
-  local lines = lines_for(node)
+  local lines = lines_for(view, node)
   local start_row
   if existing ~= nil then
     local position = vim.api.nvim_buf_get_extmark_by_id(target, namespace, existing, { details = true })

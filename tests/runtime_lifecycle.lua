@@ -93,6 +93,27 @@ assert(first.calls == 1 and second.calls == 1 and first.error == nil)
 assert(next_client.creates == 2)
 runtime.disconnect()
 
+-- Session event bursts fetch one projection per touched session per poll rather
+-- than rebuilding the same full projection for every event.
+next_client = client()
+local projection_calls = 0
+next_client.session.projection = function()
+  projection_calls = projection_calls + 1
+  return {
+    session = { session_id = "session.test" },
+    through_sequence = 0,
+    updates = {},
+  }
+end
+runtime.connect()
+next_client:status_event("ready")
+runtime.tick()
+table.insert(next_client.events, { kind = "session_update", data = { session_id = "session.test" } })
+table.insert(next_client.events, { kind = "session_update", data = { session_id = "session.test" } })
+runtime.tick()
+assert(projection_calls == 1, "one poll must refresh a touched session projection once")
+runtime.disconnect()
+
 -- Every queued waiter gets the original structured startup error exactly once.
 next_client = client()
 local bootstrap, waiting = result(), result()

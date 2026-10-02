@@ -38,6 +38,7 @@ for _, name in ipairs({
   "close_session",
   "choose_session",
   "new",
+  "logs",
 }) do
   originals[name] = actions[name]
   actions[name] = function(...)
@@ -69,6 +70,9 @@ execute("new", "curr_window")
 execute("new", "fullscreen")
 execute("auth")
 execute("select")
+execute("logs")
+execute("logs", "all")
+execute("logs", "execution")
 execute("cancel")
 
 local names = {}
@@ -95,6 +99,9 @@ assert(vim.deep_equal(names, {
   "new",
   "authenticate",
   "choose_selection",
+  "logs",
+  "logs",
+  "logs",
   "cancel",
 }))
 assert(calls[4].args[1] == 3 and calls[4].args[2] == 5)
@@ -107,6 +114,9 @@ assert(calls[14].args[1] == "sidebar")
 assert(calls[15].args[1] == "tab")
 assert(calls[16].args[1] == "curr_window")
 assert(calls[17].args[1] == "fullscreen")
+assert(calls[20].args[1] == "session")
+assert(calls[21].args[1] == "all")
+assert(calls[22].args[1] == "execution")
 
 local before_invalid = #calls
 execute("toggle", "unexpected")
@@ -114,6 +124,7 @@ execute("send", "unexpected")
 execute("cancel", "unexpected")
 execute("auth", "unexpected")
 execute("select", "unexpected")
+execute("logs", "all", "extra")
 execute("new", "unexpected")
 execute("new", "sidebar", "extra")
 execute("window", "close")
@@ -122,6 +133,7 @@ assert(#calls == before_invalid, "commands with unexpected or removed arguments 
 
 local roots = commands.complete("", "Phenix ", #"Phenix ")
 assert(vim.tbl_contains(roots, "image"))
+assert(vim.tbl_contains(roots, "logs"))
 assert(vim.tbl_contains(roots, "session"))
 assert(vim.tbl_contains(roots, "reference"))
 assert(vim.tbl_contains(roots, "new"))
@@ -136,6 +148,11 @@ assert(vim.tbl_contains(presentations, "fullscreen"))
 local image_sources = commands.complete("", "Phenix image ", #"Phenix image ")
 assert(vim.tbl_contains(image_sources, "clipboard"))
 assert(type(image_sources) == "table")
+
+local log_scopes = commands.complete("", "Phenix logs ", #"Phenix logs ")
+assert(vim.tbl_contains(log_scopes, "session"))
+assert(vim.tbl_contains(log_scopes, "execution"))
+assert(vim.tbl_contains(log_scopes, "all"))
 
 local sessions = commands.complete("", "Phenix session ", #"Phenix session ")
 assert(vim.tbl_contains(sessions, "new"))

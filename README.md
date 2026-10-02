@@ -102,6 +102,7 @@ The plugin exposes one command namespace instead of many top-level commands:
 :Phenix reference at <path>
 :Phenix image clipboard
 :Phenix image <path>
+:Phenix logs [session|execution|all]
 :Phenix new [sidebar|tab|curr_window|fullscreen]
 :Phenix session new
 :Phenix session close
@@ -142,6 +143,17 @@ stdpath("state")/phenix/
 reference-depth logging, so detailed records are stored in the shared immutable
 object tree and referenced from the root log. Referenced objects may contain
 further references.
+
+`:Phenix logs` opens a read-only log document for the active session. Use
+`:Phenix logs execution` for the active execution or `:Phenix logs all` for
+the full local stream. Records stay compact until `<CR>` expands their
+structured payload. Semantic labels distinguish agent, model, shell, read,
+write, tool, runtime, and failed activity when Phenix records that identity.
+Use `]e`/`[e` for failures, `]a`/`[a` for agent events, and
+`]t`/`[t` for tool activity. `r` reloads the selected scope and `]l`
+loads the next page. References remain visible while collapsed and `gf`,
+`gF`, or `gd` open the referenced immutable object through Phenix. The
+browser never parses the log directory layout itself.
 
 Set `log_directory = false` to disable the client-provided sink, or set
 `env.PHENIX_LOG` explicitly to select another core sink. An explicit legacy
