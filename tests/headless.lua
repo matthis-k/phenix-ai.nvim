@@ -83,6 +83,7 @@ assert(type(frontend.reference_at) == "function")
 assert(type(frontend.reference_picker) == "function")
 assert(type(frontend.send) == "function")
 assert(type(frontend.new) == "function")
+assert(type(frontend.logs) == "function")
 assert(type(frontend.choose_selection) == "function")
 assert(frontend.choose_model == nil)
 assert(frontend.choose_routing_profile == nil)
@@ -410,6 +411,98 @@ assert(
   "showing the end of the wrapped final line must re-enable follow-tail"
 )
 sidebar.close()
+
+-- Logs use the same semantic disclosure behavior as transcript tools. Hidden
+-- payloads are absent from the buffer until opened, while references remain
+-- directly navigable.
+local original_logs = runtime.logs
+local original_log_reference = runtime.log_reference
+local digest = "sha256:" .. string.rep("a", 64)
+local reference = {
+  digest = digest,
+  media_type = "application/json",
+  bytes = 18,
+  locator = { kind = "file", path = "sha256/aa/" .. string.rep("a", 64) },
+}
+runtime.logs = function(options, callback)
+  assert(options.limit == 200)
+  callback({
+    records = {
+      {
+        cursor = "0",
+        timestamp_ms = 1,
+        pid = 1,
+        kind = "runtime_trace",
+        payload = {
+          summary = { event = "fixture" },
+          hidden = "LOG-PAYLOAD-MUST-BE-COLLAPSED",
+          detail = { kind = "reference", reference = reference },
+        },
+      },
+    },
+    next_cursor = nil,
+  }, nil)
+end
+runtime.log_reference = function(value, callback)
+  assert(value.digest == digest)
+  callback({
+    reference = value,
+    content = '{"nested":"REFERENCE-PAYLOAD"}',
+  }, nil)
+end
+
+local logs = require("phenix_nvim.logs")
+logs.open("all")
+local log_buffer = vim.api.nvim_get_current_buf()
+local log_lines = vim.api.nvim_buf_get_lines(log_buffer, 0, -1, false)
+local collapsed_log = table.concat(log_lines, "\n")
+assert(not collapsed_log:find("LOG%-PAYLOAD%-MUST%-BE%-COLLAPSED"))
+assert(collapsed_log:find("fixture", 1, true))
+assert(collapsed_log:find("sha256:", 1, true))
+
+local toggle_log
+local follow_log
+for _, mapping in ipairs(vim.api.nvim_buf_get_keymap(log_buffer, "n")) do
+  if mapping.lhs == "<CR>" then
+    toggle_log = mapping.callback
+  elseif mapping.lhs == "gf" then
+    follow_log = mapping.callback
+  end
+end
+assert(type(toggle_log) == "function")
+assert(type(follow_log) == "function")
+
+local record_row
+local reference_row
+for index, line in ipairs(log_lines) do
+  if line:find("runtime_trace", 1, true) then
+    record_row = index
+  elseif line:find("sha256:", 1, true) then
+    reference_row = index
+  end
+end
+assert(record_row ~= nil and reference_row ~= nil)
+vim.api.nvim_win_set_cursor(0, { record_row, 0 })
+toggle_log()
+local expanded_log = table.concat(vim.api.nvim_buf_get_lines(log_buffer, 0, -1, false), "\n")
+assert(expanded_log:find("LOG%-PAYLOAD%-MUST%-BE%-COLLAPSED"))
+
+-- Re-rendering can move the reference row, so resolve it again before gf.
+for index, line in ipairs(vim.api.nvim_buf_get_lines(log_buffer, 0, -1, false)) do
+  if line:find("sha256:", 1, true) then
+    reference_row = index
+    break
+  end
+end
+vim.api.nvim_win_set_cursor(0, { reference_row, 0 })
+follow_log()
+local reference_buffer = vim.api.nvim_get_current_buf()
+local reference_text = table.concat(vim.api.nvim_buf_get_lines(reference_buffer, 0, -1, false), "\n")
+assert(reference_text:find("REFERENCE%-PAYLOAD"))
+vim.cmd("tabclose")
+vim.cmd("tabclose")
+runtime.logs = original_logs
+runtime.log_reference = original_log_reference
 
 local review = require("phenix_nvim.review")
 local original_decide_review = runtime.decide_review
