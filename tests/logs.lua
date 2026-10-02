@@ -59,15 +59,19 @@ local records = {
   }),
   vim.json.encode({
     timestamp_ms = 3000,
-    kind = "model_diagnostic",
+    kind = "agent_diagnostic",
     payload = {
-      summary = { event = "routing_decision" },
+      summary = {
+        event = "model_turn_started",
+        execution_id = "execution-1",
+        turn = 2,
+      },
       detail = {
         kind = "inline",
         value = {
-          event = "routing_decision",
-          provider_plugin = "phenix.openai",
-          model = "fixture-model",
+          event = "model_turn_started",
+          execution_id = "execution-1",
+          turn = 2,
         },
       },
     },
