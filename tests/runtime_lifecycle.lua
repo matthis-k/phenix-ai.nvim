@@ -297,6 +297,38 @@ assert(
   "stale rollback mutated the disconnected client"
 )
 
+-- A Phenix/model failure settles only that prompt. It does not poison the
+-- transport connection, and the next prompt gets a fresh request.
+next_client = client()
+local model_failure = {
+  kind = "failed",
+  code = "provider_failed",
+  message = "model provider failed",
+}
+local prompt_calls = 0
+next_client.session.prompt = function()
+  prompt_calls = prompt_calls + 1
+  if prompt_calls == 1 then
+    return failed(model_failure)
+  end
+  return completed({ execution_id = "execution-2" })
+end
+runtime.connect()
+next_client:status_event("ready")
+runtime.tick()
+local failed_prompt = result()
+runtime.prompt("session.test", { { kind = "text", text = "first" } }, failed_prompt.callback)
+runtime.tick()
+assert(failed_prompt.calls == 1 and failed_prompt.error == model_failure)
+assert(runtime.status().connection == "ready" and next_client.closed == 0)
+
+local recovered_prompt = result()
+runtime.prompt("session.test", { { kind = "text", text = "second" } }, recovered_prompt.callback)
+runtime.tick()
+assert(recovered_prompt.calls == 1 and recovered_prompt.error == nil)
+assert(prompt_calls == 2 and runtime.status().connection == "ready")
+runtime.disconnect()
+
 -- Application requests have no frontend deadline. Phenix owns execution limits
 -- and settles model/provider failures. The plugin only fails requests when the
 -- native process or transport reports a connection failure.
