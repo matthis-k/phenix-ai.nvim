@@ -322,7 +322,7 @@ local function classify(record, context)
   then
     return "model"
   end
-  if contains_any(event, { "tool_call", "tool_result", "tool_invocation_" }) or callable ~= "" then
+  if contains_any(event, { "tool_call", "tool_result", "tool_invocation_" }) then
     return "tool"
   end
   if kind == "agent_diagnostic"
@@ -330,6 +330,9 @@ local function classify(record, context)
     or contains_any(service, { "agent-loop", "execution", "delegat" })
   then
     return "agent"
+  end
+  if callable ~= "" then
+    return "tool"
   end
   if event == "policy_stage" or kind:find("policy", 1, true) ~= nil then
     return "policy"
