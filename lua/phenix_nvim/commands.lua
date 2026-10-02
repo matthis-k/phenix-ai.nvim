@@ -1,4 +1,5 @@
 local actions = require("phenix_nvim.actions")
+local logs = require("phenix_nvim.logs")
 local util = require("phenix_nvim.util")
 
 local M = {}
@@ -7,6 +8,7 @@ local roots = {
   "auth",
   "cancel",
   "image",
+  "logs",
   "new",
   "reference",
   "select",
@@ -68,6 +70,16 @@ function M.execute(options)
       actions.choose_selection()
     else
       usage("Usage: Phenix select")
+    end
+    return
+  end
+  if command == "logs" then
+    if #args == 0 then
+      logs.open()
+    elseif #args == 1 and args[1] == "raw" then
+      logs.open({ raw = true })
+    else
+      usage("Usage: Phenix logs [raw]")
     end
     return
   end
@@ -181,6 +193,9 @@ function M.complete(arglead, cmdline, cursorpos)
       return vim.fn.getcompletion(arglead, "file")
     end
     return {}
+  end
+  if args[1] == "logs" and #args == 1 then
+    return matches({ "raw" }, arglead)
   end
   if args[1] == "image" and #args == 1 then
     local values = { "clipboard" }
