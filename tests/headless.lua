@@ -387,6 +387,7 @@ assert(not collapsed_again:find(payload_marker, 1, true), "collapsing a tool mus
 
 -- Wrapped transcript scrolling must operate on screen rows. A partial view of
 -- the final logical line is not the tail.
+assert(vim.wo[transcript_win].scrolloff == 0, "transcript view must not inherit editing scrolloff")
 if vim.fn.exists("+smoothscroll") == 1 then
   assert(vim.wo[transcript_win].smoothscroll, "wrapped transcript must enable smoothscroll")
 end
@@ -455,6 +456,7 @@ local logs = require("phenix_nvim.logs")
 logs.open("all")
 local log_buffer = vim.api.nvim_get_current_buf()
 local log_lines = vim.api.nvim_buf_get_lines(log_buffer, 0, -1, false)
+assert(vim.wo[0].scrolloff == 0, "log view must not inherit editing scrolloff")
 local collapsed_log = table.concat(log_lines, "\n")
 assert(not collapsed_log:find("LOG%-PAYLOAD%-MUST%-BE%-COLLAPSED"))
 assert(collapsed_log:find("fixture", 1, true))
