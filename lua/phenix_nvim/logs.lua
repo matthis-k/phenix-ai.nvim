@@ -328,7 +328,10 @@ local function render(view)
     headline_rows[start] = headline_group(record)
     row_to_record[start] = id
 
-    local summary = view.conceal_payload_preview and nil or compact_summary(record.payload)
+    local summary = nil
+    if not view.conceal_payload_preview then
+      summary = compact_summary(record.payload)
+    end
     if summary ~= nil then
       local row = add_line(lines, "  " .. summary)
       row_to_record[row] = id
