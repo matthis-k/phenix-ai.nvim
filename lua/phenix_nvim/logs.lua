@@ -6,6 +6,7 @@ local M = {}
 local namespace = vim.api.nvim_create_namespace("phenix-logs")
 local views = {}
 local next_buffer_id = 0
+local attach
 
 local function inspect_lines(value)
   return vim.split(vim.inspect(value), "\n", { plain = true })
@@ -315,7 +316,7 @@ local function follow_reference()
   end)
 end
 
-local function attach(buffer)
+attach = function(buffer)
   vim.keymap.set("n", "<CR>", toggle, {
     buffer = buffer,
     silent = true,
