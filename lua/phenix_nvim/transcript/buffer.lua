@@ -217,6 +217,7 @@ function M.attach_window(key, win)
   vim.wo[win].cursorline = false
   vim.wo[win].winfixwidth = true
   vim.wo[win].conceallevel = 2
+  vim.wo[win].scrolloff = 0
   if vim.fn.exists("+smoothscroll") == 1 then
     vim.wo[win].smoothscroll = true
   end
