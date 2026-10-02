@@ -435,6 +435,7 @@ attach = function(buffer)
     vim.wo[win].wrap = true
     vim.wo[win].linebreak = true
     vim.wo[win].breakindent = true
+    vim.wo[win].scrolloff = 0
     if vim.fn.exists("+smoothscroll") == 1 then
       vim.wo[win].smoothscroll = true
     end
