@@ -267,7 +267,7 @@ local function open_reference_buffer(reference, content)
     records = {
       {
         cursor = short_digest(reference),
-        timestamp_ms = 0,
+        timestamp_ms = nil,
         kind = "referenced object",
         payload = content,
       },
@@ -281,6 +281,7 @@ local function open_reference_buffer(reference, content)
   local buffer = ensure_buffer(view)
   vim.cmd("tabnew")
   vim.api.nvim_win_set_buf(0, buffer)
+  attach(buffer)
   render(view)
 end
 
