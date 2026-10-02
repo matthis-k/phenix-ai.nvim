@@ -265,9 +265,15 @@ prompt_callbacks[1]({}, nil)
 assert(clear_calls == 1)
 actions.send()
 assert(#prompt_callbacks == 2, "settled compose revision should be sendable again")
+prompt_callbacks[2](nil, { kind = "failed", message = "fixture model failure" })
+assert(clear_calls == 1, "failed prompt must keep the compose document intact")
+actions.send()
+assert(#prompt_callbacks == 3, "failed compose revision must be immediately retryable")
+prompt_callbacks[3]({}, nil)
+assert(clear_calls == 2)
 state.compose.revision = 101
 actions.send()
-assert(#prompt_callbacks == 3, "edited compose revision must remain independently sendable")
+assert(#prompt_callbacks == 4, "edited compose revision must remain independently sendable")
 compose.serialize = original_serialize
 compose.clear = original_clear
 
