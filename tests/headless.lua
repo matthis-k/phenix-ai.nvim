@@ -403,7 +403,7 @@ assert(
   "seeing only the start of a wrapped final line must disable follow-tail"
 )
 vim.api.nvim_win_call(transcript_win, function()
-  vim.cmd("normal! G$")
+  vim.cmd("normal! G$zb")
 end)
 vim.api.nvim_exec_autocmds("WinScrolled", { pattern = tostring(transcript_win) })
 assert(
