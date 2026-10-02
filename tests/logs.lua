@@ -78,18 +78,21 @@ local records = {
   }),
   vim.json.encode({
     timestamp_ms = 4000,
-    kind = "runtime_trace",
+    kind = "agent_diagnostic",
     payload = {
-      summary = { event = "service_invocation" },
+      summary = {
+        event = "run_failed",
+        execution_id = "execution-1",
+        callable_id = "agent.default",
+        reason = "fixture failure",
+      },
       detail = {
         kind = "inline",
         value = {
-          trace = {
-            event = "service_invocation",
-            service = "phenix.execution@1",
-            success = false,
-            error = "fixture failure",
-          },
+          event = "run_failed",
+          execution_id = "execution-1",
+          callable_id = "agent.default",
+          reason = "fixture failure",
         },
       },
     },
