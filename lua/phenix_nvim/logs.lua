@@ -7,6 +7,7 @@ local namespace = vim.api.nvim_create_namespace("phenix-logs")
 local views = {}
 local next_buffer_id = 0
 local attach
+local load
 
 local function inspect_lines(value)
   return vim.split(vim.inspect(value), "\n", { plain = true })
@@ -44,6 +45,27 @@ local function collect_references(value, output, seen)
     collect_references(child, output, seen)
   end
   return output
+end
+
+local function collect_correlation(value, found, seen)
+  found = found or {}
+  seen = seen or {}
+  if type(value) ~= "table" or seen[value] then
+    return found
+  end
+  seen[value] = true
+  for key, child in pairs(value) do
+    if (key == "session_id" or key == "execution_id")
+      and type(child) == "string"
+      and child ~= ""
+      and found[key] == nil
+    then
+      found[key] = child
+    elseif type(child) == "table" then
+      collect_correlation(child, found, seen)
+    end
+  end
+  return found
 end
 
 local summary_keys = {
@@ -170,11 +192,12 @@ local function render(view)
   local lines = {
     "# Phenix logs · " .. scope_title(view),
     "",
-    "<CR> details · gf/gF/gd reference · ]l load more",
+    "<CR> details · gf/gF content · gd session/execution · ]l load more",
     "",
   }
   local row_to_record = {}
   local row_to_reference = {}
+  local row_to_scope = {}
   local record_starts = {}
   local headline_rows = {}
 
@@ -213,6 +236,20 @@ local function render(view)
       row_to_reference[row] = reference
     end
 
+    local correlation = collect_correlation(record.payload)
+    if correlation.execution_id ~= nil then
+      local row = add_line(lines, "  ↳ execution " .. correlation.execution_id .. "  gd")
+      row_to_record[row] = id
+      row_to_scope[row] = {
+        session_id = correlation.session_id,
+        execution_id = correlation.execution_id,
+      }
+    elseif correlation.session_id ~= nil then
+      local row = add_line(lines, "  ↳ session " .. correlation.session_id .. "  gd")
+      row_to_record[row] = id
+      row_to_scope[row] = { session_id = correlation.session_id }
+    end
+
     if open then
       add_line(lines, "")
       local label = add_line(lines, "  Payload")
@@ -245,7 +282,17 @@ local function render(view)
 
   view.row_to_record = row_to_record
   view.row_to_reference = row_to_reference
+  view.row_to_scope = row_to_scope
   view.record_starts = record_starts
+end
+
+local function open_view(view)
+  local buffer = ensure_buffer(view)
+  vim.cmd("tabnew")
+  vim.api.nvim_win_set_buf(0, buffer)
+  attach(buffer)
+  render(view)
+  return buffer
 end
 
 local function current_view()
@@ -323,19 +370,52 @@ local function follow_reference()
   end)
 end
 
+local function follow_scope()
+  local view = current_view()
+  if view == nil then
+    return
+  end
+  local row = vim.api.nvim_win_get_cursor(0)[1]
+  local target = view.row_to_scope[row]
+  if target == nil then
+    follow_reference()
+    return
+  end
+  local next_view = {
+    buffer = nil,
+    records = {},
+    next_cursor = nil,
+    disclosure = disclosure.new(),
+    session_id = target.session_id,
+    execution_id = target.execution_id,
+    row_to_record = {},
+    row_to_reference = {},
+    row_to_scope = {},
+    record_starts = {},
+    loading = false,
+  }
+  open_view(next_view)
+  load(next_view, false)
+end
+
 attach = function(buffer)
   vim.keymap.set("n", "<CR>", toggle, {
     buffer = buffer,
     silent = true,
     desc = "Toggle Phenix log details",
   })
-  for _, key in ipairs({ "gf", "gF", "gd" }) do
+  for _, key in ipairs({ "gf", "gF" }) do
     vim.keymap.set("n", key, follow_reference, {
       buffer = buffer,
       silent = true,
-      desc = "Open Phenix log reference",
+      desc = "Open Phenix log content reference",
     })
   end
+  vim.keymap.set("n", "gd", follow_scope, {
+    buffer = buffer,
+    silent = true,
+    desc = "Open correlated Phenix logs",
+  })
   vim.keymap.set("n", "]l", function()
     M.more()
   end, {
@@ -363,7 +443,7 @@ local function query_options(view)
   }
 end
 
-local function load(view, append)
+load = function(view, append)
   if view.loading then
     return
   end
@@ -427,14 +507,11 @@ function M.open(scope)
     execution_id = execution_id,
     row_to_record = {},
     row_to_reference = {},
+    row_to_scope = {},
     record_starts = {},
     loading = false,
   }
-  local buffer = ensure_buffer(view)
-  vim.cmd("tabnew")
-  vim.api.nvim_win_set_buf(0, buffer)
-  attach(buffer)
-  render(view)
+  open_view(view)
   load(view, false)
 end
 
