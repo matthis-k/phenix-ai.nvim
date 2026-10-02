@@ -1,6 +1,7 @@
 local actions = require("phenix_nvim.actions")
 local compose = require("phenix_nvim.compose.buffer")
 local config = require("phenix_nvim.config")
+local logs = require("phenix_nvim.logs")
 local runtime = require("phenix_nvim.runtime")
 local state = require("phenix_nvim.state")
 local status = require("phenix_nvim.status")
@@ -40,5 +41,6 @@ M.choose_session = actions.choose_session
 M.authenticate = actions.authenticate
 M.choose_selection = actions.choose_selection
 M.attach_image = actions.attach_image
+M.logs = logs.open
 
 return M
