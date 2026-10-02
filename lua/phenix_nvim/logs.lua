@@ -394,7 +394,7 @@ local function summary(record, store_root)
   if type(record) ~= "table" then
     local spec = categories.error
     return {
-      category = category,
+      category = "error",
       chunks = {
         { "--:--:-- ", "PhenixLogTimestamp" },
         { string.format("%-7s", spec.label), spec.group },
@@ -590,6 +590,9 @@ local function configure_window(win, raw)
   vim.wo[win].cursorline = true
   vim.wo[win].conceallevel = raw and 0 or 2
   vim.wo[win].concealcursor = "nvic"
+  vim.wo[win].winbar = raw
+      and "%#Title# Phenix logs %#Comment#  RAW  R semantic  r refresh  q close"
+    or "%#Title# Phenix logs %#Comment#  <CR> details  gf reference  ]e error  ]t tool  R raw"
 end
 
 local function windows_for_buffer(buf)
