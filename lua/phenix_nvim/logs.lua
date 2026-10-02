@@ -244,7 +244,15 @@ local function walk(value, callback, depth)
   if matched ~= nil then
     return matched
   end
-  for _, child in pairs(value) do
+  local keys = {}
+  for key in pairs(value) do
+    table.insert(keys, key)
+  end
+  table.sort(keys, function(left, right)
+    return tostring(left) < tostring(right)
+  end)
+  for _, key in ipairs(keys) do
+    local child = value[key]
     if type(child) == "table" then
       local nested = walk(child, callback, depth + 1)
       if nested ~= nil then
@@ -256,13 +264,10 @@ local function walk(value, callback, depth)
 end
 
 local function find_field(value, names)
-  local wanted = {}
-  for _, name in ipairs(names) do
-    wanted[name] = true
-  end
   return walk(value, function(object)
-    for key, child in pairs(object) do
-      if wanted[key] and (type(child) == "string" or type(child) == "number" or type(child) == "boolean") then
+    for _, key in ipairs(names) do
+      local child = object[key]
+      if type(child) == "string" or type(child) == "number" or type(child) == "boolean" then
         return child
       end
     end
@@ -307,6 +312,16 @@ local function normalized_context(record, store_root)
   return { record = record, detail = detail }, detail
 end
 
+local function is_failure(context, kind)
+  local event = tostring(find_field(context, { "event" }) or ""):lower()
+  local outcome = tostring(find_field(context, { "outcome", "state", "status" }) or ""):lower()
+  local success = find_field(context, { "success" })
+  return success == false
+    or contains_any(kind, { "error", "failed", "failure" })
+    or contains_any(event, { "failed", "rejected", "error" })
+    or contains_any(outcome, { "failed", "denied", "error", "cancelled" })
+end
+
 local function classify(record, store_root)
   if type(record) ~= "table" then
     return "error"
@@ -316,17 +331,8 @@ local function classify(record, store_root)
   local event = tostring(find_field(context, { "event" }) or ""):lower()
   local callable = tostring(find_field(context, { "callable_id", "callable" }) or ""):lower()
   local service = tostring(find_field(context, { "service" }) or ""):lower()
-  local outcome = tostring(find_field(context, { "outcome", "state", "status" }) or ""):lower()
-  local success = find_field(context, { "success" })
   local text = table.concat(all_text(context), " ")
 
-  if success == false
-    or contains_any(kind, { "error", "failed", "failure" })
-    or contains_any(event, { "failed", "rejected", "error" })
-    or contains_any(outcome, { "failed", "denied", "error", "cancelled" })
-  then
-    return "error"
-  end
   if contains_any(callable, { "shell", "bash" }) or contains_any(text, { "workspace.shell", "phx1_bash" }) then
     return "bash"
   end
@@ -350,6 +356,9 @@ local function classify(record, store_root)
   end
   if event == "data_mutation" or kind:find("mutation", 1, true) ~= nil then
     return "mutation"
+  end
+  if is_failure(context, kind) then
+    return "error"
   end
   return "runtime"
 end
@@ -394,10 +403,12 @@ local function summary(record, store_root)
         { " invalid JSON log record", "PhenixLogError" },
       },
       text = "invalid JSON log record",
+      failure = true,
     }
   end
 
   local context = normalized_context(record, store_root)
+  local failure = is_failure(context, tostring(record.kind or ""):lower())
   local event = find_field(context, { "event" })
   local callable = find_field(context, { "callable_id", "callable" })
   local service = find_field(context, { "service" })
@@ -438,7 +449,9 @@ local function summary(record, store_root)
     { " " .. text, "Normal" },
   }
   if outcome ~= nil and tostring(outcome) ~= "" then
-    table.insert(chunks, { " · " .. tostring(outcome), spec.group })
+    table.insert(chunks, { " · " .. tostring(outcome), failure and "PhenixLogError" or spec.group })
+  elseif failure then
+    table.insert(chunks, { " · failed", "PhenixLogError" })
   end
   if #refs > 0 then
     local digest = short_digest(refs[1]) or "reference"
@@ -450,6 +463,7 @@ local function summary(record, store_root)
     chunks = chunks,
     text = text,
     references = refs,
+    failure = failure,
   }
 end
 
@@ -541,7 +555,7 @@ local function decorate(buf)
       vim.api.nvim_buf_set_extmark(buf, namespace, row, 0, {
         end_row = row,
         end_col = #line,
-        hl_group = info.category == "error" and "PhenixLogError" or "PhenixLogMetadata",
+        hl_group = info.failure and "PhenixLogError" or "PhenixLogMetadata",
         hl_eol = false,
       })
     else
@@ -596,8 +610,13 @@ end
 
 local function close_current()
   local buf = vim.api.nvim_get_current_buf()
-  if state(buf) == nil then
+  local view = state(buf)
+  if view == nil then
     return
+  end
+  local parent = view.source and view.source.parent_buf or nil
+  if parent ~= nil and vim.api.nvim_buf_is_valid(parent) then
+    vim.api.nvim_set_current_buf(parent)
   end
   pcall(vim.api.nvim_buf_delete, buf, { force = true })
 end
@@ -616,7 +635,7 @@ local function jump_category(direction, wanted)
     local category = row and row.category or nil
     local matches = false
     for _, candidate in ipairs(wanted) do
-      if category == candidate then
+      if category == candidate or (candidate == "error" and row and row.failure) then
         matches = true
         break
       end
@@ -850,6 +869,7 @@ function M.follow_reference(buf)
       kind = "object",
       reference = reference,
       store_root = view.store_root,
+      parent_buf = buf,
     }, { raw = view.raw })
     if child == nil then
       util.notify(child_error, vim.log.levels.ERROR)
