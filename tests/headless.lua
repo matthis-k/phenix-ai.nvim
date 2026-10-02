@@ -435,7 +435,10 @@ runtime.logs = function(options, callback)
         pid = 1,
         kind = "runtime_trace",
         payload = {
-          summary = { event = "fixture" },
+          summary = {
+            event = "tool_invocation_completed",
+            callable_id = "workspace.shell",
+          },
           hidden = "LOG-PAYLOAD-MUST-BE-COLLAPSED",
           detail = { kind = "reference", reference = reference },
         },
@@ -459,7 +462,8 @@ local log_lines = vim.api.nvim_buf_get_lines(log_buffer, 0, -1, false)
 assert(vim.wo[0].scrolloff == 0, "log view must not inherit editing scrolloff")
 local collapsed_log = table.concat(log_lines, "\n")
 assert(not collapsed_log:find("LOG%-PAYLOAD%-MUST%-BE%-COLLAPSED"))
-assert(collapsed_log:find("fixture", 1, true))
+assert(collapsed_log:find("tool_invocation_completed", 1, true))
+assert(collapsed_log:find("BASH", 1, true), "semantic log rendering must classify workspace.shell")
 assert(collapsed_log:find("sha256:", 1, true))
 
 local toggle_log
