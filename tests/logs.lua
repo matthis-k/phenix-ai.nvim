@@ -94,7 +94,11 @@ local records = {
     timestamp_ms = 5000,
     kind = "runtime_trace",
     payload = {
-      summary = { event = "tool_call" },
+      summary = {
+        event = "tool_invocation_started",
+        execution_id = "execution-7",
+        callable_id = "workspace.write",
+      },
       detail = {
         kind = "reference",
         reference = reference,
@@ -124,7 +128,7 @@ assert(logs.category_at(buf, 2) == "read")
 assert(logs.category_at(buf, 3) == "model")
 assert(logs.category_at(buf, 4) == "agent")
 assert(logs.failure_at(buf, 4), "failed agent activity must retain its semantic category and failure state")
-assert(logs.category_at(buf, 5) == "write", "referenced detail must participate in semantic classification")
+assert(logs.category_at(buf, 5) == "write", "root semantic metadata must classify referenced diagnostics without loading content")
 
 local marks = vim.api.nvim_buf_get_extmarks(buf, -1, 0, -1, { details = true })
 assert(#marks == #records, "each raw record must have one semantic decoration")
