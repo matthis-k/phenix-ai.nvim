@@ -333,7 +333,10 @@ local function classify(record, context)
   if contains_any(callable, { ".write", "workspace.write", "patch", "edit" }) then
     return "write"
   end
-  if kind == "model_diagnostic" or contains_any(event, { "routing_decision", "dispatch_" }) or service:find("model", 1, true) ~= nil then
+  if kind == "model_diagnostic"
+    or contains_any(event, { "routing_decision", "dispatch_", "model_turn_" })
+    or service:find("model", 1, true) ~= nil
+  then
     return "model"
   end
   if contains_any(event, { "tool_call", "tool_result" }) or callable ~= "" then
