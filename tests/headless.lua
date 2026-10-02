@@ -498,6 +498,21 @@ vim.api.nvim_win_set_cursor(0, { reference_row, 0 })
 follow_log()
 local reference_buffer = vim.api.nvim_get_current_buf()
 local reference_text = table.concat(vim.api.nvim_buf_get_lines(reference_buffer, 0, -1, false), "\n")
+assert(
+  not reference_text:find("REFERENCE%-PAYLOAD"),
+  "referenced log content must remain concealed until explicitly opened"
+)
+local reference_toggle
+for _, mapping in ipairs(vim.api.nvim_buf_get_keymap(reference_buffer, "n")) do
+  if mapping.lhs == "<CR>" then
+    reference_toggle = mapping.callback
+    break
+  end
+end
+assert(type(reference_toggle) == "function")
+vim.api.nvim_win_set_cursor(0, { 5, 0 })
+reference_toggle()
+reference_text = table.concat(vim.api.nvim_buf_get_lines(reference_buffer, 0, -1, false), "\n")
 assert(reference_text:find("REFERENCE%-PAYLOAD"))
 vim.cmd("tabclose")
 vim.cmd("tabclose")
