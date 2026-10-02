@@ -177,22 +177,25 @@ local function contains_any(value, needles)
   return false
 end
 
+local function is_failure(record)
+  local kind = string.lower(tostring(record.kind or ""))
+  local payload = record.payload
+  local event = string.lower(tostring(find_field(payload, { "event" }) or ""))
+  local outcome = string.lower(tostring(find_field(payload, { "outcome", "state", "status" }) or ""))
+  local success = find_field(payload, { "success" })
+  return success == false
+    or contains_any(kind, { "error", "failed", "failure" })
+    or contains_any(event, { "failed", "rejected", "error" })
+    or contains_any(outcome, { "failed", "denied", "error" })
+end
+
 local function classify(record)
   local kind = string.lower(tostring(record.kind or ""))
   local payload = record.payload
   local event = string.lower(tostring(find_field(payload, { "event" }) or ""))
   local callable = string.lower(tostring(find_field(payload, { "callable_id", "callable" }) or ""))
   local service = string.lower(tostring(find_field(payload, { "service" }) or ""))
-  local outcome = string.lower(tostring(find_field(payload, { "outcome", "state", "status" }) or ""))
-  local success = find_field(payload, { "success" })
 
-  if success == false
-    or contains_any(kind, { "error", "failed", "failure" })
-    or contains_any(event, { "failed", "rejected", "error" })
-    or contains_any(outcome, { "failed", "denied", "error" })
-  then
-    return "error"
-  end
   if callable == "bash" or callable == "workspace.shell" or callable:match("%.shell$") ~= nil then
     return "bash"
   end
@@ -220,6 +223,9 @@ local function classify(record)
   if callable ~= "" then
     return "tool"
   end
+  if is_failure(record) then
+    return "error"
+  end
   return "runtime"
 end
 
@@ -236,7 +242,7 @@ local category_labels = {
 
 local function headline_group(record)
   local category = classify(record)
-  if category == "error" then
+  if is_failure(record) then
     return "DiagnosticError"
   end
   if category == "model" then
@@ -533,7 +539,7 @@ attach = function(buffer)
         for _, record in ipairs(view.records) do
           if record_id(record) == id then
             local category = classify(record)
-            if wanted[category] then
+            if wanted[category] or (wanted.error and is_failure(record)) then
               vim.api.nvim_win_set_cursor(0, { row, 0 })
               return
             end
