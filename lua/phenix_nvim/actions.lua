@@ -3,6 +3,7 @@ local compose = require("phenix_nvim.compose.buffer")
 local compose_model = require("phenix_nvim.compose.model")
 local context = require("phenix_nvim.context")
 local image = require("phenix_nvim.image")
+local logs = require("phenix_nvim.logs")
 local runtime = require("phenix_nvim.runtime")
 local sessions = require("phenix_nvim.sessions")
 local sidebar = require("phenix_nvim.sidebar")
@@ -195,6 +196,10 @@ function M.new(mode)
   return surface
 end
 
+
+function M.logs(scope)
+  logs.open(scope)
+end
 
 function M.cancel()
   runtime.cancel_active()
