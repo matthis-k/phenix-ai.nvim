@@ -144,6 +144,22 @@ reference-depth logging, so detailed records are stored in the shared immutable
 object tree and referenced from the root log. Referenced objects may contain
 further references.
 
+
+`:Phenix logs` opens a read-only `phenix://logs` inspector. The buffer keeps the
+exact JSONL records from `phenix.log`. Semantic extmarks conceal those records
+and render a compact view for humans. Categories distinguish agent activity,
+model work, tool calls, shell calls, reads, writes, policy checks, mutations,
+and failures. `<CR>` expands structured detail without changing the buffer.
+`R` switches to raw JSONL, so normal yanks always copy the machine-oriented
+data.
+
+The inspector follows file-backed `ContentReference` values with `gf` or
+`gd`. It checks the stored byte length and SHA-256 digest before opening an
+immutable `phenix://logs/object/...` buffer. `r` refreshes the current
+source. `]e` and `[e` move between failures, `]a` and `[a` move between
+agent events, and `]t` and `[t` move between tool-related events. `q`
+closes the inspector. `:Phenix logs raw` opens the root directly in raw mode.
+
 Set `log_directory = false` to disable the client-provided sink, or set
 `env.PHENIX_LOG` explicitly to select another core sink. An explicit legacy
 `PHENIX_DEBUG_LOG` is also preserved.
