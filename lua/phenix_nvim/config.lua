@@ -1,8 +1,8 @@
 local M = {}
 
 local defaults = {
-  command = "phenix-acp",
-  args = {},
+  command = "phenix",
+  args = { "--mode", "acp" },
   env = {},
   state_directory = nil,
   log_directory = vim.fn.stdpath("state") .. "/phenix",

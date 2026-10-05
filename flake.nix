@@ -27,7 +27,7 @@
           pkgs = nixpkgs.legacyPackages.${system};
           source = pkgs.lib.cleanSource ./.;
           luaBinding = phenix-ai.packages.${system}.phenix-binding-lua;
-          phenixAcp = phenix-ai.packages.${system}.phenix-acp;
+          phenixProduct = phenix-ai.packages.${system}.phenix;
           plugin = pkgs.vimUtils.buildVimPlugin {
             pname = "phenix-ai.nvim";
             version = "0";
@@ -35,8 +35,8 @@
             postInstall = ''
               install -Dm755 ${luaBinding}/lib/lua/5.1/phenix.so "$out/lua/phenix.so"
               substituteInPlace "$out/lua/phenix_nvim/config.lua" \
-                --replace-fail 'command = "phenix-acp"' \
-                'command = "${phenixAcp}/bin/phenix-acp"'
+                --replace-fail 'command = "phenix"' \
+                'command = "${phenixProduct}/bin/phenix"'
               mkdir -p "$out/share/phenix-ai.nvim"
               printf '%s\n' ${pkgs.lib.escapeShellArg (phenix-ai.rev or "dirty")} \
                 > "$out/share/phenix-ai.nvim/phenix-ai-revision"
@@ -56,7 +56,7 @@
               trap 'rm -rf "$state_dir"' EXIT
               export PHENIX_STATE_DB="$state_dir/provider-acceptance.sqlite"
               export PHENIX_SESSION_ID_FILE="$state_dir/session-id"
-              export PHENIX_ACCEPTANCE_ACP="${phenixAcp}/bin/phenix-acp"
+              export PHENIX_ACCEPTANCE_PHENIX="${phenixProduct}/bin/phenix"
 
               export PHENIX_ACCEPTANCE_PHASE=run
               nvim --headless -u NONE \
@@ -86,7 +86,7 @@
         let
           pkgs = nixpkgs.legacyPackages.${system};
           source = pkgs.lib.cleanSource ./.;
-          phenixAcp = phenix-ai.packages.${system}.phenix-acp;
+          phenixProduct = phenix-ai.packages.${system}.phenix;
           phenixAcpFixture = phenix-ai.packages.${system}.phenix-acp-fixture;
           plugin = self.packages.${system}.phenix-ai-nvim;
         in
@@ -96,7 +96,7 @@
               {
                 nativeBuildInputs = [
                   pkgs.neovim
-                  phenixAcp
+                  phenixProduct
                   phenixAcpFixture
                 ];
               }
@@ -112,7 +112,7 @@
                   echo "frontend Lua must not contain raw Phenix wire method ids" >&2
                   exit 1
                 fi
-                grep -F ${pkgs.lib.escapeShellArg "command = \"${phenixAcp}/bin/phenix-acp\""} \
+                grep -F ${pkgs.lib.escapeShellArg "command = \"${phenixProduct}/bin/phenix\""} \
                   ${plugin}/lua/phenix_nvim/config.lua >/dev/null
 
                 nvim --headless -u NONE \
@@ -153,14 +153,14 @@
                 export PHENIX_SESSION_ID_FILE="$TMPDIR/phenix-ai-nvim-session-id"
                 nvim --headless -u NONE \
                   --cmd ${pkgs.lib.escapeShellArg "set rtp^=${plugin}"} \
-                  -c ${pkgs.lib.escapeShellArg ''lua local ok, err = pcall(function() local frontend = require("phenix_nvim"); local runtime = require("phenix_nvim.runtime"); frontend.setup({ auto_connect = false }); local connected = false; local failure = nil; frontend.connect(function(_, err) failure = err; connected = true end); assert(vim.wait(10000, function() return connected end, 10), "packaged phenix-acp connection timed out"); assert(failure == nil, vim.inspect(failure)); frontend.new_session(); assert(vim.wait(10000, function() return runtime.active_session() ~= nil end, 10), "packaged session creation timed out"); local id = assert(runtime.active_session()); assert(vim.fn.writefile({ id }, vim.env.PHENIX_SESSION_ID_FILE) == 0, "could not persist test session id"); frontend.disconnect() end); if not ok then io.stderr:write(tostring(err)); vim.cmd("cquit 1") end''} \
+                  -c ${pkgs.lib.escapeShellArg ''lua local ok, err = pcall(function() local frontend = require("phenix_nvim"); local runtime = require("phenix_nvim.runtime"); frontend.setup({ auto_connect = false }); local connected = false; local failure = nil; frontend.connect(function(_, err) failure = err; connected = true end); assert(vim.wait(10000, function() return connected end, 10), "packaged Phenix ACP mode connection timed out"); assert(failure == nil, vim.inspect(failure)); frontend.new_session(); assert(vim.wait(10000, function() return runtime.active_session() ~= nil end, 10), "packaged session creation timed out"); local id = assert(runtime.active_session()); assert(vim.fn.writefile({ id }, vim.env.PHENIX_SESSION_ID_FILE) == 0, "could not persist test session id"); frontend.disconnect() end); if not ok then io.stderr:write(tostring(err)); vim.cmd("cquit 1") end''} \
                   -c qa
                 test -s "$PHENIX_STATE_DB"
                 test -s "$PHENIX_SESSION_ID_FILE"
 
                 nvim --headless -u NONE \
                   --cmd ${pkgs.lib.escapeShellArg "set rtp^=${plugin}"} \
-                  -c ${pkgs.lib.escapeShellArg ''lua local ok, err = pcall(function() local frontend = require("phenix_nvim"); local runtime = require("phenix_nvim.runtime"); frontend.setup({ auto_connect = false }); local connected = false; local connection_error = nil; frontend.connect(function(_, err) connection_error = err; connected = true end); assert(vim.wait(10000, function() return connected end, 10), "packaged phenix-acp reconnect timed out"); assert(connection_error == nil, vim.inspect(connection_error)); local id = assert(vim.fn.readfile(vim.env.PHENIX_SESSION_ID_FILE)[1]); local resumed = false; local resume_error = nil; runtime.resume_session(id, function(snapshot, err) resume_error = err; resumed = snapshot ~= nil end); assert(vim.wait(10000, function() return resumed or resume_error ~= nil end, 10), "packaged session resume timed out"); assert(resume_error == nil, vim.inspect(resume_error)); assert(runtime.active_session() == id, "restart resumed the wrong session"); local projected = assert(runtime.session_state(), "restart must publish session state"); assert(projected.sessions[id] ~= nil, "resumed session must be reconstructed from durable runtime state"); frontend.disconnect() end); if not ok then io.stderr:write(tostring(err)); vim.cmd("cquit 1") end''} \
+                  -c ${pkgs.lib.escapeShellArg ''lua local ok, err = pcall(function() local frontend = require("phenix_nvim"); local runtime = require("phenix_nvim.runtime"); frontend.setup({ auto_connect = false }); local connected = false; local connection_error = nil; frontend.connect(function(_, err) connection_error = err; connected = true end); assert(vim.wait(10000, function() return connected end, 10), "packaged Phenix ACP mode reconnect timed out"); assert(connection_error == nil, vim.inspect(connection_error)); local id = assert(vim.fn.readfile(vim.env.PHENIX_SESSION_ID_FILE)[1]); local resumed = false; local resume_error = nil; runtime.resume_session(id, function(snapshot, err) resume_error = err; resumed = snapshot ~= nil end); assert(vim.wait(10000, function() return resumed or resume_error ~= nil end, 10), "packaged session resume timed out"); assert(resume_error == nil, vim.inspect(resume_error)); assert(runtime.active_session() == id, "restart resumed the wrong session"); local projected = assert(runtime.session_state(), "restart must publish session state"); assert(projected.sessions[id] ~= nil, "resumed session must be reconstructed from durable runtime state"); frontend.disconnect() end); if not ok then io.stderr:write(tostring(err)); vim.cmd("cquit 1") end''} \
                   -c qa
 
                 nvim --headless -u NONE \
