@@ -35,8 +35,8 @@
             postInstall = ''
               install -Dm755 ${luaBinding}/lib/lua/5.1/phenix.so "$out/lua/phenix.so"
               substituteInPlace "$out/lua/phenix_nvim/config.lua" \
-                --replace-fail 'command = "phenix-acp"' \
-                'command = "${phenixProduct}/bin/phenix-acp"'
+                --replace-fail 'command = "phenix"' \
+                'command = "${phenixProduct}/bin/phenix"'
               mkdir -p "$out/share/phenix-ai.nvim"
               printf '%s\n' ${pkgs.lib.escapeShellArg (phenix-ai.rev or "dirty")} \
                 > "$out/share/phenix-ai.nvim/phenix-ai-revision"
@@ -112,7 +112,7 @@
                   echo "frontend Lua must not contain raw Phenix wire method ids" >&2
                   exit 1
                 fi
-                grep -F ${pkgs.lib.escapeShellArg "command = \"${phenixProduct}/bin/phenix-acp\""} \
+                grep -F ${pkgs.lib.escapeShellArg "command = \"${phenixProduct}/bin/phenix\""} \
                   ${plugin}/lua/phenix_nvim/config.lua >/dev/null
 
                 nvim --headless -u NONE \
