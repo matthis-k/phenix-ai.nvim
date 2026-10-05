@@ -57,7 +57,8 @@ if phase == "run" then
   assert(api_key ~= "", "OPENAI_API_KEY must not be empty")
   local phenix = require("phenix")
   local client = phenix.connect({
-    command = assert(vim.env.PHENIX_ACCEPTANCE_ACP, "PHENIX_ACCEPTANCE_ACP is required"),
+    command = assert(vim.env.PHENIX_ACCEPTANCE_PHENIX, "PHENIX_ACCEPTANCE_PHENIX is required"),
+    args = { "--mode", "acp" },
     env = {
       PHENIX_STATE_DB = state_db,
       OPENAI_API_KEY = api_key,
@@ -98,7 +99,7 @@ if phase == "run" then
     end
     sleep(10)
   end
-  assert(ready, "packaged phenix-acp did not advertise provider acceptance operations")
+  assert(ready, "packaged Phenix ACP mode did not advertise provider acceptance operations")
 
   local application = client:application()
   local function operation(id)
