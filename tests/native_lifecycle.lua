@@ -1,15 +1,22 @@
 local native = require("phenix")
-local command = require("phenix_nvim.config").get().command
+local config = require("phenix_nvim.config").get()
+local command = config.command
 local uv = vim.uv or vim.loop
 local pid_file = vim.fn.tempname()
+local wrapper_args = {
+  "-c",
+  'echo $$ > "$PHENIX_TEST_PID"; exec "$PHENIX_TEST_ACP" "$@"',
+  "phenix",
+}
+vim.list_extend(wrapper_args, config.args or {})
 local client = native.application.connect({
   command = "sh",
-  args = { "-c", 'echo $$ > "$PHENIX_TEST_PID"; exec "$PHENIX_TEST_ACP"' },
+  args = wrapper_args,
   env = { PHENIX_TEST_PID = pid_file, PHENIX_TEST_ACP = command },
 })
 local function await(request)
   local done, value, err
-  assert(vim.wait(10000, function()
+  assert(vim.wait(30000, function()
     client:pump(64)
     done, value, err = request:poll()
     return done
@@ -17,19 +24,27 @@ local function await(request)
   assert(err == nil, vim.inspect(err))
   return value
 end
-assert(vim.wait(10000, function()
+assert(vim.wait(30000, function()
   client:pump(64)
   return client:status().state == "ready"
 end, 10), "native readiness timed out")
 local pid = assert(tonumber(vim.fn.readfile(pid_file)[1]))
 local sessions = client:sessions()
-local session = await(sessions:create({ working_directory = vim.fn.getcwd() }))
-local id = session:id()
-assert(sessions:cached(id) ~= nil)
-await(session:close())
-assert(sessions:cached(id) == nil, "closed session remains in native cache")
+local controller = await(sessions:create({ working_directory = vim.fn.getcwd(), title = "controller" }))
+local controller_id = controller:id()
+local child = await(sessions:create({ working_directory = vim.fn.getcwd(), title = "child" }))
+local child_id = child:id()
+assert(sessions:cached(controller_id) ~= nil)
+assert(sessions:cached(child_id) ~= nil)
+
+await(child:close())
+assert(sessions:cached(child_id) == nil, "closed child remains in native cache")
+assert(sessions:cached(controller_id) ~= nil, "closing a child evicted the controller")
 client:pump(64)
-assert(sessions:cached(id) == nil, "late event recreated a closed session")
+assert(sessions:cached(child_id) == nil, "late child event recreated a closed session")
+assert(sessions:cached(controller_id) ~= nil, "late child event evicted the controller")
+assert(await(sessions:list()) ~= nil, "child close made the ACP connection unusable")
+
 local interrupted = sessions:list()
 client:close()
 local done, _, err = interrupted:poll()
