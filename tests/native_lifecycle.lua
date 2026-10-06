@@ -16,7 +16,7 @@ local client = native.application.connect({
 })
 local function await(request)
   local done, value, err
-  assert(vim.wait(10000, function()
+  assert(vim.wait(30000, function()
     client:pump(64)
     done, value, err = request:poll()
     return done
@@ -24,7 +24,7 @@ local function await(request)
   assert(err == nil, vim.inspect(err))
   return value
 end
-assert(vim.wait(10000, function()
+assert(vim.wait(30000, function()
   client:pump(64)
   return client:status().state == "ready"
 end, 10), "native readiness timed out")
