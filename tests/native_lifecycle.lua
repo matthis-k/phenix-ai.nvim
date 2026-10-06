@@ -1,10 +1,17 @@
 local native = require("phenix")
-local command = require("phenix_nvim.config").get().command
+local config = require("phenix_nvim.config").get()
+local command = config.command
 local uv = vim.uv or vim.loop
 local pid_file = vim.fn.tempname()
+local wrapper_args = {
+  "-c",
+  'echo $ > "$PHENIX_TEST_PID"; exec "$PHENIX_TEST_ACP" "$@"',
+  "phenix",
+}
+vim.list_extend(wrapper_args, config.args or {})
 local client = native.application.connect({
   command = "sh",
-  args = { "-c", 'echo $$ > "$PHENIX_TEST_PID"; exec "$PHENIX_TEST_ACP"' },
+  args = wrapper_args,
   env = { PHENIX_TEST_PID = pid_file, PHENIX_TEST_ACP = command },
 })
 local function await(request)
