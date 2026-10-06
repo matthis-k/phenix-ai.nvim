@@ -322,6 +322,15 @@ runtime.tick()
 assert(runtime.active_session() == controller_session, "child update replaced or cleared the active controller")
 assert(runtime.status().connection == "ready", "child update poisoned the Phenix connection")
 assert(next_client.closed == 0, "child update closed the native client")
+next_client.session.prompt = function()
+  return completed({ execution_id = "execution-after-child-close" })
+end
+local after_child = result()
+runtime.prompt(controller_session, { { kind = "text", text = "continue controller" } }, after_child.callback)
+runtime.tick()
+assert(after_child.calls == 1 and after_child.error == nil, "controller prompt failed after child lifecycle event")
+assert(runtime.active_session() == controller_session)
+assert(runtime.status().connection == "ready")
 runtime.disconnect()
 
 -- A Phenix/model failure settles only that prompt. It does not poison the
