@@ -355,6 +355,29 @@ assert(
   vim.inspect(bash_tool.input_schema):find("command", 1, true) ~= nil,
   "model-visible bash schema omitted the command field"
 )
+
+local tools_by_id = {}
+for _, tool in ipairs(introspection_report.tools) do
+  tools_by_id[tool.id] = tool
+end
+for _, tool_id in ipairs({
+  "bash",
+  "code.query",
+  "memory.recall",
+  "memory.record",
+  "phenix.inspect",
+  "workspace.discover",
+  "workspace.git",
+  "workspace.read",
+  "workspace.search",
+  "workspace.write",
+}) do
+  assert(tools_by_id[tool_id] ~= nil, "model-visible tool surface omitted " .. tool_id)
+end
+assert(
+  vim.inspect(tools_by_id["phenix.inspect"].input_schema):find("query", 1, true) ~= nil,
+  "model-visible phenix.inspect schema omitted the query field"
+)
 assert(type(introspection_report.skills) == "table", "introspection report omitted skills")
 assert(
   type(introspection_report.instructions) == "table" and #introspection_report.instructions > 0,
