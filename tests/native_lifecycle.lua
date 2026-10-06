@@ -5,7 +5,7 @@ local uv = vim.uv or vim.loop
 local pid_file = vim.fn.tempname()
 local wrapper_args = {
   "-c",
-  'echo $ > "$PHENIX_TEST_PID"; exec "$PHENIX_TEST_ACP" "$@"',
+  'echo $$ > "$PHENIX_TEST_PID"; exec "$PHENIX_TEST_ACP" "$@"',
   "phenix",
 }
 vim.list_extend(wrapper_args, config.args or {})
