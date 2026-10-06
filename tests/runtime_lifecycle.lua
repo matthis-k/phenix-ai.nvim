@@ -297,6 +297,33 @@ assert(
   "stale rollback mutated the disconnected client"
 )
 
+-- Child-session lifecycle events must not clear the controller or poison the connection.
+-- Model-side orchestration can create/close sessions that the frontend never selected.
+next_client = client()
+next_client.session.projection = function()
+  return {
+    session = { session_id = "session.test" },
+    through_sequence = 1,
+    updates = {},
+  }
+end
+runtime.connect()
+next_client:status_event("ready")
+runtime.tick()
+runtime.new_session()
+runtime.tick()
+local controller_session = assert(runtime.active_session())
+assert(controller_session == "session.test")
+table.insert(next_client.events, {
+  kind = "session_update",
+  data = { session_id = "session.child" },
+})
+runtime.tick()
+assert(runtime.active_session() == controller_session, "child update replaced or cleared the active controller")
+assert(runtime.status().connection == "ready", "child update poisoned the Phenix connection")
+assert(next_client.closed == 0, "child update closed the native client")
+runtime.disconnect()
+
 -- A Phenix/model failure settles only that prompt. It does not poison the
 -- transport connection, and the next prompt gets a fresh request.
 next_client = client()
