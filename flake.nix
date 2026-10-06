@@ -114,6 +114,8 @@
                 fi
                 grep -F ${pkgs.lib.escapeShellArg "command = \"${phenixProduct}/bin/phenix\""} \
                   ${plugin}/lua/phenix_nvim/config.lua >/dev/null
+                test "$(cat ${plugin}/share/phenix-ai.nvim/phenix-ai-revision)" = \
+                  ${pkgs.lib.escapeShellArg (phenix-ai.rev or "dirty")}
 
                 nvim --headless -u NONE \
                   -c ${pkgs.lib.escapeShellArg "lua local f, err = loadfile('${source}/tests/provider_acceptance.lua'); if not f then io.stderr:write(err); vim.cmd('cquit 1') end"} \
@@ -179,6 +181,12 @@
                   -l ${source}/tests/runtime_model_e2e.lua
                 test -s "$PHENIX_NVIM_LOG_DIRECTORY/phenix.log"
                 test -d "$PHENIX_NVIM_LOG_DIRECTORY/objects"
+
+                export PHENIX_STATE_DB="$TMPDIR/phenix-ai-nvim-orchestration.sqlite"
+                nvim --headless -u NONE \
+                  --cmd ${pkgs.lib.escapeShellArg "set rtp^=${plugin}"} \
+                  -l ${source}/tests/runtime_orchestration_e2e.lua
+                test -s "$PHENIX_STATE_DB"
 
                 touch "$out"
               '';
