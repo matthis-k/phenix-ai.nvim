@@ -21,17 +21,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: cachix/install-nix-action@v31
-      - name: Regenerate dependency lock for propagation
-        run: |
-          nix flake update phenix-ai
-          echo '---BEGIN-FLAKE-LOCK---'
-          cat flake.lock
-          echo '---END-FLAKE-LOCK---'
-      - name: Upload regenerated lock
-        uses: actions/upload-artifact@v4
-        with:
-          name: propagated-flake-lock
-          path: flake.lock
+      - run: nix flake check --no-build --no-write-lock-file --show-trace
 
   client:
     name: Client integration
