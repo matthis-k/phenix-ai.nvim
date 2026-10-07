@@ -27,6 +27,11 @@ jobs:
           echo '---BEGIN-FLAKE-LOCK---'
           cat flake.lock
           echo '---END-FLAKE-LOCK---'
+      - name: Upload regenerated lock
+        uses: actions/upload-artifact@v4
+        with:
+          name: propagated-flake-lock
+          path: flake.lock
 
   client:
     name: Client integration
