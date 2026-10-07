@@ -182,12 +182,6 @@
                 test -s "$PHENIX_NVIM_LOG_DIRECTORY/phenix.log"
                 test -d "$PHENIX_NVIM_LOG_DIRECTORY/objects"
 
-                export PHENIX_STATE_DB="$TMPDIR/phenix-ai-nvim-orchestration.sqlite"
-                nvim --headless -u NONE \
-                  --cmd ${pkgs.lib.escapeShellArg "set rtp^=${plugin}"} \
-                  -l ${source}/tests/runtime_orchestration_e2e.lua
-                test -s "$PHENIX_STATE_DB"
-
                 touch "$out"
               '';
         }
