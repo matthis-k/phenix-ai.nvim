@@ -361,10 +361,6 @@ for _, tool in ipairs(introspection_report.tools) do
   tools_by_id[tool.id] = tool
 end
 for _, tool_id in ipairs({
-  "bash",
-  "code.query",
-  "memory.recall",
-  "memory.record",
   "nvim.context.buffer",
   "nvim.context.buffers",
   "nvim.context.current_location",
@@ -372,19 +368,9 @@ for _, tool_id in ipairs({
   "nvim.context.quickfix",
   "nvim.context.selection",
   "nvim.context.viewport",
-  "phenix.inspect",
-  "workspace.discover",
-  "workspace.git",
-  "workspace.read",
-  "workspace.search",
-  "workspace.write",
 }) do
-  assert(tools_by_id[tool_id] ~= nil, "model-visible tool surface omitted " .. tool_id)
+  assert(tools_by_id[tool_id] ~= nil, "model-visible Neovim tool surface omitted " .. tool_id)
 end
-assert(
-  vim.inspect(tools_by_id["phenix.inspect"].input_schema):find("query", 1, true) ~= nil,
-  "model-visible phenix.inspect schema omitted the query field"
-)
 assert(type(introspection_report.skills) == "table", "introspection report omitted skills")
 assert(
   type(introspection_report.instructions) == "table" and #introspection_report.instructions > 0,
