@@ -79,6 +79,7 @@ assert(runtime.active_session() == nil, "model discovery test must start without
 local initial = selections()
 assert(type(initial.available) == "table" and #initial.available > 0, "no model selections exposed")
 assert(type(initial.selected) == "string" and initial.selected ~= "", "default selection is missing")
+
 assert(
   find_model(initial, "opencode-go", "qwen3.7-plus", nil) == nil,
   "unauthenticated provider catalog must not leak router targets into direct model selections"
