@@ -52,7 +52,12 @@ local function prompt(text)
   assert(vim.wait(10000, function()
     return result ~= nil or prompt_error ~= nil
   end, 10), "prompt timed out for " .. text)
-  assert(prompt_error == nil, vim.inspect(prompt_error))
+  assert(prompt_error == nil, vim.inspect({
+    error = prompt_error,
+    controller_session = session_id,
+    active_session = runtime.active_session(),
+    controller_closed_in_projection = controller_is_closed(),
+  }))
   assert(result ~= nil, "prompt completed without a result for " .. text)
   return result
 end
@@ -64,8 +69,26 @@ local function normalized_kind(value)
   return string.lower(tostring(value or "")):gsub("_", "")
 end
 
+local function controller_projection()
+  return runtime.session_state().sessions[session_id]
+end
+
+local function controller_is_closed()
+  local projection = controller_projection()
+  if projection == nil then
+    return false
+  end
+  for _, entry in ipairs(projection.updates or {}) do
+    local change = entry.update or {}
+    if normalized_kind(change.kind) == "closed" then
+      return true
+    end
+  end
+  return false
+end
+
 local function has_assistant_text(expected)
-  local projection = runtime.session_state().sessions[session_id]
+  local projection = controller_projection()
   if projection == nil then
     return false
   end
@@ -92,6 +115,7 @@ assert(vim.wait(10000, function()
   return has_assistant_text(first_done)
 end, 10), "child-session close orchestration did not reach its final response")
 assert(runtime.active_session() == session_id, "child-session orchestration replaced the controller session")
+assert(not controller_is_closed(), "child-session close projected Closed onto controller " .. session_id)
 assert(runtime.status().connection == "ready", "child-session close left the Neovim client disconnected")
 
 local second = prompt(second_marker)
