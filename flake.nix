@@ -114,6 +114,8 @@
                 fi
                 grep -F ${pkgs.lib.escapeShellArg "command = \"${phenixProduct}/bin/phenix\""} \
                   ${plugin}/lua/phenix_nvim/config.lua >/dev/null
+                test "$(cat ${plugin}/share/phenix-ai.nvim/phenix-ai-revision)" = \
+                  ${pkgs.lib.escapeShellArg (phenix-ai.rev or "dirty")}
 
                 nvim --headless -u NONE \
                   -c ${pkgs.lib.escapeShellArg "lua local f, err = loadfile('${source}/tests/provider_acceptance.lua'); if not f then io.stderr:write(err); vim.cmd('cquit 1') end"} \

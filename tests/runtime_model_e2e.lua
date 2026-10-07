@@ -355,6 +355,22 @@ assert(
   vim.inspect(bash_tool.input_schema):find("command", 1, true) ~= nil,
   "model-visible bash schema omitted the command field"
 )
+
+local tools_by_id = {}
+for _, tool in ipairs(introspection_report.tools) do
+  tools_by_id[tool.id] = tool
+end
+for _, tool_id in ipairs({
+  "nvim.context.buffer",
+  "nvim.context.buffers",
+  "nvim.context.current_location",
+  "nvim.context.diagnostics",
+  "nvim.context.quickfix",
+  "nvim.context.selection",
+  "nvim.context.viewport",
+}) do
+  assert(tools_by_id[tool_id] ~= nil, "model-visible Neovim tool surface omitted " .. tool_id)
+end
 assert(type(introspection_report.skills) == "table", "introspection report omitted skills")
 assert(
   type(introspection_report.instructions) == "table" and #introspection_report.instructions > 0,
