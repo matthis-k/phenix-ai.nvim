@@ -40,28 +40,6 @@ end, 10), "controller session creation timed out")
 assert(create_error == nil, vim.inspect(create_error))
 local session_id = assert(runtime.active_session(), "controller session did not become active")
 
-local function prompt(text)
-  local result = nil
-  local prompt_error = nil
-  runtime.prompt(session_id, {
-    { kind = "text", text = text },
-  }, function(value, err)
-    result = value
-    prompt_error = err
-  end)
-  assert(vim.wait(10000, function()
-    return result ~= nil or prompt_error ~= nil
-  end, 10), "prompt timed out for " .. text)
-  assert(prompt_error == nil, vim.inspect({
-    error = prompt_error,
-    controller_session = session_id,
-    active_session = runtime.active_session(),
-    controller_closed_in_projection = controller_is_closed(),
-  }))
-  assert(result ~= nil, "prompt completed without a result for " .. text)
-  return result
-end
-
 local function normalized_kind(value)
   if type(value) == "table" then
     value = value.kind or value.tag
@@ -85,6 +63,28 @@ local function controller_is_closed()
     end
   end
   return false
+end
+
+local function prompt(text)
+  local result = nil
+  local prompt_error = nil
+  runtime.prompt(session_id, {
+    { kind = "text", text = text },
+  }, function(value, err)
+    result = value
+    prompt_error = err
+  end)
+  assert(vim.wait(10000, function()
+    return result ~= nil or prompt_error ~= nil
+  end, 10), "prompt timed out for " .. text)
+  assert(prompt_error == nil, vim.inspect({
+    error = prompt_error,
+    controller_session = session_id,
+    active_session = runtime.active_session(),
+    controller_closed_in_projection = controller_is_closed(),
+  }))
+  assert(result ~= nil, "prompt completed without a result for " .. text)
+  return result
 end
 
 local function has_assistant_text(expected)
