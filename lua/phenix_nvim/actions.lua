@@ -16,6 +16,8 @@ local active_runs = setmetatable({}, { __mode = "k" })
 local paused_queues = setmetatable({}, { __mode = "k" })
 local queued = setmetatable({}, { __mode = "k" })
 local queue_view = require("phenix_nvim.queue")
+local prompt_connection_state = runtime.status().connection
+local prompt_connection_generation = 0
 
 local function target_surface(options)
   options = options or {}
@@ -224,6 +226,32 @@ local function render_queue(surface)
   end)
 end
 
+runtime.on_event(function(kind, status)
+  if kind ~= "status" then
+    return
+  end
+  local next_state = status.connection
+  if prompt_connection_state == "ready" and next_state ~= "ready" then
+    prompt_connection_generation = prompt_connection_generation + 1
+    for surface, pending in pairs(active_runs) do
+      pending.abandoned = true
+      active_runs[surface] = nil
+      if submissions[surface.compose] == pending then
+        submissions[surface.compose] = nil
+      end
+      local entries = queue_for(surface)
+      if pending.queued_item ~= nil and not pending.confirmed then
+        table.insert(entries, 1, pending.queued_item)
+      end
+      if #entries > 0 then
+        paused_queues[surface] = true
+        render_queue(surface)
+      end
+    end
+  end
+  prompt_connection_state = next_state
+end)
+
 local function submit(surface, content, revision, queued_item)
   local document = surface.compose
   local session_id = surface.session_id
@@ -235,12 +263,16 @@ local function submit(surface, content, revision, queued_item)
     content = vim.deepcopy(content),
     after_sequence = snapshot and (snapshot.through_sequence or 0) or 0,
     confirmed = false,
+    queued_item = queued_item,
   }
   active_runs[surface] = pending
   if queued_item == nil then
     submissions[document] = pending
   end
   runtime.prompt(session_id, content, function(_, error)
+    if pending.abandoned then
+      return
+    end
     local latest = runtime.session_state()
     local current = latest and latest.sessions and latest.sessions[session_id]
     acknowledge(document, pending, current)
@@ -340,8 +372,15 @@ function M.send(options)
     return
   end
   local creating = { revision = revision, session_id = nil, confirmed = false }
+  local generation = prompt_connection_generation
   submissions[document] = creating
   runtime.new_session(function(created, create_error)
+    if generation ~= prompt_connection_generation then
+      if submissions[document] == creating then
+        submissions[document] = nil
+      end
+      return
+    end
     if create_error ~= nil then
       if submissions[document] == creating then
         submissions[document] = nil
