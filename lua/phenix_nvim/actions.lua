@@ -129,35 +129,44 @@ local function message_kind(value)
   return string.lower(tostring(value or ""))
 end
 
-local function request_text(content)
-  local parts = {}
+local function normalized_content(content)
+  local result = {}
   for _, part in ipairs(content or {}) do
-    if part.kind == "text" then
-      table.insert(parts, part.text or "")
+    local kind = message_kind(part.kind)
+    if kind == "text" then
+      table.insert(result, { kind = "text", text = part.text or "" })
+    elseif kind == "resource" or kind == "location" or kind == "selection" then
+      local source = part.source or {}
+      table.insert(result, {
+        kind = "resource",
+        uri = part.uri or source.uri,
+        text = part.snapshot or part.text,
+      })
+    elseif kind == "image" then
+      table.insert(result, {
+        kind = "image",
+        mime_type = part.mime_type,
+        data = part.bytes or part.data,
+      })
     end
   end
-  return table.concat(parts)
+  return result
 end
 
 local function transcript_contains_submission(projection, pending)
   if type(projection) ~= "table" or type(projection.updates) ~= "table" then
     return false
   end
+  local expected = normalized_content(pending.content)
   for _, item in ipairs(projection.updates) do
     if type(item.sequence) == "number" and item.sequence > pending.after_sequence then
       local change = item.update or {}
       if message_kind(change.kind) == "message" then
         local message = change.message or {}
-        if message_kind(message.role) == "user" then
-          local text = {}
-          for _, part in ipairs(message.content or {}) do
-            if message_kind(part.kind) == "text" then
-              table.insert(text, part.text or "")
-            end
-          end
-          if table.concat(text) == request_text(pending.content) then
-            return true
-          end
+        if message_kind(message.role) == "user"
+          and vim.deep_equal(normalized_content(message.content), expected)
+        then
+          return true
         end
       end
     end
