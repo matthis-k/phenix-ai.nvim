@@ -1,0 +1,45 @@
+-- Deterministic display contract fixture; no backend or model required.
+local doc = require("phenix_nvim.ui.document")
+local view = require("phenix_nvim.ui.buffer")
+local fixture = {
+  version = 1, session_id = "session-a", document_id = "document-a", revision = 1,
+  root = { id = "root", kind = "column", children = {
+    { id = "label", kind = "label", text = "Status" },
+    { id = "badge", kind = "badge", text = "Queued" },
+    { id = "progress", kind = "progress", fraction = 0.5, text = "Running" },
+    { id = "table", kind = "table", columns = { "Name", "State" },
+      rows = { { "build", "passed" } } },
+  } },
+}
+local buffer = assert(view.present(fixture))
+local lines = vim.api.nvim_buf_get_lines(buffer, 0, -1, false)
+assert(vim.tbl_contains(lines, "  Running [========--------] 50%"))
+assert(vim.tbl_contains(lines, "  build | passed"))
+assert(view.present(fixture) == buffer, "same revision must be idempotent")
+local changed = vim.deepcopy(fixture)
+changed.revision = 2
+changed.root.children[2].text = "Completed"
+assert(view.present(changed) == buffer)
+local stale, error = view.present(fixture)
+assert(stale == nil and error:find("stale"), "old revisions must not overwrite new ones")
+
+local function reject(mutator)
+  local invalid = vim.deepcopy(fixture)
+  mutator(invalid)
+  local projected = doc.project(invalid)
+  assert(projected == nil, "invalid UI document passed validation")
+end
+reject(function(d) d.root.children[1].id = "badge" end)
+reject(function(d) d.root.children[1].kind = "button" end)
+reject(function(d) d.root.children[1].text = string.char(27) .. "[2J" end)
+reject(function(d) d.root.children[3].fraction = 1.5 end)
+reject(function(d) d.root.children[4].rows[1] = { "only one cell" } end)
+reject(function(d) d.version = 2 end)
+reject(function(d) d.root.children[1].text = string.rep("x", 4097) end)
+
+local other = vim.deepcopy(fixture)
+other.session_id = "session-b"
+assert(view.present(other) ~= buffer, "sessions must not share buffers")
+view.close("session-a", "document-a")
+view.close("session-b", "document-a")
+print("structured UI display fixture passed")
