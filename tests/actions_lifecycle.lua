@@ -432,10 +432,17 @@ state.compose.revision = 400
 actions.send()
 assert(session_open_callback ~= nil)
 assert(#prompt_callbacks == 8, "no prompt may dispatch without a session ID")
+local original_queue_render_before_session = queue_view.render
+local retry_before_session
+queue_view.render = function(_, _, _, retry) retry_before_session = retry end
 prompt_text = "follow-up-before-session"
 state.compose.revision = 401
 actions.send()
 assert(clear_calls == 6, "pre-session follow-up must be visible in its queue")
+assert(retry_before_session ~= nil, "pre-session queue must be visible")
+retry_before_session()
+assert(#prompt_callbacks == 8, "queue retry must not dispatch without a bound session")
+queue_view.render = original_queue_render_before_session
 session_open_callback({ session_id = "created-session" }, nil)
 assert(#prompt_callbacks == 9, "created session must send the original draft first")
 prompt_callbacks[9]({}, nil)
