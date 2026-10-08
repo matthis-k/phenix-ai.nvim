@@ -39,13 +39,16 @@ function M.project(document)
     if not integer(document.revision) then
       error("revision must be a non-negative integer")
     end
-    local ids, lines, count = {}, {}, 0
-    local function add(line)
-      for _, segment in ipairs(vim.split(line, "\n", { plain = true })) do
+    local ids, lines, styles, count = {}, {}, {}, 0
+    local function add(line, style)
+      for index, segment in ipairs(vim.split(line, "\n", { plain = true })) do
         if #lines >= MAX_LINES then
           error("document exceeds line limit")
         end
         lines[#lines + 1] = segment
+        if index == 1 and style ~= nil then
+          styles[#styles + 1] = { row = #lines - 1, end_col = #segment, kind = style }
+        end
       end
     end
     local visit
@@ -70,7 +73,7 @@ function M.project(document)
       if kind == "text" or kind == "label" then
         add(prefix .. valid_text(node.text, "text"))
       elseif kind == "badge" then
-        add(prefix .. "[" .. valid_text(node.text, "badge") .. "]")
+        add(prefix .. "[" .. valid_text(node.text, "badge") .. "]", "badge")
       elseif kind == "progress" then
         local fraction = node.fraction
         if type(fraction) ~= "number" or fraction ~= fraction or fraction < 0 or fraction > 1 then
@@ -79,7 +82,7 @@ function M.project(document)
         local filled = math.floor(fraction * 16 + 0.5)
         add(prefix .. valid_text(node.text, "progress label", true) .. " ["
           .. string.rep("=", filled) .. string.rep("-", 16 - filled)
-          .. "] " .. tostring(math.floor(fraction * 100 + 0.5)) .. "%")
+          .. "] " .. tostring(math.floor(fraction * 100 + 0.5)) .. "%", "progress")
       elseif kind == "table" then
         if type(node.columns) ~= "table" or #node.columns == 0 or #node.columns > 12
           or type(node.rows) ~= "table" or #node.rows > 100 then
@@ -118,6 +121,7 @@ function M.project(document)
       document_id = document_id,
       revision = document.revision,
       lines = lines,
+      styles = styles,
     }
   end)
   if not ok then
