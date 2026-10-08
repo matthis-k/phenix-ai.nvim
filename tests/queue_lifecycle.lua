@@ -41,7 +41,10 @@ assert(w1 > 0 and w2 > 0 and mapped[w1] and mapped[w2)
 local config1 = vim.api.nvim_win_get_config(w1)
 local config2 = vim.api.nvim_win_get_config(w2)
 assert(config1.win == host and config2.win == host)
-assert(config2.row[false] == config1.row[false] + 3)
+local function row(config)
+  return type(config.row) == "table" and config.row[2] or config.row
+end
+assert(row(config2) == row(config1) + 3)
 assert(queue.reserved_rows(surface, vim.api.nvim_win_get_height(host), 3) == 6)
 
 vim.api.nvim_set_current_win(w1)
