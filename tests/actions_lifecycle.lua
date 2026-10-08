@@ -382,6 +382,38 @@ for _, listener in ipairs(listeners) do
 end
 prompt_callbacks[6]({}, nil)
 
+-- Disconnects must stop automatic dispatch and invalidate callbacks from the old
+-- connection. A queued item remains recoverable until the user resumes it.
+local queue_view = require("phenix_nvim.queue")
+local original_queue_render = queue_view.render
+local queued_snapshot, resume_queue
+queue_view.render = function(_, entries, _, resume)
+  queued_snapshot = vim.deepcopy(entries)
+  resume_queue = resume
+end
+prompt_text = "in-flight-disconnect"
+state.compose.revision = 300
+actions.send()
+assert(#prompt_callbacks == 7)
+prompt_text = "queued-after-disconnect"
+state.compose.revision = 301
+actions.send()
+assert(#prompt_callbacks == 7 and clear_calls == 5)
+status("disconnected")
+assert(queued_snapshot and #queued_snapshot == 1, "disconnect dropped a queued follow-up")
+assert(queued_snapshot[1].content[1].text == "queued-after-disconnect")
+status("connecting")
+status("ready")
+prompt_callbacks[7]({}, nil)
+assert(#prompt_callbacks == 7, "old connection callback dispatched a new prompt")
+assert(clear_calls == 5, "old connection callback cleared a newer draft")
+assert(resume_queue ~= nil, "disconnected queue lost manual resume")
+resume_queue()
+assert(#prompt_callbacks == 8, "explicit resume must dispatch the preserved follow-up")
+prompt_callbacks[8](nil, { kind = "disconnected" })
+assert(queued_snapshot and #queued_snapshot == 1, "rejected queued follow-up must be recoverable")
+queue_view.render = original_queue_render
+
 compose.serialize = original_serialize
 compose.clear = original_clear
 
