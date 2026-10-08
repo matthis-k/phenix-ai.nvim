@@ -4,6 +4,7 @@ local active = {}
 local connection = "ready"
 local auth_calls, selection_calls, resume_calls = 0, 0, 0
 local prompt_callbacks = {}
+local session_projections = {}
 local runtime = {
   on_event = function(listener) listeners[#listeners + 1] = listener end,
   active_session_object = function() return active end,
@@ -13,7 +14,7 @@ local runtime = {
     return { connection = connection, session_id = "session-send" }
   end,
   session_state = function()
-    return { sessions = {} }
+    return { sessions = session_projections }
   end,
   refresh_session_state = function() end,
   prompt = function(_, _, callback)
@@ -245,14 +246,16 @@ status("ready")
 picked(items[1])
 assert(resume_calls == 1)
 
--- Repeating send without editing must not dispatch the same compose revision twice.
+-- A sent draft remains until its user message is in the transcript.
+-- The model's final response does not control draft clearing.
 local compose = require("phenix_nvim.compose.buffer")
 local state = require("phenix_nvim.state")
 local original_serialize = compose.serialize
 local original_clear = compose.clear
 local clear_calls = 0
+local prompt_text = "question"
 compose.serialize = function()
-  return { { kind = "text", text = "question" } }
+  return { { kind = "text", text = prompt_text } }
 end
 compose.clear = function()
   clear_calls = clear_calls + 1
@@ -260,20 +263,340 @@ end
 state.compose.revision = 100
 actions.send()
 actions.send()
-assert(#prompt_callbacks == 1, "same compose revision was submitted more than once")
+assert(#prompt_callbacks == 1, "same compose revision was submitted twice")
+assert(clear_calls == 0, "draft cleared before the transcript accepted it")
+
+session_projections["session-send"] = {
+  session = { session_id = "session-send" },
+  through_sequence = 1,
+  updates = {
+    {
+      sequence = 1,
+      update = {
+        kind = "Message",
+        message = {
+          role = { kind = "User" },
+          content = { { kind = "Text", text = "question" } },
+        },
+      },
+    },
+  },
+}
+for _, listener in ipairs(listeners) do
+  listener("sessions", { sessions = session_projections })
+end
+assert(clear_calls == 1, "accepted user prompt must clear before final response")
+
+-- A follow-up is queued in the per-chat pane while the earlier turn runs.
+prompt_text = "follow-up"
+actions.send()
+assert(#prompt_callbacks == 1, "concurrent follow-up must stay in the local queue")
+assert(clear_calls == 2, "queued draft must clear after entering the visible queue")
 prompt_callbacks[1]({}, nil)
-assert(clear_calls == 1)
+assert(clear_calls == 2, "final response must not clear an already accepted draft")
+assert(#prompt_callbacks == 2, "settling the previous execution must dispatch queued follow-up")
+session_projections["session-send"].through_sequence = 2
+table.insert(session_projections["session-send"].updates, {
+  sequence = 2,
+  update = {
+    kind = "Message",
+    message = {
+      role = { kind = "User" },
+      content = { { kind = "Text", text = "follow-up" } },
+    },
+  },
+})
+for _, listener in ipairs(listeners) do
+  listener("sessions", { sessions = session_projections })
+end
+assert(clear_calls == 2, "queued prompt was already removed from the composer")
+prompt_callbacks[2]({}, nil)
+
+-- A rejected unqueued prompt retains its compose draft and can be retried.
+prompt_text = "rejected"
 actions.send()
-assert(#prompt_callbacks == 2, "settled compose revision should be sendable again")
-prompt_callbacks[2](nil, { kind = "failed", message = "fixture model failure" })
-assert(clear_calls == 1, "failed prompt must keep the compose document intact")
+assert(#prompt_callbacks == 3)
+prompt_callbacks[3](nil, { kind = "failed", message = "fixture model failure" })
+assert(clear_calls == 2, "failed prompt without admission must preserve the draft")
 actions.send()
-assert(#prompt_callbacks == 3, "failed compose revision must be immediately retryable")
-prompt_callbacks[3]({}, nil)
-assert(clear_calls == 2)
-state.compose.revision = 101
+assert(#prompt_callbacks == 4, "failed compose draft must be retryable")
+session_projections["session-send"].through_sequence = 3
+table.insert(session_projections["session-send"].updates, {
+  sequence = 3,
+  update = {
+    kind = "Message",
+    message = {
+      role = { kind = "User" },
+      content = { { kind = "Text", text = "rejected" } },
+    },
+  },
+})
+for _, listener in ipairs(listeners) do
+  listener("sessions", { sessions = session_projections })
+end
+assert(clear_calls == 3, "retried prompt accepted in transcript must clear")
+prompt_callbacks[4]({}, nil)
+
+-- The user can queue a changed draft before the first prompt appears in the
+-- session journal. Admission of the first prompt must preserve that later edit.
+prompt_text = "before-admission"
+state.compose.revision = 200
 actions.send()
-assert(#prompt_callbacks == 4, "edited compose revision must remain independently sendable")
+assert(#prompt_callbacks == 5)
+prompt_text = "before-admission-follow-up"
+state.compose.revision = 201
+actions.send()
+assert(#prompt_callbacks == 5, "pre-admission follow-up must queue, not dispatch concurrently")
+assert(clear_calls == 4, "pre-admission queued draft must leave the composer")
+
+session_projections["session-send"].through_sequence = 4
+table.insert(session_projections["session-send"].updates, {
+  sequence = 4,
+  update = {
+    kind = "Message",
+    message = {
+      role = { kind = "User" },
+      content = { { kind = "Text", text = "before-admission" } },
+    },
+  },
+})
+for _, listener in ipairs(listeners) do
+  listener("sessions", { sessions = session_projections })
+end
+assert(clear_calls == 4, "late admission must not clear a newer compose revision")
+prompt_callbacks[5]({}, nil)
+assert(#prompt_callbacks == 6, "settling admitted prompt must dispatch its queued follow-up")
+session_projections["session-send"].through_sequence = 5
+table.insert(session_projections["session-send"].updates, {
+  sequence = 5,
+  update = {
+    kind = "Message",
+    message = {
+      role = { kind = "User" },
+      content = { { kind = "Text", text = "before-admission-follow-up" } },
+    },
+  },
+})
+for _, listener in ipairs(listeners) do
+  listener("sessions", { sessions = session_projections })
+end
+prompt_callbacks[6]({}, nil)
+
+-- Disconnects must stop automatic dispatch and invalidate callbacks from the old
+-- connection. A queued item remains recoverable until the user resumes it.
+local queue_view = require("phenix_nvim.queue")
+local original_queue_render = queue_view.render
+local queued_snapshot, resume_queue
+queue_view.render = function(_, entries, _, resume)
+  queued_snapshot = vim.deepcopy(entries)
+  resume_queue = resume
+end
+prompt_text = "in-flight-disconnect"
+state.compose.revision = 300
+actions.send()
+assert(#prompt_callbacks == 7)
+prompt_text = "queued-after-disconnect"
+state.compose.revision = 301
+actions.send()
+assert(#prompt_callbacks == 7 and clear_calls == 5)
+status("disconnected")
+assert(queued_snapshot and #queued_snapshot == 1, "disconnect dropped a queued follow-up")
+assert(queued_snapshot[1].content[1].text == "queued-after-disconnect")
+status("connecting")
+status("ready")
+prompt_callbacks[7]({}, nil)
+assert(#prompt_callbacks == 7, "old connection callback dispatched a new prompt")
+assert(clear_calls == 5, "old connection callback cleared a newer draft")
+assert(resume_queue ~= nil, "disconnected queue lost manual resume")
+resume_queue()
+assert(#prompt_callbacks == 8, "explicit resume must dispatch the preserved follow-up")
+prompt_callbacks[8](nil, { kind = "disconnected" })
+assert(queued_snapshot and #queued_snapshot == 1, "rejected queued follow-up must be recoverable")
+queue_view.render = original_queue_render
+
+-- A session opening must accept local queued follow-ups before an ID exists.
+local sidebar = require("phenix_nvim.sidebar")
+local original_current_surface = sidebar.current_surface
+local original_new_session = runtime.new_session
+local original_bind_session = sidebar.bind_session
+local session_open_callback
+local temporary_surface = { compose = state.compose }
+sidebar.current_surface = function() return temporary_surface end
+runtime.new_session = function(callback) session_open_callback = callback end
+sidebar.bind_session = function(session_id, surface)
+  surface.session_id = session_id
+end
+
+prompt_text = "before-session-exists"
+state.compose.revision = 400
+actions.send()
+assert(session_open_callback ~= nil)
+assert(#prompt_callbacks == 8, "no prompt may dispatch without a session ID")
+local original_queue_render_before_session = queue_view.render
+local retry_before_session
+queue_view.render = function(_, _, _, retry) retry_before_session = retry end
+prompt_text = "follow-up-before-session"
+state.compose.revision = 401
+actions.send()
+assert(clear_calls == 6, "pre-session follow-up must be visible in its queue")
+assert(retry_before_session ~= nil, "pre-session queue must be visible")
+retry_before_session()
+assert(#prompt_callbacks == 8, "queue retry must not dispatch without a bound session")
+queue_view.render = original_queue_render_before_session
+session_open_callback({ session_id = "created-session" }, nil)
+assert(#prompt_callbacks == 9, "created session must send the original draft first")
+session_projections["created-session"] = {
+  through_sequence = 1,
+  updates = { {
+    sequence = 1,
+    update = {
+      kind = "Message",
+      message = {
+        role = { kind = "User" },
+        content = { { kind = "Text", text = "before-session-exists" } },
+      },
+    },
+  } },
+}
+for _, listener in ipairs(listeners) do
+  listener("sessions", { sessions = session_projections })
+end
+prompt_callbacks[9]({}, nil)
+assert(#prompt_callbacks == 10, "queued prompt must dispatch after admitted first turn settles")
+prompt_callbacks[10]({}, nil)
+
+sidebar.current_surface = original_current_surface
+runtime.new_session = original_new_session
+sidebar.bind_session = original_bind_session
+
+-- A successful callback without admission must not silently dispatch the
+-- next queued prompt. Recovery remains visible and requires explicit action.
+local unconfirmed_surface = { compose = state.compose, session_id = "unconfirmed-session" }
+sidebar.current_surface = function() return unconfirmed_surface end
+local unconfirmed_snapshot, unconfirmed_resume
+queue_view.render = function(_, entries, _, retry)
+  unconfirmed_snapshot = vim.deepcopy(entries)
+  unconfirmed_resume = retry
+end
+prompt_text = "unconfirmed-first"
+state.compose.revision = 500
+actions.send()
+assert(#prompt_callbacks == 11)
+prompt_text = "must-remain-queued"
+state.compose.revision = 501
+actions.send()
+assert(#prompt_callbacks == 11)
+prompt_callbacks[11]({}, nil)
+assert(#prompt_callbacks == 11, "unconfirmed success must not dispatch the next prompt")
+assert(unconfirmed_snapshot and #unconfirmed_snapshot == 1)
+assert(unconfirmed_snapshot[1].content[1].text == "must-remain-queued")
+assert(unconfirmed_resume ~= nil, "the queued prompt must remain recoverable")
+queue_view.render = original_queue_render
+sidebar.current_surface = original_current_surface
+
+-- Early durable receipts are distinct from a turn's terminal state.
+-- A second follow-up may not dispatch until the prior execution settles.
+local admission_document = require("phenix_nvim.compose.model").new()
+local admission_surface = { compose = admission_document, session_id = "admission-session" }
+sidebar.current_surface = function() return admission_surface end
+local original_supports = runtime.supports_prompt_admission
+local original_admit = runtime.admit_prompt
+local admitted_calls = {}
+runtime.supports_prompt_admission = function() return true end
+runtime.admit_prompt = function(session_id, content, item_id, revision, callback)
+  admitted_calls[#admitted_calls + 1] = {
+    session_id = session_id, content = vim.deepcopy(content),
+    item_id = item_id, revision = revision, callback = callback,
+  }
+end
+prompt_text = "admission initial"
+admission_document.revision = 1
+actions.send()
+assert(#prompt_callbacks == 12, "initial nonqueued submission keeps legacy completion semantics")
+prompt_text = "admission queued"
+admission_document.revision = 2
+actions.send()
+assert(#admitted_calls == 0, "queued admission started before the current turn settled")
+session_projections["admission-session"] = {
+  through_sequence = 1,
+  updates = { {
+    sequence = 1,
+    update = {
+      kind = "Message",
+      message = {
+        role = { kind = "User" },
+        content = { { kind = "Text", text = "admission initial" } },
+      },
+    },
+  } },
+}
+for _, listener in ipairs(listeners) do
+  listener("sessions", { sessions = session_projections })
+end
+prompt_callbacks[12]({}, nil)
+assert(#admitted_calls == 1, "queued turn must use admission, not blocking prompt")
+local first_admit = admitted_calls[1]
+assert(first_admit.session_id == "admission-session")
+assert(type(first_admit.item_id) == "string" and first_admit.item_id ~= "")
+assert(first_admit.revision == 1)
+first_admit.callback({
+  session_id = "admission-session",
+  item_id = first_admit.item_id,
+  revision = first_admit.revision,
+  execution_id = "admitted-execution-1",
+  journal_sequence = 2,
+}, nil)
+prompt_text = "after receipt"
+admission_document.revision = 3
+actions.send()
+assert(#admitted_calls == 1, "admission receipt does not indicate turn completion")
+session_projections["admission-session"].through_sequence = 3
+table.insert(session_projections["admission-session"].updates, {
+  sequence = 2,
+  update = {
+    kind = "MessageAdmitted", item_id = first_admit.item_id, revision = 1,
+    execution_id = "admitted-execution-1",
+    message = { role = { kind = "User" }, content = { { kind = "Text", text = "admission queued" } } },
+  },
+})
+table.insert(session_projections["admission-session"].updates, {
+  sequence = 3,
+  update = {
+    kind = "Execution", execution_id = "admitted-execution-1",
+    update = { kind = "State", state = { kind = "Completed" } },
+  },
+})
+for _, listener in ipairs(listeners) do
+  listener("sessions", { sessions = session_projections })
+end
+assert(vim.wait(1000, function() return #admitted_calls == 2 end, 10),
+  "terminal journal state must unlock the next follow-up")
+assert(admitted_calls[2].content[1].text == "after receipt")
+local second_admit = admitted_calls[2]
+second_admit.callback(nil, {
+  message = "session admission-session already has a running execution",
+})
+assert(#admitted_calls == 2, "busy conflict must not spin through retries")
+session_projections["admission-session"].through_sequence = 4
+table.insert(session_projections["admission-session"].updates, {
+  sequence = 4,
+  update = {
+    kind = "Execution", execution_id = "remote-execution",
+    update = { kind = "State", state = { kind = "Completed" } },
+  },
+})
+for _, listener in ipairs(listeners) do
+  listener("sessions", { sessions = session_projections })
+end
+assert(vim.wait(1000, function() return #admitted_calls == 3 end, 10),
+  "terminal remote state must retry a busy follow-up")
+assert(admitted_calls[3].item_id == second_admit.item_id
+  and admitted_calls[3].revision == second_admit.revision,
+  "retry must preserve the original idempotency key")
+runtime.supports_prompt_admission = original_supports
+runtime.admit_prompt = original_admit
+sidebar.current_surface = original_current_surface
+
 compose.serialize = original_serialize
 compose.clear = original_clear
 

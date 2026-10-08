@@ -736,6 +736,48 @@ function M.prompt(session_id, segments, callback)
   end)
 end
 
+function M.supports_prompt_admission()
+  if state.client == nil then
+    return false
+  end
+  local ok, features = pcall(state.client.features, state.client)
+  return ok and type(features) == "table" and features.prompt_admission == true
+end
+
+-- The server response confirms durable journal admission, not execution completion.
+-- Its execution ID is observed subsequently through ordered session updates.
+function M.admit_prompt(session_id, segments, item_id, revision, callback)
+  ensure_ready(callback, function()
+    local ok, session = pcall(state.sessions.cached, state.sessions, session_id)
+    if not ok or session == nil or type(session.admit_prompt) ~= "function" then
+      util.safe_call(callback, nil, { message = "prompt admission is not supported by this runtime" })
+      return
+    end
+    ensure_client_tools(session_id, function(_, tool_error)
+      if tool_error ~= nil then
+        util.safe_call(callback, nil, tool_error)
+        return
+      end
+      local content, content_error = application_content(segments)
+      if content == nil then
+        util.safe_call(callback, nil, { message = content_error })
+        return
+      end
+      local invoked, request = pcall(session.admit_prompt, session, item_id, revision, content)
+      if not invoked then
+        util.safe_call(callback, nil, { message = tostring(request) })
+        return
+      end
+      M.track(request, function(receipt, error)
+        if error == nil then
+          refresh_projection(session_id)
+        end
+        util.safe_call(callback, receipt, error)
+      end)
+    end)
+  end)
+end
+
 local unpack_args = table.unpack or unpack
 
 local function client_request(method, callback, ...)

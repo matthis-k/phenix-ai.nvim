@@ -63,6 +63,10 @@ local function execution_state_id(projection, execution_id)
   return id(projection.prefix, "execution:" .. execution_id .. ":state")
 end
 
+local function thinking_id(projection, execution_id)
+  return id(projection.prefix, "execution:" .. execution_id .. ":thinking")
+end
+
 local function tool_id(projection, execution_id, call_id)
   return id(projection.prefix, "execution:" .. execution_id .. ":tool:" .. call_id)
 end
@@ -126,6 +130,20 @@ local function apply_execution(projection, execution_id, change)
     node.output = kind == "tool_result" and change.output or change.error
     return node_id
   end
+  if kind == "tool_output_delta" then
+    local node_id = tool_id(projection, execution_id, change.call_id)
+    local node = projection.nodes[node_id]
+    if node == nil or node.kind ~= "tool" then
+      return nil, "tool output targets unknown call " .. tostring(change.call_id)
+    end
+    local stream = variant_kind(change.stream) or snake(change.stream)
+    if stream ~= "stdout" and stream ~= "stderr" then
+      return nil, "unknown tool output stream " .. tostring(stream)
+    end
+    node.output_streams = node.output_streams or { stdout = "", stderr = "" }
+    node.output_streams[stream] = node.output_streams[stream] .. (change.text or "")
+    return node_id
+  end
   if kind == "progress" then
     local node_id = execution_state_id(projection, execution_id)
     local node = projection.nodes[node_id]
@@ -165,7 +183,7 @@ function M.apply(projection, update)
 
   local changed
   local err
-  if kind == "message" then
+  if kind == "message" or kind == "message_admitted" then
     local role = role_name(change.message and change.message.role)
     local text = message_text(change.message and change.message.content)
     if role == "assistant" and projection.streaming_execution_id ~= nil then
@@ -188,6 +206,20 @@ function M.apply(projection, update)
         final = true,
       })
     end
+  elseif kind == "reasoning_delta" then
+    local node_id = thinking_id(projection, change.execution_id)
+    local node = projection.nodes[node_id]
+    if node == nil then
+      node = {
+        id = node_id,
+        kind = "thinking",
+        execution_id = change.execution_id,
+        text = "",
+      }
+      upsert(projection, node)
+    end
+    node.text = node.text .. (change.text or "")
+    changed = node_id
   elseif kind == "text_delta" then
     local node_id = assistant_id(projection, change.execution_id)
     local node = projection.nodes[node_id]

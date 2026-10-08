@@ -12,6 +12,22 @@ local util = require("phenix_nvim.util")
 
 local M = {}
 local submissions = setmetatable({}, { __mode = "k" })
+local active_runs = setmetatable({}, { __mode = "k" })
+local paused_queues = setmetatable({}, { __mode = "k" })
+local queued = setmetatable({}, { __mode = "k" })
+local queue_view = require("phenix_nvim.queue")
+local prompt_connection_state = runtime.status().connection
+local prompt_connection_generation = 0
+local queue_item_counter = 0
+local queue_instance_id = vim.fn.sha256(
+  tostring(vim.uv.hrtime()) .. ":" .. tostring(vim.fn.getpid()) .. ":" .. tostring({})
+):sub(1, 24)
+
+local function new_queue_identity()
+  queue_item_counter = queue_item_counter + 1
+  return queue_instance_id .. ":" .. tostring(queue_item_counter)
+end
+local queue_for, render_queue, dispatch_next
 
 local function target_surface(options)
   options = options or {}
@@ -114,21 +130,393 @@ function M.attach_image(source, options)
   return attach_image_file(source, false, options)
 end
 
-local function submit(surface, content, revision)
+local function snapshot_revision(document)
+  local buffer = compose.ensure(document)
+  return tostring(document.revision) .. ":" .. tostring(vim.api.nvim_buf_get_changedtick(buffer))
+end
+
+local function message_kind(value)
+  if type(value) == "table" then
+    return tostring(value.kind or ""):gsub("(%l)(%u)", "%1_%2"):lower()
+  end
+  return tostring(value or ""):gsub("(%l)(%u)", "%1_%2"):lower()
+end
+
+local function normalized_content(content)
+  local result = {}
+  for _, part in ipairs(content or {}) do
+    local kind = message_kind(part.kind)
+    if kind == "text" then
+      table.insert(result, { kind = "text", text = part.text or "" })
+    elseif kind == "resource" or kind == "location" or kind == "selection" then
+      local source = part.source or {}
+      table.insert(result, {
+        kind = "resource",
+        uri = part.uri or source.uri,
+        text = part.snapshot or part.text,
+      })
+    elseif kind == "image" then
+      table.insert(result, {
+        kind = "image",
+        mime_type = part.mime_type,
+        data = part.bytes or part.data,
+      })
+    end
+  end
+  return result
+end
+
+local function transcript_contains_submission(projection, pending)
+  if type(projection) ~= "table" or type(projection.updates) ~= "table" then
+    return false
+  end
+  local expected = normalized_content(pending.content)
+  for _, item in ipairs(projection.updates) do
+    if type(item.sequence) == "number" and item.sequence > pending.after_sequence then
+      local change = item.update or {}
+      local kind = message_kind(change.kind)
+      local correct_identity = pending.use_admission
+        and kind == "message_admitted"
+        and change.item_id == pending.queued_item.item_id
+        and change.revision == pending.queued_item.revision
+      local legacy = not pending.use_admission and kind == "message"
+      if correct_identity or legacy then
+        local message = change.message or {}
+        if message_kind(message.role) == "user"
+          and vim.deep_equal(normalized_content(message.content), expected)
+        then
+          return true, change.execution_id
+        end
+      end
+    end
+  end
+  return false
+end
+
+local function execution_settled(projection, execution_id)
+  if type(projection) ~= "table" or type(projection.updates) ~= "table" or execution_id == nil then
+    return false
+  end
+  for _, item in ipairs(projection.updates) do
+    local change = item.update or {}
+    local update = change.update or {}
+    if message_kind(change.kind) == "execution"
+      and change.execution_id == execution_id
+      and message_kind(update.kind) == "state"
+    then
+      local state = message_kind(update.state)
+      if state == "completed" or state == "cancelled" or state == "failed" then
+        return true
+      end
+    end
+  end
+  return false
+end
+
+local function latest_execution_is_terminal(projection, since_sequence)
+  if type(projection) ~= "table" or type(projection.updates) ~= "table" then
+    return false
+  end
+  for index = #projection.updates, 1, -1 do
+    local event = projection.updates[index]
+    if (event.sequence or 0) <= since_sequence then
+      break
+    end
+    local change = event.update or {}
+    local update = change.update or {}
+    if message_kind(change.kind) == "execution" and message_kind(update.kind) == "state" then
+      local state = message_kind(update.state)
+      return state == "completed" or state == "cancelled" or state == "failed"
+    end
+  end
+  return false
+end
+
+local function acknowledge(document, pending, projection)
+  if pending.confirmed then
+    return false
+  end
+  local accepted, execution_id = transcript_contains_submission(projection, pending)
+  if not accepted then
+    return false
+  end
+  pending.confirmed = true
+  pending.execution_id = pending.execution_id or execution_id
+  if submissions[document] == pending then
+    submissions[document] = nil
+  end
+  -- Queued entries stay in their editable buffers until journal admission.
+  -- Only a direct compose submission can clear the composer.
+  if pending.queued_item == nil and snapshot_revision(document) == pending.revision then
+    compose.clear(document)
+  end
+  return true
+end
+
+local function confirm_queued(surface, pending, projection, receipt)
+  if pending.queued_item == nil then
+    return false
+  end
+  if receipt ~= nil then
+    if receipt.session_id ~= pending.session_id
+      or receipt.item_id ~= pending.queued_item.item_id
+      or receipt.revision ~= pending.queued_item.revision
+      or type(receipt.execution_id) ~= "string"
+      or type(receipt.journal_sequence) ~= "number"
+    then
+      return false
+    end
+    pending.execution_id = receipt.execution_id
+    pending.confirmed = true
+  elseif not acknowledge(surface.compose, pending, projection) then
+    return false
+  end
+  local items = queue_for(surface)
+  for index, item in ipairs(items) do
+    if item == pending.queued_item then
+      table.remove(items, index)
+      break
+    end
+  end
+  pending.queued_item.pending = nil
+  if paused_queues[surface] then
+    paused_queues[surface] = nil
+  end
+  render_queue(surface)
+  if active_runs[surface] == nil then
+    vim.schedule(function() dispatch_next(surface) end)
+  end
+  return true
+end
+
+runtime.on_event(function(kind, value)
+  if kind ~= "sessions" then
+    return
+  end
+  local sessions = type(value) == "table" and value.sessions or {}
+  for document, pending in pairs(submissions) do
+    if pending.session_id ~= nil and acknowledge(document, pending, sessions[pending.session_id]) then
+      local surface = sidebar.surface_for_document(document)
+      if surface ~= nil and active_runs[surface] == nil and paused_queues[surface] then
+        paused_queues[surface] = nil
+        vim.schedule(function() dispatch_next(surface) end)
+      end
+    end
+  end
+  for surface, items in pairs(queued) do
+    local pause = paused_queues[surface]
+    local projection = sessions[surface.session_id]
+    if type(pause) == "table" and pause.reason == "busy"
+      and type(projection) == "table"
+      and (projection.through_sequence or 0) > pause.watermark
+      and latest_execution_is_terminal(projection, pause.watermark)
+    then
+      paused_queues[surface] = nil
+      vim.schedule(function() dispatch_next(surface) end)
+    end
+    -- Snapshot references because admission removes queue buffers.
+    for _, item in ipairs(vim.list_extend({}, items)) do
+      local pending = item.pending
+      if pending and pending.session_id ~= nil and not pending.confirmed then
+        confirm_queued(surface, pending, sessions[pending.session_id])
+      end
+    end
+  end
+  for surface, pending in pairs(active_runs) do
+    if pending.use_admission and pending.confirmed
+      and execution_settled(sessions[pending.session_id], pending.execution_id)
+    then
+      active_runs[surface] = nil
+      vim.schedule(function() dispatch_next(surface) end)
+    end
+  end
+end)
+
+queue_for = function(surface)
+  if queued[surface] == nil then
+    queued[surface] = {}
+  end
+  return queued[surface]
+end
+
+render_queue = function(surface)
+  local entries = queue_for(surface)
+  if #entries == 0 then
+    paused_queues[surface] = nil
+  end
+  queue_view.render(surface, entries, function(index)
+    table.remove(entries, index)
+    render_queue(surface)
+  end, function()
+    paused_queues[surface] = nil
+    for _, item in ipairs(entries) do
+      if item.pending ~= nil and not item.pending.confirmed then
+        item.pending.abandoned = true
+        item.pending = nil
+        queue_view.set_claimed(surface, item, false)
+      end
+    end
+    dispatch_next(surface)
+  end, function()
+    dispatch_next(surface)
+  end)
+end
+
+runtime.on_event(function(kind, status)
+  if kind ~= "status" then
+    return
+  end
+  local next_state = status.connection
+  if prompt_connection_state == "ready" and next_state ~= "ready" then
+    prompt_connection_generation = prompt_connection_generation + 1
+    for surface, pending in pairs(active_runs) do
+      pending.abandoned = true
+      active_runs[surface] = nil
+      if submissions[surface.compose] == pending then
+        submissions[surface.compose] = nil
+      end
+      local entries = queue_for(surface)
+      if pending.queued_item ~= nil and not pending.confirmed then
+        pending.queued_item.pending = nil
+        queue_view.set_claimed(surface, pending.queued_item, false)
+      end
+      if #entries > 0 then
+        paused_queues[surface] = true
+        render_queue(surface)
+      end
+    end
+  end
+  prompt_connection_state = next_state
+end)
+
+local function submit(surface, content, revision, queued_item)
   local document = surface.compose
   local session_id = surface.session_id
-  runtime.prompt(session_id, content, function(_, error)
-    if submissions[document] == revision then
+  local projection = runtime.session_state()
+  local snapshot = projection and projection.sessions and projection.sessions[session_id]
+  local pending = {
+    revision = revision,
+    session_id = session_id,
+    content = vim.deepcopy(content),
+    after_sequence = snapshot and (snapshot.through_sequence or 0) or 0,
+    confirmed = false,
+    queued_item = queued_item,
+    use_admission = queued_item ~= nil
+      and type(runtime.supports_prompt_admission) == "function"
+      and runtime.supports_prompt_admission(),
+  }
+  active_runs[surface] = pending
+  if queued_item ~= nil then
+    queued_item.pending = pending
+    queue_view.set_claimed(surface, queued_item, true)
+  else
+    submissions[document] = pending
+  end
+  local function complete(result, error)
+    if pending.abandoned then
+      return
+    end
+    local latest = runtime.session_state()
+    local current = latest and latest.sessions and latest.sessions[session_id]
+    if queued_item ~= nil then
+      confirm_queued(surface, pending, current)
+    else
+      acknowledge(document, pending, current)
+    end
+    if submissions[document] == pending and (pending.confirmed or error ~= nil) then
       submissions[document] = nil
+    end
+    if pending.use_admission then
+      if error == nil and not pending.confirmed then
+        if not confirm_queued(surface, pending, current, result) then
+          error = { message = "prompt admission receipt did not match the queued revision" }
+        end
+      end
+      if error ~= nil and not pending.confirmed then
+        util.notify(vim.inspect(error), vim.log.levels.ERROR)
+        queued_item.pending = nil
+        queue_view.set_claimed(surface, queued_item, false)
+        active_runs[surface] = nil
+        local message = type(error) == "table" and tostring(error.message or "") or tostring(error)
+        if message:find("already has a running execution", 1, true) then
+          local state = runtime.session_state()
+          local projected = state and state.sessions and state.sessions[session_id]
+          paused_queues[surface] = {
+            reason = "busy",
+            watermark = projected and (projected.through_sequence or 0) or 0,
+          }
+        else
+          paused_queues[surface] = true
+        end
+        render_queue(surface)
+        return
+      end
+      if execution_settled(current, pending.execution_id) then
+        active_runs[surface] = nil
+        dispatch_next(surface)
+      end
+      return
     end
     if error ~= nil then
       util.notify(vim.inspect(error), vim.log.levels.ERROR)
-      return
+    elseif not pending.confirmed then
+      util.notify("Prompt finished without a matching transcript entry; draft preserved", vim.log.levels.WARN)
     end
-    if document.revision == revision then
-      compose.clear(document)
+    if active_runs[surface] == pending then
+      active_runs[surface] = nil
+      if not pending.confirmed then
+        -- A completed request is not proof of journal admission. Preserve
+        -- queued follow-ups until admission is confirmed or retry is explicit.
+        if queued_item ~= nil then
+          queue_view.set_claimed(surface, queued_item, false)
+        end
+        if #queue_for(surface) > 0 then
+          paused_queues[surface] = true
+          render_queue(surface)
+          util.notify("Follow-up queue paused: prior prompt was not confirmed in the transcript; press r to resume", vim.log.levels.WARN)
+        else
+          paused_queues[surface] = nil
+        end
+      else
+        dispatch_next(surface)
+      end
     end
-  end)
+  end
+  if pending.use_admission then
+    runtime.admit_prompt(
+      session_id, content, queued_item.item_id, queued_item.revision, complete
+    )
+  else
+    runtime.prompt(session_id, content, complete)
+  end
+end
+
+dispatch_next = function(surface)
+  if active_runs[surface] ~= nil or paused_queues[surface] then
+    return
+  end
+  if surface.session_id == nil then
+    if #queue_for(surface) > 0 then
+      paused_queues[surface] = true
+      render_queue(surface)
+      util.notify("Send a draft to create a session before resuming queued follow-ups", vim.log.levels.WARN)
+    end
+    return
+  end
+  local entries = queue_for(surface)
+  local next_item = entries[1]
+  if next_item == nil then
+    render_queue(surface)
+    return
+  end
+  if next_item.session_id ~= surface.session_id then
+    util.notify("Queued follow-ups belong to a different session; queue paused", vim.log.levels.WARN)
+    return
+  end
+  if not queue_view.can_dispatch(surface, next_item) then
+    return
+  end
+  submit(surface, vim.deepcopy(next_item.content), nil, next_item)
 end
 
 function M.send(options)
@@ -154,32 +542,82 @@ function M.send(options)
     util.notify("compose buffer is empty", vim.log.levels.WARN)
     return
   end
-  local revision = document.revision
-  if submissions[document] == revision then
+  local revision = snapshot_revision(document)
+  local previous = submissions[document]
+  if previous ~= nil and previous.revision == revision then
     util.notify("this compose revision is already being sent", vim.log.levels.WARN)
     return
   end
-  submissions[document] = revision
+  if active_runs[surface] ~= nil or paused_queues[surface] or #queue_for(surface) > 0 then
+    table.insert(queue_for(surface), {
+      session_id = surface.session_id,
+      content = vim.deepcopy(content),
+      item_id = new_queue_identity(),
+      ready = true,
+      revision = 1,
+    })
+    render_queue(surface)
+    compose.clear(document)
+    dispatch_next(surface)
+    return
+  end
+  if previous ~= nil then
+    -- A session may still be opening. Preserve the new draft until it is bound.
+    util.notify("Wait for the previous prompt to reach its session before sending a follow-up", vim.log.levels.WARN)
+    return
+  end
 
   if surface.session_id ~= nil then
     submit(surface, content, revision)
     return
   end
+  local creating = { revision = revision, session_id = nil, confirmed = false }
+  local generation = prompt_connection_generation
+  submissions[document] = creating
+  active_runs[surface] = creating
   runtime.new_session(function(created, create_error)
-    if create_error ~= nil then
-      if submissions[document] == revision then
+    if generation ~= prompt_connection_generation then
+      if submissions[document] == creating then
         submissions[document] = nil
+      end
+      return
+    end
+    if create_error ~= nil then
+      if submissions[document] == creating then
+        submissions[document] = nil
+      end
+      if active_runs[surface] == creating then
+        active_runs[surface] = nil
+      end
+      if #queue_for(surface) > 0 then
+        paused_queues[surface] = true
+        render_queue(surface)
       end
       util.notify(vim.inspect(create_error), vim.log.levels.ERROR)
       return
     end
     local session_id = created and (created.session_id or created.id)
     if session_id == nil then
-      submissions[document] = nil
+      if submissions[document] == creating then
+        submissions[document] = nil
+      end
+      if active_runs[surface] == creating then
+        active_runs[surface] = nil
+      end
+      if #queue_for(surface) > 0 then
+        paused_queues[surface] = true
+        render_queue(surface)
+      end
       util.notify("Phenix created a session without an id", vim.log.levels.ERROR)
       return
     end
     sidebar.bind_session(session_id, surface)
+    for _, item in ipairs(queue_for(surface)) do
+      if item.session_id == nil then
+        item.session_id = session_id
+      end
+    end
+    paused_queues[surface] = nil
     submit(surface, content, revision)
   end)
 end

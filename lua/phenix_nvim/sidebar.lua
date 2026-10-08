@@ -11,6 +11,7 @@ local group = vim.api.nvim_create_augroup("phenix-sidebar", { clear = true })
 local surfaces = {}
 local hosts = {}
 local children = {}
+local queue_windows = {}
 local next_surface_id = 0
 local reconciling = false
 local primary_states = {}
@@ -199,6 +200,7 @@ local function release_surface(surface)
   surface.closing = true
   remember_cursor(surface)
   detach_children(surface)
+  require("phenix_nvim.queue").close(surface)
   close_window(surface.compose_win)
   close_window(surface.transcript_win)
   unregister(surface)
@@ -222,11 +224,13 @@ local function geometry(surface)
   local height = math.max(2, vim.api.nvim_win_get_height(surface.host_win))
   local requested_compose = math.max(1, math.floor(config.get().compose_height))
   local compose_height = math.min(requested_compose, height - 1)
-  local transcript_height = math.max(1, height - compose_height)
+  local queue_height = require("phenix_nvim.queue").reserved_rows(surface, height, compose_height)
+  local transcript_height = math.max(1, height - compose_height - queue_height)
   return {
     width = width,
     transcript_height = transcript_height,
     compose_height = compose_height,
+    compose_row = height - compose_height,
   }
 end
 
@@ -237,7 +241,7 @@ local function float_config(surface, role)
     relative = "win",
     win = surface.host_win,
     anchor = "NW",
-    row = is_compose and size.transcript_height or 0,
+    row = is_compose and size.compose_row or 0,
     col = 0,
     width = size.width,
     height = is_compose and size.compose_height or size.transcript_height,
@@ -281,6 +285,7 @@ local function sync_surface(surface)
   local compose_win = ensure_float(surface, "compose", compose.ensure(surface.state.compose))
   transcript.attach_window(surface.transcript_key, transcript_win)
   compose.attach_window(surface.state.compose, compose_win)
+  require("phenix_nvim.queue").relayout(surface)
   winbar.attach(transcript_win, compose_win, surface)
   local function map_children(key, callback, description)
     for _, win in ipairs({ transcript_win, compose_win }) do
@@ -506,6 +511,19 @@ function M.surface_for_window(win)
   return surface_for_window(win or vim.api.nvim_get_current_win())
 end
 
+function M.attach_queue_window(surface, win)
+  children[win] = surface
+  queue_windows[win] = true
+  vim.w[win].phenix_surface_id = surface.id
+  vim.w[win].phenix_sidebar_role = "followup"
+  vim.w[win].phenix_window_selectable = true
+end
+
+function M.detach_queue_window(win)
+  children[win] = nil
+  queue_windows[win] = nil
+end
+
 function M.remember_cursor()
   remember_cursor(current_surface())
 end
@@ -716,6 +734,11 @@ vim.api.nvim_create_autocmd("WinClosed", {
     if closed == nil then
       return
     end
+    if queue_windows[closed] then
+      M.detach_queue_window(closed)
+      M.reconcile()
+      return
+    end
     local surface = surface_for_window(closed)
     if surface == nil or surface.closing then
       return
@@ -771,6 +794,8 @@ vim.api.nvim_create_autocmd("WinEnter", {
       runtime.activate_session(surface.session_id)
     elseif win == surface.compose_win then
       surface.selected_role = "compose"
+      runtime.activate_session(surface.session_id)
+    elseif queue_windows[win] then
       runtime.activate_session(surface.session_id)
     end
   end,
