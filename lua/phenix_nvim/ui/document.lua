@@ -40,7 +40,12 @@ function M.project(document)
     if not integer(document.revision) then
       error("revision must be a non-negative integer")
     end
-    local ids, lines, styles, count, bytes = {}, {}, {}, 0, 0
+    local ids, lines, styles, semantic, count, bytes = {}, {}, {}, {}, 0, 0
+    local function remember(value)
+      -- Length-prefix each typed field so structural identity is unambiguous.
+      local serialized = tostring(value)
+      semantic[#semantic + 1] = type(value) .. ":" .. #serialized .. ":" .. serialized
+    end
     local function add(line, style)
       for index, segment in ipairs(vim.split(line, "\n", { plain = true })) do
         if #lines >= MAX_LINES then
@@ -69,6 +74,8 @@ function M.project(document)
         error("duplicate node id: " .. id)
       end
       ids[id] = true
+      remember(id)
+      remember(node.kind)
     end
     local visit
     visit = function(node, depth)
@@ -82,16 +89,23 @@ function M.project(document)
       end
       local prefix = string.rep("  ", depth)
       if kind == "text" or kind == "label" then
-        add(prefix .. valid_text(node.text, "text"))
+        local value = valid_text(node.text, "text")
+        remember(value)
+        add(prefix .. value)
       elseif kind == "badge" then
-        add(prefix .. "[" .. valid_text(node.text, "badge") .. "]", "badge")
+        local value = valid_text(node.text, "badge")
+        remember(value)
+        add(prefix .. "[" .. value .. "]", "badge")
       elseif kind == "progress" then
         local fraction = node.fraction
         if type(fraction) ~= "number" or fraction ~= fraction or fraction < 0 or fraction > 1 then
           error("progress fraction must be within 0..1")
         end
+        local label = valid_text(node.text, "progress label", true)
+        remember(fraction)
+        remember(label)
         local filled = math.floor(fraction * 16 + 0.5)
-        add(prefix .. valid_text(node.text, "progress label", true) .. " ["
+        add(prefix .. label .. " ["
           .. string.rep("=", filled) .. string.rep("-", 16 - filled)
           .. "] " .. tostring(math.floor(fraction * 100 + 0.5)) .. "%", "progress")
       elseif kind == "row" then
@@ -108,6 +122,7 @@ function M.project(document)
           end
           accept_id(child)
           local value = valid_text(child.text, "row cell")
+          remember(value)
           if value:find("\n", 1, true) then
             error("row cells must be single-line")
           end
@@ -119,9 +134,13 @@ function M.project(document)
           or type(node.rows) ~= "table" or #node.rows > 100 then
           error("invalid table dimensions")
         end
+        remember(#node.columns)
+        remember(#node.rows)
         local columns = {}
         for _, item in ipairs(node.columns) do
-          columns[#columns + 1] = valid_text(item, "column")
+          local value = valid_text(item, "column")
+          remember(value)
+          columns[#columns + 1] = value
         end
         add(prefix .. table.concat(columns, " | "))
         for _, row in ipairs(node.rows) do
@@ -130,13 +149,17 @@ function M.project(document)
           end
           local cells = {}
           for _, cell in ipairs(row) do
-            cells[#cells + 1] = valid_text(cell, "cell")
+            local value = valid_text(cell, "cell")
+            remember(value)
+            cells[#cells + 1] = value
           end
           add(prefix .. table.concat(cells, " | "))
         end
       else
         if kind == "card" then
-          add(prefix .. valid_text(node.title, "card title", true))
+          local title = valid_text(node.title, "card title", true)
+          remember(title)
+          add(prefix .. title)
         end
         if type(node.children) ~= "table" or #node.children == 0 then
           error("layout node requires children")
@@ -151,6 +174,7 @@ function M.project(document)
       session_id = session_id,
       document_id = document_id,
       revision = document.revision,
+      identity = table.concat(semantic, "\0"),
       lines = lines,
       styles = styles,
     }
