@@ -19,30 +19,53 @@ local function view_for(surface)
   return view
 end
 
+local function attachment_marker(index)
+  return "⟦attachment-" .. tostring(index) .. "⟧"
+end
+
 local function content_text(content)
   local result = {}
-  for _, part in ipairs(content or {}) do
+  for index, part in ipairs(content or {}) do
     if part.kind == "text" then
       result[#result + 1] = part.text or ""
+    else
+      result[#result + 1] = attachment_marker(index)
     end
   end
   return table.concat(result)
 end
 
+-- Parse the buffer into the same ordered content parts. Attachments are opaque,
+-- immutable snapshots: their character-cell markers may move but must occur
+-- exactly once. A missing marker cannot silently discard an image or resource.
 local function replace_text(content, text)
-  local result, found = {}, false
-  for _, part in ipairs(content or {}) do
-    if part.kind == "text" then
-      if not found then
-        result[#result + 1] = { kind = "text", text = text }
-        found = true
-      end
-    else
-      result[#result + 1] = vim.deepcopy(part)
+  local attachments, seen, result = {}, {}, {}
+  for index, part in ipairs(content or {}) do
+    if part.kind ~= "text" then
+      attachments[index] = part
     end
   end
-  if not found then
-    table.insert(result, 1, { kind = "text", text = text })
+  local cursor = 1
+  for first, last, id in text:gmatch("()⟦attachment%-(%d+)⟧()") do
+    -- Iterator captures the next byte after the marker as its third capture.
+    local index = tonumber(id)
+    if attachments[index] == nil or seen[index] then
+      return nil, "unknown or duplicated queued attachment marker"
+    end
+    if first > cursor then
+      result[#result + 1] = { kind = "text", text = text:sub(cursor, first - 1) }
+    end
+    result[#result + 1] = vim.deepcopy(attachments[index])
+    seen[index] = true
+    cursor = last
+  end
+  for index in pairs(attachments) do
+    if not seen[index] then
+      return nil, "queued attachment marker was removed: " .. tostring(index)
+    end
+  end
+  if cursor <= #text then
+    result[#result + 1] = { kind = "text", text = text:sub(cursor) }
   end
   return result
 end
@@ -92,7 +115,8 @@ function M.can_dispatch(surface, item)
 end
 
 local function title(index, total, item, entry)
-  local status = entry.dirty and "modified · :w to release"
+  local status = item.pending and "claimed · waiting for admission"
+    or entry.dirty and "modified · :w to release"
     or (is_focused(entry) and not entry.released and "editing · :w to release")
     or (item.ready == false and "held")
     or "ready"
@@ -150,8 +174,13 @@ local function ensure_entry(surface, view, item)
       if view.by_item[item] ~= entry then
         return
       end
-      item.content = replace_text(item.content,
+      local content, error = replace_text(item.content,
         table.concat(vim.api.nvim_buf_get_lines(entry.buf, 0, -1, false), "\n"))
+      if content == nil then
+        vim.notify(error, vim.log.levels.ERROR)
+        return
+      end
+      item.content = content
       item.revision = (item.revision or 0) + 1
       item.ready = true
       entry.dirty = false
