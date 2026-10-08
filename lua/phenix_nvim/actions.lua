@@ -12,6 +12,9 @@ local util = require("phenix_nvim.util")
 
 local M = {}
 local submissions = setmetatable({}, { __mode = "k" })
+local active_runs = setmetatable({}, { __mode = "k" })
+local queued = setmetatable({}, { __mode = "k" })
+local queue_view = require("phenix_nvim.queue")
 
 local function target_surface(options)
   options = options or {}
@@ -188,7 +191,24 @@ runtime.on_event(function(kind, value)
   end
 end)
 
-local function submit(surface, content, revision)
+local function queue_for(surface)
+  if queued[surface] == nil then
+    queued[surface] = {}
+  end
+  return queued[surface]
+end
+
+local function render_queue(surface)
+  local entries = queue_for(surface)
+  queue_view.render(surface, entries, function(index)
+    table.remove(entries, index)
+    render_queue(surface)
+  end)
+end
+
+local dispatch_next
+
+local function submit(surface, content, revision, from_queue)
   local document = surface.compose
   local session_id = surface.session_id
   local projection = runtime.session_state()
@@ -200,7 +220,10 @@ local function submit(surface, content, revision)
     after_sequence = snapshot and (snapshot.through_sequence or 0) or 0,
     confirmed = false,
   }
-  submissions[document] = pending
+  active_runs[surface] = pending
+  if not from_queue then
+    submissions[document] = pending
+  end
   runtime.prompt(session_id, content, function(_, error)
     local latest = runtime.session_state()
     local current = latest and latest.sessions and latest.sessions[session_id]
@@ -210,12 +233,37 @@ local function submit(surface, content, revision)
     end
     if error ~= nil then
       util.notify(vim.inspect(error), vim.log.levels.ERROR)
-      return
-    end
-    if not pending.confirmed then
+    elseif not pending.confirmed then
       util.notify("Prompt finished without a matching transcript entry; draft preserved", vim.log.levels.WARN)
     end
+    if active_runs[surface] == pending then
+      active_runs[surface] = nil
+      if error == nil or pending.confirmed then
+        dispatch_next(surface)
+      elseif #queue_for(surface) > 0 then
+        util.notify("Follow-up queue paused after rejected prompt; retry the draft", vim.log.levels.WARN)
+      end
+    end
   end)
+end
+
+dispatch_next = function(surface)
+  if active_runs[surface] ~= nil then
+    return
+  end
+  local entries = queue_for(surface)
+  local next_item = entries[1]
+  if next_item == nil then
+    render_queue(surface)
+    return
+  end
+  if next_item.session_id ~= surface.session_id then
+    util.notify("Queued follow-ups belong to a different session; queue paused", vim.log.levels.WARN)
+    return
+  end
+  table.remove(entries, 1)
+  render_queue(surface)
+  submit(surface, next_item.content, nil, true)
 end
 
 function M.send(options)
@@ -249,6 +297,16 @@ function M.send(options)
   end
   if previous ~= nil then
     util.notify("Wait for the previous prompt to appear in the transcript before sending a follow-up", vim.log.levels.WARN)
+    return
+  end
+
+  if active_runs[surface] ~= nil then
+    table.insert(queue_for(surface), {
+      session_id = surface.session_id,
+      content = vim.deepcopy(content),
+    })
+    render_queue(surface)
+    compose.clear(document)
     return
   end
 
