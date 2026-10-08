@@ -13,6 +13,7 @@ local util = require("phenix_nvim.util")
 local M = {}
 local submissions = setmetatable({}, { __mode = "k" })
 local active_runs = setmetatable({}, { __mode = "k" })
+local paused_queues = setmetatable({}, { __mode = "k" })
 local queued = setmetatable({}, { __mode = "k" })
 local queue_view = require("phenix_nvim.queue")
 
@@ -207,15 +208,21 @@ local function queue_for(surface)
   return queued[surface]
 end
 
+local dispatch_next
+
 local function render_queue(surface)
   local entries = queue_for(surface)
+  if #entries == 0 then
+    paused_queues[surface] = nil
+  end
   queue_view.render(surface, entries, function(index)
     table.remove(entries, index)
     render_queue(surface)
+  end, function()
+    paused_queues[surface] = nil
+    dispatch_next(surface)
   end)
 end
-
-local dispatch_next
 
 local function submit(surface, content, revision, queued_item)
   local document = surface.compose
@@ -248,6 +255,7 @@ local function submit(surface, content, revision, queued_item)
     if active_runs[surface] == pending then
       active_runs[surface] = nil
       if error ~= nil and not pending.confirmed then
+        paused_queues[surface] = true
         if queued_item ~= nil then
           table.insert(queue_for(surface), 1, queued_item)
           render_queue(surface)
@@ -263,7 +271,7 @@ local function submit(surface, content, revision, queued_item)
 end
 
 dispatch_next = function(surface)
-  if active_runs[surface] ~= nil then
+  if active_runs[surface] ~= nil or paused_queues[surface] then
     return
   end
   local entries = queue_for(surface)
@@ -315,7 +323,7 @@ function M.send(options)
     return
   end
 
-  if active_runs[surface] ~= nil then
+  if active_runs[surface] ~= nil or paused_queues[surface] then
     table.insert(queue_for(surface), {
       session_id = surface.session_id,
       content = vim.deepcopy(content),
