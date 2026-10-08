@@ -18,6 +18,7 @@ local queued = setmetatable({}, { __mode = "k" })
 local queue_view = require("phenix_nvim.queue")
 local prompt_connection_state = runtime.status().connection
 local prompt_connection_generation = 0
+local queue_for, render_queue, dispatch_next
 
 local function target_surface(options)
   options = options or {}
@@ -179,16 +180,34 @@ end
 
 local function acknowledge(document, pending, projection)
   if pending.confirmed or not transcript_contains_submission(projection, pending) then
-    return
+    return false
   end
   pending.confirmed = true
   if submissions[document] == pending then
     submissions[document] = nil
   end
-  -- Preserve text or attachments edited after send.
-  if snapshot_revision(document) == pending.revision then
+  -- Queued entries stay in their editable buffers until journal admission.
+  -- Only a direct compose submission can clear the composer.
+  if pending.queued_item == nil and snapshot_revision(document) == pending.revision then
     compose.clear(document)
   end
+  return true
+end
+
+local function confirm_queued(surface, pending, projection)
+  if pending.queued_item == nil or not acknowledge(surface.compose, pending, projection) then
+    return false
+  end
+  local items = queue_for(surface)
+  for index, item in ipairs(items) do
+    if item == pending.queued_item then
+      table.remove(items, index)
+      break
+    end
+  end
+  pending.queued_item.pending = nil
+  render_queue(surface)
+  return true
 end
 
 runtime.on_event(function(kind, value)
@@ -201,18 +220,28 @@ runtime.on_event(function(kind, value)
       acknowledge(document, pending, sessions[pending.session_id])
     end
   end
+  for surface, items in pairs(queued) do
+    for _, item in ipairs(vim.deepcopy(items)) do
+      -- Resolve by the actual object, not a deepcopy: claims are identity-bound.
+      for _, actual in ipairs(items) do
+        local pending = actual.pending
+        if pending and pending.session_id ~= nil and not pending.confirmed then
+          confirm_queued(surface, pending, sessions[pending.session_id])
+        end
+      end
+      break
+    end
+  end
 end)
 
-local function queue_for(surface)
+queue_for = function(surface)
   if queued[surface] == nil then
     queued[surface] = {}
   end
   return queued[surface]
 end
 
-local dispatch_next
-
-local function render_queue(surface)
+render_queue = function(surface)
   local entries = queue_for(surface)
   if #entries == 0 then
     paused_queues[surface] = nil
@@ -222,6 +251,15 @@ local function render_queue(surface)
     render_queue(surface)
   end, function()
     paused_queues[surface] = nil
+    for _, item in ipairs(entries) do
+      if item.pending ~= nil and not item.pending.confirmed then
+        item.pending.abandoned = true
+        item.pending = nil
+        queue_view.set_claimed(surface, item, false)
+      end
+    end
+    dispatch_next(surface)
+  end, function()
     dispatch_next(surface)
   end)
 end
@@ -241,7 +279,8 @@ runtime.on_event(function(kind, status)
       end
       local entries = queue_for(surface)
       if pending.queued_item ~= nil and not pending.confirmed then
-        table.insert(entries, 1, pending.queued_item)
+        pending.queued_item.pending = nil
+        queue_view.set_claimed(surface, pending.queued_item, false)
       end
       if #entries > 0 then
         paused_queues[surface] = true
@@ -266,7 +305,10 @@ local function submit(surface, content, revision, queued_item)
     queued_item = queued_item,
   }
   active_runs[surface] = pending
-  if queued_item == nil then
+  if queued_item ~= nil then
+    queued_item.pending = pending
+    queue_view.set_claimed(surface, queued_item, true)
+  else
     submissions[document] = pending
   end
   runtime.prompt(session_id, content, function(_, error)
@@ -275,7 +317,11 @@ local function submit(surface, content, revision, queued_item)
     end
     local latest = runtime.session_state()
     local current = latest and latest.sessions and latest.sessions[session_id]
-    acknowledge(document, pending, current)
+    if queued_item ~= nil then
+      confirm_queued(surface, pending, current)
+    else
+      acknowledge(document, pending, current)
+    end
     if submissions[document] == pending then
       submissions[document] = nil
     end
@@ -290,7 +336,7 @@ local function submit(surface, content, revision, queued_item)
         -- A completed request is not proof of journal admission. Preserve
         -- queued follow-ups until admission is confirmed or retry is explicit.
         if queued_item ~= nil then
-          table.insert(queue_for(surface), 1, queued_item)
+          queue_view.set_claimed(surface, queued_item, false)
         end
         if #queue_for(surface) > 0 then
           paused_queues[surface] = true
@@ -328,9 +374,10 @@ dispatch_next = function(surface)
     util.notify("Queued follow-ups belong to a different session; queue paused", vim.log.levels.WARN)
     return
   end
-  table.remove(entries, 1)
-  render_queue(surface)
-  submit(surface, next_item.content, nil, next_item)
+  if not queue_view.can_dispatch(surface, next_item) then
+    return
+  end
+  submit(surface, vim.deepcopy(next_item.content), nil, next_item)
 end
 
 function M.send(options)
@@ -362,13 +409,16 @@ function M.send(options)
     util.notify("this compose revision is already being sent", vim.log.levels.WARN)
     return
   end
-  if active_runs[surface] ~= nil or (paused_queues[surface] and surface.session_id ~= nil) then
+  if active_runs[surface] ~= nil or paused_queues[surface] or #queue_for(surface) > 0 then
     table.insert(queue_for(surface), {
       session_id = surface.session_id,
       content = vim.deepcopy(content),
+      ready = true,
+      revision = 0,
     })
     render_queue(surface)
     compose.clear(document)
+    dispatch_next(surface)
     return
   end
   if previous ~= nil then
