@@ -137,9 +137,9 @@ end
 
 local function message_kind(value)
   if type(value) == "table" then
-    return string.lower(tostring(value.kind or ""))
+    return tostring(value.kind or ""):gsub("(%l)(%u)", "%1_%2"):lower()
   end
-  return string.lower(tostring(value or ""))
+  return tostring(value or ""):gsub("(%l)(%u)", "%1_%2"):lower()
 end
 
 local function normalized_content(content)
@@ -174,12 +174,18 @@ local function transcript_contains_submission(projection, pending)
   for _, item in ipairs(projection.updates) do
     if type(item.sequence) == "number" and item.sequence > pending.after_sequence then
       local change = item.update or {}
-      if message_kind(change.kind) == "message" then
+      local kind = message_kind(change.kind)
+      local correct_identity = pending.use_admission
+        and kind == "message_admitted"
+        and change.item_id == pending.queued_item.item_id
+        and change.revision == pending.queued_item.revision
+      local legacy = not pending.use_admission and kind == "message"
+      if correct_identity or legacy then
         local message = change.message or {}
         if message_kind(message.role) == "user"
           and vim.deep_equal(normalized_content(message.content), expected)
         then
-          return true
+          return true, change.execution_id
         end
       end
     end
@@ -187,11 +193,36 @@ local function transcript_contains_submission(projection, pending)
   return false
 end
 
+local function execution_settled(projection, execution_id)
+  if type(projection) ~= "table" or type(projection.updates) ~= "table" or execution_id == nil then
+    return false
+  end
+  for _, item in ipairs(projection.updates) do
+    local change = item.update or {}
+    local update = change.update or {}
+    if message_kind(change.kind) == "execution"
+      and change.execution_id == execution_id
+      and message_kind(update.kind) == "state"
+    then
+      local state = message_kind(update.state)
+      if state == "completed" or state == "cancelled" or state == "failed" then
+        return true
+      end
+    end
+  end
+  return false
+end
+
 local function acknowledge(document, pending, projection)
-  if pending.confirmed or not transcript_contains_submission(projection, pending) then
+  if pending.confirmed then
+    return false
+  end
+  local accepted, execution_id = transcript_contains_submission(projection, pending)
+  if not accepted then
     return false
   end
   pending.confirmed = true
+  pending.execution_id = pending.execution_id or execution_id
   if submissions[document] == pending then
     submissions[document] = nil
   end
@@ -203,8 +234,22 @@ local function acknowledge(document, pending, projection)
   return true
 end
 
-local function confirm_queued(surface, pending, projection)
-  if pending.queued_item == nil or not acknowledge(surface.compose, pending, projection) then
+local function confirm_queued(surface, pending, projection, receipt)
+  if pending.queued_item == nil then
+    return false
+  end
+  if receipt ~= nil then
+    if receipt.session_id ~= pending.session_id
+      or receipt.item_id ~= pending.queued_item.item_id
+      or receipt.revision ~= pending.queued_item.revision
+      or type(receipt.execution_id) ~= "string"
+      or type(receipt.journal_sequence) ~= "number"
+    then
+      return false
+    end
+    pending.execution_id = receipt.execution_id
+    pending.confirmed = true
+  elseif not acknowledge(surface.compose, pending, projection) then
     return false
   end
   local items = queue_for(surface)
@@ -240,13 +285,20 @@ runtime.on_event(function(kind, value)
     end
   end
   for surface, items in pairs(queued) do
-    -- Snapshot the table of references because admission removes items.
-    local candidates = vim.list_extend({}, items)
-    for _, item in ipairs(candidates) do
+    -- Snapshot references because admission removes queue buffers.
+    for _, item in ipairs(vim.list_extend({}, items)) do
       local pending = item.pending
       if pending and pending.session_id ~= nil and not pending.confirmed then
         confirm_queued(surface, pending, sessions[pending.session_id])
       end
+    end
+  end
+  for surface, pending in pairs(active_runs) do
+    if pending.use_admission and pending.confirmed
+      and execution_settled(sessions[pending.session_id], pending.execution_id)
+    then
+      active_runs[surface] = nil
+      vim.schedule(function() dispatch_next(surface) end)
     end
   end
 end)
@@ -320,6 +372,9 @@ local function submit(surface, content, revision, queued_item)
     after_sequence = snapshot and (snapshot.through_sequence or 0) or 0,
     confirmed = false,
     queued_item = queued_item,
+    use_admission = queued_item ~= nil
+      and type(runtime.supports_prompt_admission) == "function"
+      and runtime.supports_prompt_admission(),
   }
   active_runs[surface] = pending
   if queued_item ~= nil then
@@ -328,7 +383,7 @@ local function submit(surface, content, revision, queued_item)
   else
     submissions[document] = pending
   end
-  runtime.prompt(session_id, content, function(_, error)
+  local function complete(result, error)
     if pending.abandoned then
       return
     end
@@ -346,6 +401,26 @@ local function submit(surface, content, revision, queued_item)
       util.notify(vim.inspect(error), vim.log.levels.ERROR)
     elseif not pending.confirmed then
       util.notify("Prompt finished without a matching transcript entry; draft preserved", vim.log.levels.WARN)
+    end
+    if pending.use_admission then
+      if error == nil and not pending.confirmed then
+        if not confirm_queued(surface, pending, current, result) then
+          error = { message = "prompt admission receipt did not match the queued revision" }
+        end
+      end
+      if error ~= nil and not pending.confirmed then
+        util.notify(vim.inspect(error), vim.log.levels.ERROR)
+        queue_view.set_claimed(surface, queued_item, false)
+        active_runs[surface] = nil
+        paused_queues[surface] = true
+        render_queue(surface)
+        return
+      end
+      if execution_settled(current, pending.execution_id) then
+        active_runs[surface] = nil
+        dispatch_next(surface)
+      end
+      return
     end
     if active_runs[surface] == pending then
       active_runs[surface] = nil
@@ -366,7 +441,14 @@ local function submit(surface, content, revision, queued_item)
         dispatch_next(surface)
       end
     end
-  end)
+  end
+  if pending.use_admission then
+    runtime.admit_prompt(
+      session_id, content, queued_item.item_id, queued_item.revision, complete
+    )
+  else
+    runtime.prompt(session_id, content, complete)
+  end
 end
 
 dispatch_next = function(surface)
