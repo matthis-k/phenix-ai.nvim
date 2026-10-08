@@ -16,7 +16,14 @@ function M.present(value)
     return nil, "stale UI document revision"
   end
   if view ~= nil and projection.revision == view.revision then
-    return view.buffer
+    if not vim.deep_equal(projection.lines, view.lines)
+      or not vim.deep_equal(projection.styles, view.styles)
+    then
+      return nil, "conflicting UI document revision"
+    end
+    if vim.api.nvim_buf_is_valid(view.buffer) then
+      return view.buffer
+    end
   end
   if view == nil or not vim.api.nvim_buf_is_valid(view.buffer) then
     view = {
@@ -40,6 +47,8 @@ function M.present(value)
   end
   vim.bo[view.buffer].modifiable = false
   view.revision = projection.revision
+  view.lines = vim.deepcopy(projection.lines)
+  view.styles = vim.deepcopy(projection.styles)
   return view.buffer
 end
 
