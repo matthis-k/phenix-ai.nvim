@@ -90,8 +90,11 @@ local function lines_for(view, node)
   end
   if node.kind == "execution" then
     local label = node.message or node.state or "running"
-    if node.fraction ~= nil then
-      label = string.format("%s · %.0f%%", label, node.fraction * 100)
+    if type(node.fraction) == "number" and node.fraction >= 0 and node.fraction <= 1 then
+      local length = 16
+      local filled = math.floor(node.fraction * length + 0.5)
+      local bar = string.rep("━", filled) .. string.rep("─", length - filled)
+      label = string.format("%s  %s  %.0f%%", label, bar, node.fraction * 100)
     end
     return { "· " .. label, "" }
   end
@@ -374,7 +377,11 @@ local function define_highlights()
       + lift(base % 256)
   end
   vim.api.nvim_set_hl(0, "PhenixUserMessage", { bg = bg })
-  vim.api.nvim_set_hl(0, "PhenixToolLabel", { link = "DiagnosticInfo" })
+  local diagnostic = vim.api.nvim_get_hl(0, { name = "DiagnosticInfo", link = false })
+  vim.api.nvim_set_hl(0, "PhenixToolLabel", {
+    fg = diagnostic.fg or 0x89b4fa,
+    bold = true,
+  })
   vim.api.nvim_set_hl(0, "PhenixToolCompleted", { link = "DiagnosticOk" })
   vim.api.nvim_set_hl(0, "PhenixToolRunning", { link = "DiagnosticWarn" })
   vim.api.nvim_set_hl(0, "PhenixToolFailed", { link = "DiagnosticError" })
