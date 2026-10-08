@@ -414,6 +414,38 @@ prompt_callbacks[8](nil, { kind = "disconnected" })
 assert(queued_snapshot and #queued_snapshot == 1, "rejected queued follow-up must be recoverable")
 queue_view.render = original_queue_render
 
+-- A session opening must accept local queued follow-ups before an ID exists.
+local sidebar = require("phenix_nvim.sidebar")
+local original_current_surface = sidebar.current_surface
+local original_new_session = runtime.new_session
+local original_bind_session = sidebar.bind_session
+local session_open_callback
+local temporary_surface = { compose = state.compose }
+sidebar.current_surface = function() return temporary_surface end
+runtime.new_session = function(callback) session_open_callback = callback end
+sidebar.bind_session = function(session_id, surface)
+  surface.session_id = session_id
+end
+
+prompt_text = "before-session-exists"
+state.compose.revision = 400
+actions.send()
+assert(session_open_callback ~= nil)
+assert(#prompt_callbacks == 8, "no prompt may dispatch without a session ID")
+prompt_text = "follow-up-before-session"
+state.compose.revision = 401
+actions.send()
+assert(clear_calls == 6, "pre-session follow-up must be visible in its queue")
+session_open_callback({ session_id = "created-session" }, nil)
+assert(#prompt_callbacks == 9, "created session must send the original draft first")
+prompt_callbacks[9]({}, nil)
+assert(#prompt_callbacks == 10, "queued prompt must dispatch after first turn settles")
+prompt_callbacks[10]({}, nil)
+
+sidebar.current_surface = original_current_surface
+runtime.new_session = original_new_session
+sidebar.bind_session = original_bind_session
+
 compose.serialize = original_serialize
 compose.clear = original_clear
 
