@@ -1,6 +1,7 @@
 -- Display-only structured documents. Backend action and capability contracts are pending.
 local M = {}
 local MAX_NODES, MAX_DEPTH, MAX_TEXT, MAX_LINES = 128, 12, 4096, 512
+local MAX_LINE_BYTES, MAX_TOTAL_BYTES = 8192, 65536
 local leaf = { text = true, label = true, badge = true, progress = true, table = true }
 local layout = { row = true, column = true, card = true }
 
@@ -39,11 +40,18 @@ function M.project(document)
     if not integer(document.revision) then
       error("revision must be a non-negative integer")
     end
-    local ids, lines, styles, count = {}, {}, {}, 0
+    local ids, lines, styles, count, bytes = {}, {}, {}, 0, 0
     local function add(line, style)
       for index, segment in ipairs(vim.split(line, "\n", { plain = true })) do
         if #lines >= MAX_LINES then
           error("document exceeds line limit")
+        end
+        if #segment > MAX_LINE_BYTES then
+          error("document exceeds line byte limit")
+        end
+        bytes = bytes + #segment + 1
+        if bytes > MAX_TOTAL_BYTES then
+          error("document exceeds total byte limit")
         end
         lines[#lines + 1] = segment
         if index == 1 and style ~= nil then
