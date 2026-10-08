@@ -48,6 +48,8 @@ function M.render(surface, items, on_remove)
     view = {}
     views[surface] = view
   end
+  view.items = items
+  view.on_remove = on_remove
   if #items == 0 then
     close(view)
     return
@@ -73,8 +75,8 @@ function M.render(surface, items, on_remove)
     vim.bo[view.buffer].modifiable = false
     vim.keymap.set("n", "dd", function()
       local index = vim.api.nvim_win_get_cursor(0)[1] - 1
-      if index > 0 and index <= #items and on_remove ~= nil then
-        on_remove(index)
+      if index > 0 and index <= #(view.items or {}) and view.on_remove ~= nil then
+        view.on_remove(index)
       end
     end, { buffer = view.buffer, silent = true, desc = "Remove queued follow-up" })
   end
