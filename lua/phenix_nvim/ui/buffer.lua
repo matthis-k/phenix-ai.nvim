@@ -3,6 +3,7 @@ local document = require("phenix_nvim.ui.document")
 
 local M = {}
 local views = {}
+local highlights = vim.api.nvim_create_namespace("phenix-structured-ui")
 
 function M.present(value)
   local projection, error = document.project(value)
@@ -30,6 +31,13 @@ function M.present(value)
   end
   vim.bo[view.buffer].modifiable = true
   vim.api.nvim_buf_set_lines(view.buffer, 0, -1, false, projection.lines)
+  vim.api.nvim_buf_clear_namespace(view.buffer, highlights, 0, -1)
+  for _, item in ipairs(projection.styles) do
+    vim.api.nvim_buf_set_extmark(view.buffer, highlights, item.row, 0, {
+      end_col = item.end_col,
+      hl_group = item.kind == "badge" and "DiagnosticInfo" or "DiagnosticHint",
+    })
+  end
   vim.bo[view.buffer].modifiable = false
   view.revision = projection.revision
   return view.buffer
