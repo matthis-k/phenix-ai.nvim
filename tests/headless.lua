@@ -313,6 +313,41 @@ local rebuilt = assert(transcript.rebuild({
 assert(rebuilt.sequence == 9)
 assert(rebuilt.nodes[assistant_id].text == "hello world")
 
+-- Optional reasoning and tool-stream deltas reduce deterministically.
+local rich = transcript.new("streaming")
+local function rich_update(sequence, change)
+  return { session_id = "streaming", sequence = sequence, update = change }
+end
+assert(transcript.apply(rich, rich_update(1, {
+  kind = "Execution", execution_id = "run", update = {
+    kind = "ToolCall", call_id = "shell", callable_id = "workspace.shell",
+    input = { command = "printf hello" },
+  },
+})))
+assert(transcript.apply(rich, rich_update(2, {
+  kind = "ReasoningDelta", execution_id = "run", text = "Reasoning available",
+})))
+assert(transcript.apply(rich, rich_update(3, {
+  kind = "Execution", execution_id = "run", update = {
+    kind = "ToolOutputDelta", call_id = "shell", stream = "Stdout", text = "hel",
+  },
+})))
+assert(transcript.apply(rich, rich_update(4, {
+  kind = "Execution", execution_id = "run", update = {
+    kind = "ToolOutputDelta", call_id = "shell", stream = "Stdout", text = "lo",
+  },
+})))
+local thinking_id = "session:streaming:execution:run:thinking"
+local shell_id = "session:streaming:execution:run:tool:shell"
+assert(rich.nodes[thinking_id].text == "Reasoning available")
+assert(rich.nodes[shell_id].output_streams.stdout == "hello")
+assert(transcript.apply(rich, rich_update(5, {
+  kind = "Execution", execution_id = "run", update = {
+    kind = "ToolResult", call_id = "shell", output = { stdout = "hello", stderr = "" },
+  },
+})))
+assert(rich.nodes[shell_id].state == "completed")
+
 local unknown_tool = transcript.new("session-1")
 local _, tool_error = transcript.apply(unknown_tool, update(1, {
   kind = "Execution",
