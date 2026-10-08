@@ -289,15 +289,13 @@ assert(clear_calls == 1, "accepted user prompt must clear before final response"
 prompt_callbacks[1]({}, nil)
 assert(clear_calls == 1, "final response must not clear an already accepted draft")
 
--- New sends after admission are independent, even if an older execution has not
--- reported completion yet.
+-- A follow-up is queued in the per-chat pane while the earlier turn runs.
 prompt_text = "follow-up"
 actions.send()
-assert(#prompt_callbacks == 2, "accepted prompt must free the composer")
-prompt_callbacks[2](nil, { kind = "failed", message = "fixture failure" })
-assert(clear_calls == 1, "failed prompt without admission must preserve the draft")
-actions.send()
-assert(#prompt_callbacks == 3, "failed draft must be retryable")
+assert(#prompt_callbacks == 1, "concurrent follow-up must stay in the local queue")
+assert(clear_calls == 2, "queued draft must clear after entering the visible queue")
+prompt_callbacks[1]({}, nil)
+assert(#prompt_callbacks == 2, "settling the previous execution must dispatch queued follow-up")
 session_projections["session-send"].through_sequence = 2
 table.insert(session_projections["session-send"].updates, {
   sequence = 2,
@@ -312,8 +310,34 @@ table.insert(session_projections["session-send"].updates, {
 for _, listener in ipairs(listeners) do
   listener("sessions", { sessions = session_projections })
 end
-assert(clear_calls == 2, "retry accepted in transcript must clear")
-prompt_callbacks[3]({}, nil)
+assert(clear_calls == 2, "queued prompt was already removed from the composer")
+prompt_callbacks[2]({}, nil)
+
+-- A rejected unqueued prompt retains its compose draft and can be retried.
+prompt_text = "rejected"
+actions.send()
+assert(#prompt_callbacks == 3)
+prompt_callbacks[3](nil, { kind = "failed", message = "fixture model failure" })
+assert(clear_calls == 2, "failed prompt without admission must preserve the draft")
+actions.send()
+assert(#prompt_callbacks == 4, "failed compose draft must be retryable")
+session_projections["session-send"].through_sequence = 3
+table.insert(session_projections["session-send"].updates, {
+  sequence = 3,
+  update = {
+    kind = "Message",
+    message = {
+      role = { kind = "User" },
+      content = { { kind = "Text", text = "rejected" } },
+    },
+  },
+})
+for _, listener in ipairs(listeners) do
+  listener("sessions", { sessions = session_projections })
+end
+assert(clear_calls == 3, "retried prompt accepted in transcript must clear")
+prompt_callbacks[4]({}, nil)
+
 compose.serialize = original_serialize
 compose.clear = original_clear
 
