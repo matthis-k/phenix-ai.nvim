@@ -206,7 +206,13 @@ local function confirm_queued(surface, pending, projection)
     end
   end
   pending.queued_item.pending = nil
+  if paused_queues[surface] then
+    paused_queues[surface] = nil
+  end
   render_queue(surface)
+  if active_runs[surface] == nil then
+    vim.schedule(function() dispatch_next(surface) end)
+  end
   return true
 end
 
@@ -216,8 +222,12 @@ runtime.on_event(function(kind, value)
   end
   local sessions = type(value) == "table" and value.sessions or {}
   for document, pending in pairs(submissions) do
-    if pending.session_id ~= nil then
-      acknowledge(document, pending, sessions[pending.session_id])
+    if pending.session_id ~= nil and acknowledge(document, pending, sessions[pending.session_id]) then
+      local surface = sidebar.surface_for_document(document)
+      if surface ~= nil and active_runs[surface] == nil and paused_queues[surface] then
+        paused_queues[surface] = nil
+        vim.schedule(function() dispatch_next(surface) end)
+      end
     end
   end
   for surface, items in pairs(queued) do
@@ -320,7 +330,7 @@ local function submit(surface, content, revision, queued_item)
     else
       acknowledge(document, pending, current)
     end
-    if submissions[document] == pending then
+    if submissions[document] == pending and (pending.confirmed or error ~= nil) then
       submissions[document] = nil
     end
     if error ~= nil then
