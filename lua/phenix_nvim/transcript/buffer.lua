@@ -1,4 +1,5 @@
 local disclosure = require("phenix_nvim.disclosure")
+local tool_view = require("phenix_nvim.transcript.tool_view")
 
 local M = {}
 local namespace = vim.api.nvim_create_namespace("phenix-transcript")
@@ -24,6 +25,7 @@ local function store(key)
       marks = {},
       attached_windows = {},
       disclosure = disclosure.new(),
+      tool_modes = {},
       last_projection = nil,
     }
     stores[key] = value
@@ -64,23 +66,25 @@ local function lines_for(view, node)
     return lines
   end
   if node.kind == "tool" then
-    local title = "Tool · " .. tostring(node.callable_id or "unknown") .. " · " .. tostring(node.state or "running")
+    local width = 80
+    for win in pairs(view.attached_windows) do
+      if vim.api.nvim_win_is_valid(win) then
+        width = vim.api.nvim_win_get_width(win)
+        break
+      end
+    end
+    local mode = view.tool_modes[node.id] or "compact"
+    local lines = tool_view.lines(node, mode, width)
+    table.insert(lines, "")
+    return lines
+  end
+  if node.kind == "thinking" then
+    local label = node.final and "Thinking" or "Thinking · running"
     if not disclosure.is_open(view.disclosure, node.id) then
-      return { title .. " · <CR> details", "" }
+      return { label .. " · <CR> to expand", "" }
     end
-    local lines = { title }
-    local input = inspect(node.input)
-    if input ~= nil and input ~= "" then
-      table.insert(lines, "")
-      table.insert(lines, "Input")
-      append(lines, text_lines(input))
-    end
-    local output = inspect(node.output)
-    if output ~= nil and output ~= "" then
-      table.insert(lines, "")
-      table.insert(lines, node.state == "failed" and "Error" or "Output")
-      append(lines, text_lines(output))
-    end
+    local lines = { label }
+    append(lines, text_lines(node.text))
     table.insert(lines, "")
     return lines
   end
@@ -226,8 +230,17 @@ function M.attach_window(key, win)
   end, {
     buffer = M.ensure(resolved),
     silent = true,
-    desc = "Toggle Phenix tool details",
+    desc = "Cycle Phenix disclosure: compact / human / protocol",
   })
+  for key, mode in pairs({ ["1"] = "compact", ["2"] = "human", ["3"] = "protocol" }) do
+    vim.keymap.set("n", key, function()
+      M.set_tool_mode(vim.api.nvim_get_current_win(), nil, mode)
+    end, {
+      buffer = M.ensure(resolved),
+      silent = true,
+      desc = "Phenix tool view: " .. mode,
+    })
+  end
   update_follow_tail(win)
 end
 
@@ -293,6 +306,31 @@ local function node_under_cursor(view, win)
   return nil
 end
 
+function M.set_tool_mode(win, key, mode)
+  win = win or vim.api.nvim_get_current_win()
+  key = key or window_keys[win]
+  if key == nil then
+    return false
+  end
+  local view = store(key)
+  local node = node_under_cursor(view, win)
+  if node == nil then
+    return false
+  end
+  if node.kind == "thinking" then
+    disclosure.set(view.disclosure, node.id, mode ~= "compact")
+  elseif node.kind == "tool" then
+    if mode ~= "compact" and mode ~= "human" and mode ~= "protocol" then
+      return false
+    end
+    view.tool_modes[node.id] = mode
+  else
+    return false
+  end
+  M.render_node(node, key)
+  return true
+end
+
 function M.toggle_tool(win, key)
   win = win or vim.api.nvim_get_current_win()
   key = key or window_keys[win]
@@ -301,10 +339,16 @@ function M.toggle_tool(win, key)
   end
   local view = store(key)
   local node = node_under_cursor(view, win)
-  if node == nil or node.kind ~= "tool" then
+  if node == nil then
     return false
   end
-  disclosure.toggle(view.disclosure, node.id)
+  if node.kind == "thinking" then
+    disclosure.toggle(view.disclosure, node.id)
+  elseif node.kind == "tool" then
+    view.tool_modes[node.id] = tool_view.next_mode(view.tool_modes[node.id] or "compact")
+  else
+    return false
+  end
   M.render_node(node, key)
   return true
 end
@@ -316,14 +360,58 @@ local function replace(view, start_row, finish_row, lines)
   vim.bo[target].modifiable = false
 end
 
+local function define_highlights()
+  local normal = vim.api.nvim_get_hl(0, { name = "Normal", link = false })
+  local cursorline = vim.api.nvim_get_hl(0, { name = "CursorLine", link = false })
+  local bg = cursorline.bg
+  if bg == nil or bg == normal.bg then
+    local base = normal.bg or 0x1e1e2e
+    local function lift(channel)
+      return math.min(255, math.floor(channel * 0.88 + 255 * 0.12))
+    end
+    bg = lift(math.floor(base / 65536)) * 65536
+      + lift(math.floor(base / 256) % 256) * 256
+      + lift(base % 256)
+  end
+  vim.api.nvim_set_hl(0, "PhenixUserMessage", { bg = bg })
+  vim.api.nvim_set_hl(0, "PhenixToolLabel", { link = "DiagnosticInfo" })
+  vim.api.nvim_set_hl(0, "PhenixToolCompleted", { link = "DiagnosticOk" })
+  vim.api.nvim_set_hl(0, "PhenixToolRunning", { link = "DiagnosticWarn" })
+  vim.api.nvim_set_hl(0, "PhenixToolFailed", { link = "DiagnosticError" })
+end
+
+define_highlights()
+vim.api.nvim_create_autocmd("ColorScheme", { group = group, callback = define_highlights })
+
 local function style_node(view, node, start_row, lines)
   local target = M.ensure(view.key)
   vim.api.nvim_buf_clear_namespace(target, style_namespace, start_row, start_row + math.max(#lines, 1))
+  if node.kind == "message" and node.role == "user" then
+    for index, line in ipairs(lines) do
+      vim.api.nvim_buf_set_extmark(target, style_namespace, start_row + index - 1, 0, {
+        end_col = #line,
+        hl_group = "PhenixUserMessage",
+        hl_eol = true,
+        priority = 110,
+      })
+    end
+    return
+  end
+  if node.kind == "tool" then
+    local status, hl_group = tool_view.status(node.state)
+    vim.api.nvim_buf_add_highlight(target, style_namespace, "PhenixToolLabel", start_row, 0, 4)
+    local header = lines[1] or ""
+    local offset = header:find(status, 1, true)
+    if offset ~= nil then
+      vim.api.nvim_buf_add_highlight(target, style_namespace, hl_group, start_row, offset - 1, offset - 1 + #status)
+    end
+    return
+  end
   local group_name = "Comment"
   if node.kind == "message" then
-    group_name = node.role == "user" and "Title" or "Special"
-  elseif node.kind == "tool" then
-    group_name = node.state == "failed" and "DiagnosticError" or "Identifier"
+    group_name = "Special"
+  elseif node.kind == "thinking" then
+    group_name = "Comment"
   elseif node.kind == "diagnostic" then
     group_name = node.severity == "error" and "DiagnosticError" or "DiagnosticWarn"
   elseif node.kind == "review" then
