@@ -430,6 +430,7 @@ local function submit(surface, content, revision, queued_item)
       end
       if error ~= nil and not pending.confirmed then
         util.notify(vim.inspect(error), vim.log.levels.ERROR)
+        queued_item.pending = nil
         queue_view.set_claimed(surface, queued_item, false)
         active_runs[surface] = nil
         local message = type(error) == "table" and tostring(error.message or "") or tostring(error)
