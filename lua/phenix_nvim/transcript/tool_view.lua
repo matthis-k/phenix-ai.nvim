@@ -89,6 +89,14 @@ function M.lines(node, mode, width)
     end
     if output ~= nil then
       add(result, friendly_output(output))
+    elseif type(node.output_streams) == "table" then
+      if node.output_streams.stdout ~= "" then
+        add(result, node.output_streams.stdout)
+      end
+      if node.output_streams.stderr ~= "" then
+        table.insert(result, "stderr:")
+        add(result, node.output_streams.stderr)
+      end
     elseif node.state == "running" then
       table.insert(result, "Running…")
     end
