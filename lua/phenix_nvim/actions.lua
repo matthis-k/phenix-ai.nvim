@@ -213,6 +213,21 @@ local function execution_settled(projection, execution_id)
   return false
 end
 
+local function latest_execution_is_terminal(projection)
+  if type(projection) ~= "table" or type(projection.updates) ~= "table" then
+    return false
+  end
+  for index = #projection.updates, 1, -1 do
+    local change = projection.updates[index].update or {}
+    local update = change.update or {}
+    if message_kind(change.kind) == "execution" and message_kind(update.kind) == "state" then
+      local state = message_kind(update.state)
+      return state == "completed" or state == "cancelled" or state == "failed"
+    end
+  end
+  return false
+end
+
 local function acknowledge(document, pending, projection)
   if pending.confirmed then
     return false
@@ -285,6 +300,16 @@ runtime.on_event(function(kind, value)
     end
   end
   for surface, items in pairs(queued) do
+    local pause = paused_queues[surface]
+    local projection = sessions[surface.session_id]
+    if type(pause) == "table" and pause.reason == "busy"
+      and type(projection) == "table"
+      and (projection.through_sequence or 0) > pause.watermark
+      and latest_execution_is_terminal(projection)
+    then
+      paused_queues[surface] = nil
+      vim.schedule(function() dispatch_next(surface) end)
+    end
     -- Snapshot references because admission removes queue buffers.
     for _, item in ipairs(vim.list_extend({}, items)) do
       local pending = item.pending
@@ -407,7 +432,17 @@ local function submit(surface, content, revision, queued_item)
         util.notify(vim.inspect(error), vim.log.levels.ERROR)
         queue_view.set_claimed(surface, queued_item, false)
         active_runs[surface] = nil
-        paused_queues[surface] = true
+        local message = type(error) == "table" and tostring(error.message or "") or tostring(error)
+        if message:find("already has a running execution", 1, true) then
+          local state = runtime.session_state()
+          local projected = state and state.sessions and state.sessions[session_id]
+          paused_queues[surface] = {
+            reason = "busy",
+            watermark = projected and (projected.through_sequence or 0) or 0,
+          }
+        else
+          paused_queues[surface] = true
+        end
         render_queue(surface)
         return
       end
