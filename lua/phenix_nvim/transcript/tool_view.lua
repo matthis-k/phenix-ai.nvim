@@ -105,6 +105,16 @@ function M.lines(node, mode, width)
 
   table.insert(result, "Input")
   add(result, inspect(input) or "(none)")
+  if type(node.output_streams) == "table" then
+    if node.output_streams.stdout ~= "" then
+      table.insert(result, "Stream · stdout")
+      add(result, node.output_streams.stdout)
+    end
+    if node.output_streams.stderr ~= "" then
+      table.insert(result, "Stream · stderr")
+      add(result, node.output_streams.stderr)
+    end
+  end
   if output ~= nil then
     table.insert(result, node.state == "failed" and "Error" or "Output")
     add(result, inspect(output))
