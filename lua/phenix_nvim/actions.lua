@@ -255,13 +255,15 @@ local function submit(surface, content, revision, queued_item)
     if active_runs[surface] == pending then
       active_runs[surface] = nil
       if error ~= nil and not pending.confirmed then
-        paused_queues[surface] = true
         if queued_item ~= nil then
           table.insert(queue_for(surface), 1, queued_item)
-          render_queue(surface)
         end
         if #queue_for(surface) > 0 then
-          util.notify("Follow-up queue paused after rejected prompt; retry the draft", vim.log.levels.WARN)
+          paused_queues[surface] = true
+          render_queue(surface)
+          util.notify("Follow-up queue paused after rejected prompt; press r in the queue to retry", vim.log.levels.WARN)
+        else
+          paused_queues[surface] = nil
         end
       else
         dispatch_next(surface)
