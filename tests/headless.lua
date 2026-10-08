@@ -359,11 +359,13 @@ local transcript_win = vim.fn.bufwinid(transcript_buffer)
 assert(transcript_win > 0, "transcript buffer must be visible")
 local transcript_surface = assert(sidebar.current_surface())
 
--- Tool payloads stay out of the rendered transcript until the user opens them.
+-- Tool payloads have three views. Compact never materializes protocol text.
 local payload_marker = "TOOL-PAYLOAD-MUST-BE-COLLAPSED"
 transcript_view.render_projection({
-  order = { "tool" },
+  order = { "user", "thinking", "tool" },
   nodes = {
+    user = { id = "user", kind = "message", role = "user", text = "question" },
+    thinking = { id = "thinking", kind = "thinking", text = "reasoning preview", final = false },
     tool = {
       id = "tool",
       kind = "tool",
@@ -374,17 +376,49 @@ transcript_view.render_projection({
     },
   },
 }, transcript_surface.transcript_key)
+
 local collapsed = table.concat(vim.api.nvim_buf_get_lines(transcript_buffer, 0, -1, false), "\n")
-assert(collapsed:find("<CR> details", 1, true), "collapsed tool must advertise disclosure")
-assert(not collapsed:find(payload_marker, 1, true), "collapsed tool must not eagerly render its payload")
+assert(collapsed:find("Tool", 1, true))
+assert(collapsed:find("completed", 1, true))
+assert(not collapsed:find(payload_marker, 1, true), "compact tool must not eagerly render its payload")
+local user_bg = vim.api.nvim_buf_get_extmarks(transcript_buffer, -1, 0, -1, { details = true })
+assert(type(user_bg) == "table")
+
 vim.api.nvim_win_set_cursor(transcript_win, { 1, 0 })
+local user_line = vim.api.nvim_buf_get_lines(transcript_buffer, 0, 1, false)[1]
+assert(user_line == "You")
+local user_style = vim.api.nvim_get_hl(0, { name = "PhenixUserMessage", link = false })
+assert(user_style.bg ~= nil, "user messages must have a contrasting background")
+
+local all_lines = vim.api.nvim_buf_get_lines(transcript_buffer, 0, -1, false)
+local thinking_row, tool_row
+for row, line in ipairs(all_lines) do
+  if line:find("Thinking", 1, true) then thinking_row = row end
+  if line:find("Tool ", 1, true) then tool_row = row end
+end
+assert(thinking_row and tool_row)
+vim.api.nvim_win_set_cursor(transcript_win, { thinking_row, 0 })
 assert(transcript_view.toggle_tool(transcript_win, transcript_surface.transcript_key))
-local expanded = table.concat(vim.api.nvim_buf_get_lines(transcript_buffer, 0, -1, false), "\n")
-assert(expanded:find(payload_marker, 1, true), "expanded tool must render its payload")
+assert(table.concat(vim.api.nvim_buf_get_lines(transcript_buffer, 0, -1, false), "\n"):find("reasoning preview", 1, true))
+assert(transcript_view.toggle_tool(transcript_win, transcript_surface.transcript_key))
+assert(not table.concat(vim.api.nvim_buf_get_lines(transcript_buffer, 0, -1, false), "\n"):find("reasoning preview", 1, true))
+
+-- Resolve the tool row again since opening thinking changed the line offsets.
+for row, line in ipairs(vim.api.nvim_buf_get_lines(transcript_buffer, 0, -1, false)) do
+  if line:find("Tool ", 1, true) then tool_row = row end
+end
+vim.api.nvim_win_set_cursor(transcript_win, { tool_row, 0 })
+assert(transcript_view.toggle_tool(transcript_win, transcript_surface.transcript_key))
+local human = table.concat(vim.api.nvim_buf_get_lines(transcript_buffer, 0, -1, false), "\n")
+assert(human:find("$ " .. payload_marker, 1, true), "human mode shows the bash command")
+assert(not human:find("Input\n", 1, true), "human mode hides protocol headings")
+assert(transcript_view.toggle_tool(transcript_win, transcript_surface.transcript_key))
+local protocol = table.concat(vim.api.nvim_buf_get_lines(transcript_buffer, 0, -1, false), "\n")
+assert(protocol:find("Input\n", 1, true), "protocol mode shows the raw input heading")
+assert(protocol:find(payload_marker, 1, true))
 assert(transcript_view.toggle_tool(transcript_win, transcript_surface.transcript_key))
 local collapsed_again = table.concat(vim.api.nvim_buf_get_lines(transcript_buffer, 0, -1, false), "\n")
-assert(not collapsed_again:find(payload_marker, 1, true), "collapsing a tool must remove its payload from the buffer")
-
+assert(not collapsed_again:find(payload_marker, 1, true), "compact mode must remove the tool payload")
 -- Wrapped transcript scrolling must operate on screen rows. A partial view of
 -- the final logical line is not the tail.
 assert(vim.wo[transcript_win].scrolloff == 0, "transcript view must not inherit editing scrolloff")
