@@ -352,7 +352,7 @@ function M.send(options)
     util.notify("this compose revision is already being sent", vim.log.levels.WARN)
     return
   end
-  if active_runs[surface] ~= nil or paused_queues[surface] then
+  if active_runs[surface] ~= nil or (paused_queues[surface] and surface.session_id ~= nil) then
     table.insert(queue_for(surface), {
       session_id = surface.session_id,
       content = vim.deepcopy(content),
@@ -374,6 +374,7 @@ function M.send(options)
   local creating = { revision = revision, session_id = nil, confirmed = false }
   local generation = prompt_connection_generation
   submissions[document] = creating
+  active_runs[surface] = creating
   runtime.new_session(function(created, create_error)
     if generation ~= prompt_connection_generation then
       if submissions[document] == creating then
@@ -385,16 +386,38 @@ function M.send(options)
       if submissions[document] == creating then
         submissions[document] = nil
       end
+      if active_runs[surface] == creating then
+        active_runs[surface] = nil
+      end
+      if #queue_for(surface) > 0 then
+        paused_queues[surface] = true
+        render_queue(surface)
+      end
       util.notify(vim.inspect(create_error), vim.log.levels.ERROR)
       return
     end
     local session_id = created and (created.session_id or created.id)
     if session_id == nil then
-      submissions[document] = nil
+      if submissions[document] == creating then
+        submissions[document] = nil
+      end
+      if active_runs[surface] == creating then
+        active_runs[surface] = nil
+      end
+      if #queue_for(surface) > 0 then
+        paused_queues[surface] = true
+        render_queue(surface)
+      end
       util.notify("Phenix created a session without an id", vim.log.levels.ERROR)
       return
     end
     sidebar.bind_session(session_id, surface)
+    for _, item in ipairs(queue_for(surface)) do
+      if item.session_id == nil then
+        item.session_id = session_id
+      end
+    end
+    paused_queues[surface] = nil
     submit(surface, content, revision)
   end)
 end
