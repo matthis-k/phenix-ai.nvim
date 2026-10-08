@@ -397,11 +397,6 @@ local function submit(surface, content, revision, queued_item)
     if submissions[document] == pending and (pending.confirmed or error ~= nil) then
       submissions[document] = nil
     end
-    if error ~= nil then
-      util.notify(vim.inspect(error), vim.log.levels.ERROR)
-    elseif not pending.confirmed then
-      util.notify("Prompt finished without a matching transcript entry; draft preserved", vim.log.levels.WARN)
-    end
     if pending.use_admission then
       if error == nil and not pending.confirmed then
         if not confirm_queued(surface, pending, current, result) then
@@ -421,6 +416,11 @@ local function submit(surface, content, revision, queued_item)
         dispatch_next(surface)
       end
       return
+    end
+    if error ~= nil then
+      util.notify(vim.inspect(error), vim.log.levels.ERROR)
+    elseif not pending.confirmed then
+      util.notify("Prompt finished without a matching transcript entry; draft preserved", vim.log.levels.WARN)
     end
     if active_runs[surface] == pending then
       active_runs[surface] = nil
