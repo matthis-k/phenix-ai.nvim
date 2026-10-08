@@ -183,7 +183,7 @@ function M.apply(projection, update)
 
   local changed
   local err
-  if kind == "message" then
+  if kind == "message" or kind == "message_admitted" then
     local role = role_name(change.message and change.message.role)
     local text = message_text(change.message and change.message.content)
     if role == "assistant" and projection.streaming_execution_id ~= nil then
