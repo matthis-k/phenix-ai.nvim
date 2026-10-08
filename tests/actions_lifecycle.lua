@@ -445,13 +445,54 @@ assert(#prompt_callbacks == 8, "queue retry must not dispatch without a bound se
 queue_view.render = original_queue_render_before_session
 session_open_callback({ session_id = "created-session" }, nil)
 assert(#prompt_callbacks == 9, "created session must send the original draft first")
+session_projections["created-session"] = {
+  through_sequence = 1,
+  updates = { {
+    sequence = 1,
+    update = {
+      kind = "Message",
+      message = {
+        role = { kind = "User" },
+        content = { { kind = "Text", text = "before-session-exists" } },
+      },
+    },
+  } },
+}
+for _, listener in ipairs(listeners) do
+  listener("sessions", { sessions = session_projections })
+end
 prompt_callbacks[9]({}, nil)
-assert(#prompt_callbacks == 10, "queued prompt must dispatch after first turn settles")
+assert(#prompt_callbacks == 10, "queued prompt must dispatch after admitted first turn settles")
 prompt_callbacks[10]({}, nil)
 
 sidebar.current_surface = original_current_surface
 runtime.new_session = original_new_session
 sidebar.bind_session = original_bind_session
+
+-- A successful callback without admission must not silently dispatch the
+-- next queued prompt. Recovery remains visible and requires explicit action.
+local unconfirmed_surface = { compose = state.compose, session_id = "unconfirmed-session" }
+sidebar.current_surface = function() return unconfirmed_surface end
+local unconfirmed_snapshot, unconfirmed_resume
+queue_view.render = function(_, entries, _, retry)
+  unconfirmed_snapshot = vim.deepcopy(entries)
+  unconfirmed_resume = retry
+end
+prompt_text = "unconfirmed-first"
+state.compose.revision = 500
+actions.send()
+assert(#prompt_callbacks == 11)
+prompt_text = "must-remain-queued"
+state.compose.revision = 501
+actions.send()
+assert(#prompt_callbacks == 11)
+prompt_callbacks[11]({}, nil)
+assert(#prompt_callbacks == 11, "unconfirmed success must not dispatch the next prompt")
+assert(unconfirmed_snapshot and #unconfirmed_snapshot == 1)
+assert(unconfirmed_snapshot[1].content[1].text == "must-remain-queued")
+assert(unconfirmed_resume ~= nil, "the queued prompt must remain recoverable")
+queue_view.render = original_queue_render
+sidebar.current_surface = original_current_surface
 
 compose.serialize = original_serialize
 compose.clear = original_clear
