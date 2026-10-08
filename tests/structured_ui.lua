@@ -29,6 +29,11 @@ local marks = vim.api.nvim_buf_get_extmarks(
 )
 assert(#marks == 2, "badge and progress must receive theme-aware highlights")
 assert(view.present(fixture) == buffer, "same revision must be idempotent")
+local collision = vim.deepcopy(fixture)
+collision.root.children[1].text = "different text at the same revision"
+local conflicted, conflict_error = view.present(collision)
+assert(conflicted == nil and conflict_error:find("conflicting", 1, true),
+  "equal revisions with different content must reject without overwriting")
 local changed = vim.deepcopy(fixture)
 changed.revision = 2
 changed.root.children[2].text = "Completed"
@@ -54,6 +59,10 @@ reject(function(d) d.root.children[1].text = string.rep("x", 4097) end)
 local other = vim.deepcopy(fixture)
 other.session_id = "session-b"
 assert(view.present(other) ~= buffer, "sessions must not share buffers")
+vim.api.nvim_buf_delete(buffer, { force = true })
+local recreated = assert(view.present(changed))
+assert(vim.api.nvim_buf_is_valid(recreated), "replayed document must recreate its wiped buffer")
+assert(recreated ~= buffer, "recreated buffer must have a new identity")
 view.close("session-a", "document-a")
 view.close("session-b", "document-a")
 print("structured UI display fixture passed")
