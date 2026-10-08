@@ -213,12 +213,16 @@ local function execution_settled(projection, execution_id)
   return false
 end
 
-local function latest_execution_is_terminal(projection)
+local function latest_execution_is_terminal(projection, since_sequence)
   if type(projection) ~= "table" or type(projection.updates) ~= "table" then
     return false
   end
   for index = #projection.updates, 1, -1 do
-    local change = projection.updates[index].update or {}
+    local event = projection.updates[index]
+    if (event.sequence or 0) <= since_sequence then
+      break
+    end
+    local change = event.update or {}
     local update = change.update or {}
     if message_kind(change.kind) == "execution" and message_kind(update.kind) == "state" then
       local state = message_kind(update.state)
@@ -305,7 +309,7 @@ runtime.on_event(function(kind, value)
     if type(pause) == "table" and pause.reason == "busy"
       and type(projection) == "table"
       and (projection.through_sequence or 0) > pause.watermark
-      and latest_execution_is_terminal(projection)
+      and latest_execution_is_terminal(projection, pause.watermark)
     then
       paused_queues[surface] = nil
       vim.schedule(function() dispatch_next(surface) end)
