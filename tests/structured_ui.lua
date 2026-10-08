@@ -9,12 +9,17 @@ local fixture = {
     { id = "progress", kind = "progress", fraction = 0.5, text = "Running" },
     { id = "table", kind = "table", columns = { "Name", "State" },
       rows = { { "build", "passed" } } },
+    { id = "row", kind = "row", children = {
+      { id = "row-label", kind = "label", text = "Tasks" },
+      { id = "row-badge", kind = "badge", text = "3" },
+    } },
   } },
 }
 local buffer = assert(view.present(fixture))
 local lines = vim.api.nvim_buf_get_lines(buffer, 0, -1, false)
 assert(vim.tbl_contains(lines, "  Running [========--------] 50%"))
 assert(vim.tbl_contains(lines, "  build | passed"))
+assert(vim.tbl_contains(lines, "  Tasks  [3]"), "row must render children horizontally")
 local marks = vim.api.nvim_buf_get_extmarks(
   buffer,
   vim.api.nvim_get_namespaces()["phenix-structured-ui"],
@@ -39,6 +44,7 @@ local function reject(mutator)
 end
 reject(function(d) d.root.children[1].id = "badge" end)
 reject(function(d) d.root.children[1].kind = "button" end)
+reject(function(d) d.root.children[5].children[2].kind = "progress" end)
 reject(function(d) d.root.children[1].text = string.char(27) .. "[2J" end)
 reject(function(d) d.root.children[3].fraction = 1.5 end)
 reject(function(d) d.root.children[4].rows[1] = { "only one cell" } end)
