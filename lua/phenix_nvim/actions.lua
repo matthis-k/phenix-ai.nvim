@@ -208,7 +208,7 @@ end
 
 local dispatch_next
 
-local function submit(surface, content, revision, from_queue)
+local function submit(surface, content, revision, queued_item)
   local document = surface.compose
   local session_id = surface.session_id
   local projection = runtime.session_state()
@@ -221,7 +221,7 @@ local function submit(surface, content, revision, from_queue)
     confirmed = false,
   }
   active_runs[surface] = pending
-  if not from_queue then
+  if queued_item == nil then
     submissions[document] = pending
   end
   runtime.prompt(session_id, content, function(_, error)
@@ -238,10 +238,16 @@ local function submit(surface, content, revision, from_queue)
     end
     if active_runs[surface] == pending then
       active_runs[surface] = nil
-      if error == nil or pending.confirmed then
+      if error ~= nil and not pending.confirmed then
+        if queued_item ~= nil then
+          table.insert(queue_for(surface), 1, queued_item)
+          render_queue(surface)
+        end
+        if #queue_for(surface) > 0 then
+          util.notify("Follow-up queue paused after rejected prompt; retry the draft", vim.log.levels.WARN)
+        end
+      else
         dispatch_next(surface)
-      elseif #queue_for(surface) > 0 then
-        util.notify("Follow-up queue paused after rejected prompt; retry the draft", vim.log.levels.WARN)
       end
     end
   end)
@@ -263,7 +269,7 @@ dispatch_next = function(surface)
   end
   table.remove(entries, 1)
   render_queue(surface)
-  submit(surface, next_item.content, nil, true)
+  submit(surface, next_item.content, nil, next_item)
 end
 
 function M.send(options)
