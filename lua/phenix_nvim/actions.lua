@@ -308,6 +308,14 @@ dispatch_next = function(surface)
   if active_runs[surface] ~= nil or paused_queues[surface] then
     return
   end
+  if surface.session_id == nil then
+    if #queue_for(surface) > 0 then
+      paused_queues[surface] = true
+      render_queue(surface)
+      util.notify("Send a draft to create a session before resuming queued follow-ups", vim.log.levels.WARN)
+    end
+    return
+  end
   local entries = queue_for(surface)
   local next_item = entries[1]
   if next_item == nil then
