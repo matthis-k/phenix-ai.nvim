@@ -572,6 +572,27 @@ end
 assert(vim.wait(1000, function() return #admitted_calls == 2 end, 10),
   "terminal journal state must unlock the next follow-up")
 assert(admitted_calls[2].content[1].text == "after receipt")
+local second_admit = admitted_calls[2]
+second_admit.callback(nil, {
+  message = "session admission-session already has a running execution",
+})
+assert(#admitted_calls == 2, "busy conflict must not spin through retries")
+session_projections["admission-session"].through_sequence = 4
+table.insert(session_projections["admission-session"].updates, {
+  sequence = 4,
+  update = {
+    kind = "Execution", execution_id = "remote-execution",
+    update = { kind = "State", state = { kind = "Completed" } },
+  },
+})
+for _, listener in ipairs(listeners) do
+  listener("sessions", { sessions = session_projections })
+end
+assert(vim.wait(1000, function() return #admitted_calls == 3 end, 10),
+  "terminal remote state must retry a busy follow-up")
+assert(admitted_calls[3].item_id == second_admit.item_id
+  and admitted_calls[3].revision == second_admit.revision,
+  "retry must preserve the original idempotency key")
 runtime.supports_prompt_admission = original_supports
 runtime.admit_prompt = original_admit
 sidebar.current_surface = original_current_surface
