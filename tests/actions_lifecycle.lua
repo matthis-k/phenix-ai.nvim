@@ -494,6 +494,88 @@ assert(unconfirmed_resume ~= nil, "the queued prompt must remain recoverable")
 queue_view.render = original_queue_render
 sidebar.current_surface = original_current_surface
 
+-- Early durable receipts are distinct from a turn's terminal state.
+-- A second follow-up may not dispatch until the prior execution settles.
+local admission_document = require("phenix_nvim.compose.model").new()
+local admission_surface = { compose = admission_document, session_id = "admission-session" }
+sidebar.current_surface = function() return admission_surface end
+local original_supports = runtime.supports_prompt_admission
+local original_admit = runtime.admit_prompt
+local admitted_calls = {}
+runtime.supports_prompt_admission = function() return true end
+runtime.admit_prompt = function(session_id, content, item_id, revision, callback)
+  admitted_calls[#admitted_calls + 1] = {
+    session_id = session_id, content = vim.deepcopy(content),
+    item_id = item_id, revision = revision, callback = callback,
+  }
+end
+prompt_text = "admission initial"
+admission_document.revision = 1
+actions.send()
+assert(#prompt_callbacks == 12, "initial nonqueued submission keeps legacy completion semantics")
+prompt_text = "admission queued"
+admission_document.revision = 2
+actions.send()
+assert(#admitted_calls == 0, "queued admission started before the current turn settled")
+session_projections["admission-session"] = {
+  through_sequence = 1,
+  updates = { {
+    sequence = 1,
+    update = {
+      kind = "Message",
+      message = {
+        role = { kind = "User" },
+        content = { { kind = "Text", text = "admission initial" } },
+      },
+    },
+  } },
+}
+for _, listener in ipairs(listeners) do
+  listener("sessions", { sessions = session_projections })
+end
+prompt_callbacks[12]({}, nil)
+assert(#admitted_calls == 1, "queued turn must use admission, not blocking prompt")
+local first_admit = admitted_calls[1]
+assert(first_admit.session_id == "admission-session")
+assert(type(first_admit.item_id) == "string" and first_admit.item_id ~= "")
+assert(first_admit.revision == 1)
+first_admit.callback({
+  session_id = "admission-session",
+  item_id = first_admit.item_id,
+  revision = first_admit.revision,
+  execution_id = "admitted-execution-1",
+  journal_sequence = 2,
+}, nil)
+prompt_text = "after receipt"
+admission_document.revision = 3
+actions.send()
+assert(#admitted_calls == 1, "admission receipt does not indicate turn completion")
+session_projections["admission-session"].through_sequence = 3
+table.insert(session_projections["admission-session"].updates, {
+  sequence = 2,
+  update = {
+    kind = "MessageAdmitted", item_id = first_admit.item_id, revision = 1,
+    execution_id = "admitted-execution-1",
+    message = { role = { kind = "User" }, content = { { kind = "Text", text = "admission queued" } } },
+  },
+})
+table.insert(session_projections["admission-session"].updates, {
+  sequence = 3,
+  update = {
+    kind = "Execution", execution_id = "admitted-execution-1",
+    update = { kind = "State", state = { kind = "Completed" } },
+  },
+})
+for _, listener in ipairs(listeners) do
+  listener("sessions", { sessions = session_projections })
+end
+assert(vim.wait(1000, function() return #admitted_calls == 2 end, 10),
+  "terminal journal state must unlock the next follow-up")
+assert(admitted_calls[2].content[1].text == "after receipt")
+runtime.supports_prompt_admission = original_supports
+runtime.admit_prompt = original_admit
+sidebar.current_surface = original_current_surface
+
 compose.serialize = original_serialize
 compose.clear = original_clear
 
