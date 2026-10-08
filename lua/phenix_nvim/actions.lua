@@ -18,6 +18,15 @@ local queued = setmetatable({}, { __mode = "k" })
 local queue_view = require("phenix_nvim.queue")
 local prompt_connection_state = runtime.status().connection
 local prompt_connection_generation = 0
+local queue_item_counter = 0
+local queue_instance_id = vim.fn.sha256(
+  tostring(vim.uv.hrtime()) .. ":" .. tostring(vim.fn.getpid()) .. ":" .. tostring({})
+):sub(1, 24)
+
+local function new_queue_identity()
+  queue_item_counter = queue_item_counter + 1
+  return queue_instance_id .. ":" .. tostring(queue_item_counter)
+end
 local queue_for, render_queue, dispatch_next
 
 local function target_surface(options)
@@ -421,8 +430,9 @@ function M.send(options)
     table.insert(queue_for(surface), {
       session_id = surface.session_id,
       content = vim.deepcopy(content),
+      item_id = new_queue_identity(),
       ready = true,
-      revision = 0,
+      revision = 1,
     })
     render_queue(surface)
     compose.clear(document)
