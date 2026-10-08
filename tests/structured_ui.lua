@@ -55,6 +55,23 @@ reject(function(d) d.root.children[3].fraction = 1.5 end)
 reject(function(d) d.root.children[4].rows[1] = { "only one cell" } end)
 reject(function(d) d.version = 2 end)
 reject(function(d) d.root.children[1].text = string.rep("x", 4097) end)
+reject(function(d)
+  local table_node = d.root.children[4]
+  local cols, cells = {}, {}
+  for _ = 1, 12 do
+    cols[#cols + 1] = "Column"
+    cells[#cells + 1] = string.rep("x", 1000)
+  end
+  table_node.columns = cols
+  table_node.rows = { cells }
+end)
+reject(function(d)
+  local rows = {}
+  for _ = 1, 100 do
+    rows[#rows + 1] = { string.rep("x", 1000), string.rep("y", 1000) }
+  end
+  d.root.children[4].rows = rows
+end)
 
 local other = vim.deepcopy(fixture)
 other.session_id = "session-b"
