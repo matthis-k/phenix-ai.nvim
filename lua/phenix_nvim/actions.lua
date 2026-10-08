@@ -114,19 +114,106 @@ function M.attach_image(source, options)
   return attach_image_file(source, false, options)
 end
 
+local function snapshot_revision(document)
+  local buffer = compose.ensure(document)
+  return tostring(document.revision) .. ":" .. tostring(vim.api.nvim_buf_get_changedtick(buffer))
+end
+
+local function message_kind(value)
+  if type(value) == "table" then
+    return string.lower(tostring(value.kind or ""))
+  end
+  return string.lower(tostring(value or ""))
+end
+
+local function request_text(content)
+  local parts = {}
+  for _, part in ipairs(content or {}) do
+    if part.kind == "text" then
+      table.insert(parts, part.text or "")
+    end
+  end
+  return table.concat(parts)
+end
+
+local function transcript_contains_submission(projection, pending)
+  if type(projection) ~= "table" or type(projection.updates) ~= "table" then
+    return false
+  end
+  for _, item in ipairs(projection.updates) do
+    if type(item.sequence) == "number" and item.sequence > pending.after_sequence then
+      local change = item.update or {}
+      if message_kind(change.kind) == "message" then
+        local message = change.message or {}
+        if message_kind(message.role) == "user" then
+          local text = {}
+          for _, part in ipairs(message.content or {}) do
+            if message_kind(part.kind) == "text" then
+              table.insert(text, part.text or "")
+            end
+          end
+          if table.concat(text) == request_text(pending.content) then
+            return true
+          end
+        end
+      end
+    end
+  end
+  return false
+end
+
+local function acknowledge(document, pending, projection)
+  if pending.confirmed or not transcript_contains_submission(projection, pending) then
+    return
+  end
+  pending.confirmed = true
+  if submissions[document] == pending then
+    submissions[document] = nil
+  end
+  -- Preserve text or attachments edited after send.
+  if snapshot_revision(document) == pending.revision then
+    compose.clear(document)
+  end
+end
+
+runtime.on_event(function(kind, value)
+  if kind ~= "sessions" then
+    return
+  end
+  local sessions = type(value) == "table" and value.sessions or {}
+  for document, pending in pairs(submissions) do
+    if pending.session_id ~= nil then
+      acknowledge(document, pending, sessions[pending.session_id])
+    end
+  end
+end)
+
 local function submit(surface, content, revision)
   local document = surface.compose
   local session_id = surface.session_id
+  local projection = runtime.session_state()
+  local snapshot = projection and projection.sessions and projection.sessions[session_id]
+  local pending = {
+    revision = revision,
+    session_id = session_id,
+    content = vim.deepcopy(content),
+    after_sequence = snapshot and (snapshot.through_sequence or 0) or 0,
+    confirmed = false,
+  }
+  submissions[document] = pending
   runtime.prompt(session_id, content, function(_, error)
-    if submissions[document] == revision then
+    local latest = runtime.session_state()
+    local current = latest and latest.sessions and latest.sessions[session_id]
+    acknowledge(document, pending, current)
+    if submissions[document] == pending then
       submissions[document] = nil
     end
     if error ~= nil then
       util.notify(vim.inspect(error), vim.log.levels.ERROR)
       return
     end
-    if document.revision == revision then
-      compose.clear(document)
+    if not pending.confirmed then
+      util.notify("Prompt finished without a matching transcript entry; draft preserved", vim.log.levels.WARN)
     end
   end)
 end
@@ -154,20 +241,26 @@ function M.send(options)
     util.notify("compose buffer is empty", vim.log.levels.WARN)
     return
   end
-  local revision = document.revision
-  if submissions[document] == revision then
+  local revision = snapshot_revision(document)
+  local previous = submissions[document]
+  if previous ~= nil and previous.revision == revision then
     util.notify("this compose revision is already being sent", vim.log.levels.WARN)
     return
   end
-  submissions[document] = revision
+  if previous ~= nil then
+    util.notify("Wait for the previous prompt to appear in the transcript before sending a follow-up", vim.log.levels.WARN)
+    return
+  end
 
   if surface.session_id ~= nil then
     submit(surface, content, revision)
     return
   end
+  local creating = { revision = revision, session_id = nil, confirmed = false }
+  submissions[document] = creating
   runtime.new_session(function(created, create_error)
     if create_error ~= nil then
-      if submissions[document] == revision then
+      if submissions[document] == creating then
         submissions[document] = nil
       end
       util.notify(vim.inspect(create_error), vim.log.levels.ERROR)
