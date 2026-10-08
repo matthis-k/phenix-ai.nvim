@@ -34,6 +34,16 @@ collision.root.children[1].text = "different text at the same revision"
 local conflicted, conflict_error = view.present(collision)
 assert(conflicted == nil and conflict_error:find("conflicting", 1, true),
   "equal revisions with different content must reject without overwriting")
+local same_render = vim.deepcopy(fixture)
+same_render.root.children[1].id = "renamed-but-visually-identical"
+local structural, structural_error = view.present(same_render)
+assert(structural == nil and structural_error:find("conflicting", 1, true),
+  "identical rendering must not allow different node identities at the same revision")
+local exact_value = vim.deepcopy(fixture)
+exact_value.root.children[3].fraction = 0.501
+local value_conflict, value_error = view.present(exact_value)
+assert(value_conflict == nil and value_error:find("conflicting", 1, true),
+  "visually rounded progress must not hide a same-revision state change")
 local changed = vim.deepcopy(fixture)
 changed.revision = 2
 changed.root.children[2].text = "Completed"
