@@ -15,6 +15,14 @@ local buffer = assert(view.present(fixture))
 local lines = vim.api.nvim_buf_get_lines(buffer, 0, -1, false)
 assert(vim.tbl_contains(lines, "  Running [========--------] 50%"))
 assert(vim.tbl_contains(lines, "  build | passed"))
+local marks = vim.api.nvim_buf_get_extmarks(
+  buffer,
+  vim.api.nvim_get_namespaces()["phenix-structured-ui"],
+  0,
+  -1,
+  {}
+)
+assert(#marks == 2, "badge and progress must receive theme-aware highlights")
 assert(view.present(fixture) == buffer, "same revision must be idempotent")
 local changed = vim.deepcopy(fixture)
 changed.revision = 2
