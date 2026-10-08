@@ -51,11 +51,7 @@ function M.project(document)
         end
       end
     end
-    local visit
-    visit = function(node, depth)
-      if type(node) ~= "table" or depth > MAX_DEPTH then
-        error("invalid node or maximum nesting exceeded")
-      end
+    local function accept_id(node)
       count = count + 1
       if count > MAX_NODES then
         error("document exceeds node limit")
@@ -65,6 +61,13 @@ function M.project(document)
         error("duplicate node id: " .. id)
       end
       ids[id] = true
+    end
+    local visit
+    visit = function(node, depth)
+      if type(node) ~= "table" or depth > MAX_DEPTH then
+        error("invalid node or maximum nesting exceeded")
+      end
+      accept_id(node)
       local kind = node.kind
       if not leaf[kind] and not layout[kind] then
         error("unsupported display node: " .. tostring(kind))
@@ -83,6 +86,26 @@ function M.project(document)
         add(prefix .. valid_text(node.text, "progress label", true) .. " ["
           .. string.rep("=", filled) .. string.rep("-", 16 - filled)
           .. "] " .. tostring(math.floor(fraction * 100 + 0.5)) .. "%", "progress")
+      elseif kind == "row" then
+        if type(node.children) ~= "table" or #node.children == 0 then
+          error("row requires children")
+        end
+        local cells = {}
+        for _, child in ipairs(node.children) do
+          if type(child) ~= "table" or (child.kind ~= "text" and child.kind ~= "label" and child.kind ~= "badge") then
+            error("row children must be inline text, labels or badges")
+          end
+          if depth + 1 > MAX_DEPTH then
+            error("row exceeds nesting limit")
+          end
+          accept_id(child)
+          local value = valid_text(child.text, "row cell")
+          if value:find("\n", 1, true) then
+            error("row cells must be single-line")
+          end
+          cells[#cells + 1] = child.kind == "badge" and ("[" .. value .. "]") or value
+        end
+        add(prefix .. table.concat(cells, "  "))
       elseif kind == "table" then
         if type(node.columns) ~= "table" or #node.columns == 0 or #node.columns > 12
           or type(node.rows) ~= "table" or #node.rows > 100 then
@@ -111,7 +134,7 @@ function M.project(document)
           error("layout node requires children")
         end
         for _, child in ipairs(node.children) do
-          visit(child, depth + (kind == "row" and 0 or 1))
+          visit(child, depth + 1)
         end
       end
     end
