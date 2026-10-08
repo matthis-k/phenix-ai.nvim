@@ -286,14 +286,16 @@ local function submit(surface, content, revision, queued_item)
     end
     if active_runs[surface] == pending then
       active_runs[surface] = nil
-      if error ~= nil and not pending.confirmed then
+      if not pending.confirmed then
+        -- A completed request is not proof of journal admission. Preserve
+        -- queued follow-ups until admission is confirmed or retry is explicit.
         if queued_item ~= nil then
           table.insert(queue_for(surface), 1, queued_item)
         end
         if #queue_for(surface) > 0 then
           paused_queues[surface] = true
           render_queue(surface)
-          util.notify("Follow-up queue paused after rejected prompt; press r in the queue to retry", vim.log.levels.WARN)
+          util.notify("Follow-up queue paused: prior prompt was not confirmed in the transcript; press r to resume", vim.log.levels.WARN)
         else
           paused_queues[surface] = nil
         end
