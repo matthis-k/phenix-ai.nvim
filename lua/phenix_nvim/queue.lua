@@ -42,7 +42,7 @@ local function close(view)
   view.buffer = nil
 end
 
-function M.render(surface, items, on_remove)
+function M.render(surface, items, on_remove, on_retry)
   local view = views[surface]
   if view == nil then
     view = {}
@@ -50,6 +50,7 @@ function M.render(surface, items, on_remove)
   end
   view.items = items
   view.on_remove = on_remove
+  view.on_retry = on_retry
   if #items == 0 then
     close(view)
     return
@@ -79,6 +80,11 @@ function M.render(surface, items, on_remove)
         view.on_remove(index)
       end
     end, { buffer = view.buffer, silent = true, desc = "Remove queued follow-up" })
+    vim.keymap.set("n", "r", function()
+      if view.on_retry ~= nil then
+        view.on_retry()
+      end
+    end, { buffer = view.buffer, silent = true, desc = "Resume queued follow-ups" })
   end
   vim.bo[view.buffer].modifiable = true
   vim.api.nvim_buf_set_lines(view.buffer, 0, -1, false, lines)
