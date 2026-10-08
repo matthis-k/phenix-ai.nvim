@@ -79,7 +79,7 @@ local function lines_for(view, node)
     return lines
   end
   if node.kind == "thinking" then
-    local label = node.final and "Thinking" or "Thinking · running"
+    local label = "Thinking"
     if not disclosure.is_open(view.disclosure, node.id) then
       return { label .. " · <CR> to expand", "" }
     end
