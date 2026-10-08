@@ -46,8 +46,7 @@ local function replace_text(content, text)
     end
   end
   local cursor = 1
-  for first, last, id in text:gmatch("()⟦attachment%-(%d+)⟧()") do
-    -- Iterator captures the next byte after the marker as its third capture.
+  for first, id, after in text:gmatch("()⟦attachment%-(%d+)⟧()") do
     local index = tonumber(id)
     if attachments[index] == nil or seen[index] then
       return nil, "unknown or duplicated queued attachment marker"
@@ -57,7 +56,7 @@ local function replace_text(content, text)
     end
     result[#result + 1] = vim.deepcopy(attachments[index])
     seen[index] = true
-    cursor = last
+    cursor = after
   end
   for index in pairs(attachments) do
     if not seen[index] then
