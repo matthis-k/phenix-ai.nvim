@@ -27,7 +27,29 @@ local function nonempty(value, field)
 end
 
 local function integer(value)
-  return type(value) == "number" and value >= 0 and value == math.floor(value)
+  return type(value) == "number" and value >= 0 and value < math.huge and value == math.floor(value)
+end
+
+-- Lua's # and ipairs may silently discard entries in sparse arrays.
+local function array_length(value, field, limit, allow_empty)
+  if type(value) ~= "table" then
+    error(field .. " must be an array")
+  end
+  local length = #value
+  if length > limit or (not allow_empty and length == 0) then
+    error(field .. " has invalid dimensions")
+  end
+  local count = 0
+  for key in pairs(value) do
+    if not integer(key) or key == 0 or key > length then
+      error(field .. " must be a dense array")
+    end
+    count = count + 1
+  end
+  if count ~= length then
+    error(field .. " must be a dense array")
+  end
+  return length
 end
 
 function M.project(document)
@@ -109,9 +131,7 @@ function M.project(document)
           .. string.rep("=", filled) .. string.rep("-", 16 - filled)
           .. "] " .. tostring(math.floor(fraction * 100 + 0.5)) .. "%", "progress")
       elseif kind == "row" then
-        if type(node.children) ~= "table" or #node.children == 0 then
-          error("row requires children")
-        end
+        array_length(node.children, "row children", MAX_NODES, false)
         local cells = {}
         for _, child in ipairs(node.children) do
           if type(child) ~= "table" or (child.kind ~= "text" and child.kind ~= "label" and child.kind ~= "badge") then
@@ -130,10 +150,8 @@ function M.project(document)
         end
         add(prefix .. table.concat(cells, "  "))
       elseif kind == "table" then
-        if type(node.columns) ~= "table" or #node.columns == 0 or #node.columns > 12
-          or type(node.rows) ~= "table" or #node.rows > 100 then
-          error("invalid table dimensions")
-        end
+        array_length(node.columns, "table columns", 12, false)
+        array_length(node.rows, "table rows", 100, true)
         remember(#node.columns)
         remember(#node.rows)
         local columns = {}
@@ -144,7 +162,7 @@ function M.project(document)
         end
         add(prefix .. table.concat(columns, " | "))
         for _, row in ipairs(node.rows) do
-          if type(row) ~= "table" or #row ~= #columns then
+          if array_length(row, "table row", #columns, false) ~= #columns then
             error("table row width mismatch")
           end
           local cells = {}
@@ -161,9 +179,7 @@ function M.project(document)
           remember(title)
           add(prefix .. title)
         end
-        if type(node.children) ~= "table" or #node.children == 0 then
-          error("layout node requires children")
-        end
+        array_length(node.children, "layout children", MAX_NODES, false)
         for _, child in ipairs(node.children) do
           visit(child, depth + 1)
         end
