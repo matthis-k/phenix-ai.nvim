@@ -61,6 +61,27 @@ local function is_focused(entry)
   return valid(entry.win) and vim.api.nvim_get_current_win() == entry.win
 end
 
+function M.set_claimed(surface, item, claimed)
+  local view = views[surface]
+  local entry = view and view.by_item[item] or nil
+  if entry and vim.api.nvim_buf_is_valid(entry.buf) then
+    -- While claimed, the exact revision cannot change under the runtime.
+    vim.bo[entry.buf].modifiable = not claimed
+    vim.bo[entry.buf].readonly = claimed
+  end
+  if view then M.relayout(surface) end
+end
+
+function M.buffers(surface)
+  local view = views[surface]
+  local result = {}
+  for _, item in ipairs(view and view.entries or {}) do
+    local entry = view.by_item[item]
+    result[#result + 1] = entry and entry.buf or nil
+  end
+  return result
+end
+
 function M.can_dispatch(surface, item)
   local view = views[surface]
   local entry = view and view.by_item[item] or nil
