@@ -64,6 +64,18 @@ reject(function(d) d.root.children[1].text = string.char(27) .. "[2J" end)
 reject(function(d) d.root.children[3].fraction = 1.5 end)
 reject(function(d) d.root.children[4].rows[1] = { "only one cell" } end)
 reject(function(d) d.version = 2 end)
+reject(function(d) d.revision = math.huge end)
+reject(function(d) d.revision = 0 / 0 end)
+reject(function(d)
+  d.root.children = { [1] = d.root.children[1], [3] = d.root.children[3] }
+end)
+reject(function(d)
+  local row = d.root.children[4].rows[1]
+  d.root.children[4].rows[1] = { [1] = row[1], [3] = row[2] }
+end)
+reject(function(d)
+  d.root.children[4].columns = { [1] = "Name", [3] = "State" }
+end)
 reject(function(d) d.root.children[1].text = string.rep("x", 4097) end)
 reject(function(d)
   local table_node = d.root.children[4]
