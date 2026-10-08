@@ -4,6 +4,7 @@ local active = {}
 local connection = "ready"
 local auth_calls, selection_calls, resume_calls = 0, 0, 0
 local prompt_callbacks = {}
+local session_projections = {}
 local runtime = {
   on_event = function(listener) listeners[#listeners + 1] = listener end,
   active_session_object = function() return active end,
@@ -13,7 +14,7 @@ local runtime = {
     return { connection = connection, session_id = "session-send" }
   end,
   session_state = function()
-    return { sessions = {} }
+    return { sessions = session_projections }
   end,
   refresh_session_state = function() end,
   prompt = function(_, _, callback)
@@ -245,14 +246,16 @@ status("ready")
 picked(items[1])
 assert(resume_calls == 1)
 
--- Repeating send without editing must not dispatch the same compose revision twice.
+-- A sent draft remains until its user message is in the transcript.
+-- The model's final response does not control draft clearing.
 local compose = require("phenix_nvim.compose.buffer")
 local state = require("phenix_nvim.state")
 local original_serialize = compose.serialize
 local original_clear = compose.clear
 local clear_calls = 0
+local prompt_text = "question"
 compose.serialize = function()
-  return { { kind = "text", text = "question" } }
+  return { { kind = "text", text = prompt_text } }
 end
 compose.clear = function()
   clear_calls = clear_calls + 1
@@ -260,20 +263,57 @@ end
 state.compose.revision = 100
 actions.send()
 actions.send()
-assert(#prompt_callbacks == 1, "same compose revision was submitted more than once")
+assert(#prompt_callbacks == 1, "same compose revision was submitted twice")
+assert(clear_calls == 0, "draft cleared before the transcript accepted it")
+
+session_projections["session-send"] = {
+  session = { session_id = "session-send" },
+  through_sequence = 1,
+  updates = {
+    {
+      sequence = 1,
+      update = {
+        kind = "Message",
+        message = {
+          role = { kind = "User" },
+          content = { { kind = "Text", text = "question" } },
+        },
+      },
+    },
+  },
+}
+for _, listener in ipairs(listeners) do
+  listener("sessions", { sessions = session_projections })
+end
+assert(clear_calls == 1, "accepted user prompt must clear before final response")
 prompt_callbacks[1]({}, nil)
-assert(clear_calls == 1)
+assert(clear_calls == 1, "final response must not clear an already accepted draft")
+
+-- New sends after admission are independent, even if an older execution has not
+-- reported completion yet.
+prompt_text = "follow-up"
 actions.send()
-assert(#prompt_callbacks == 2, "settled compose revision should be sendable again")
-prompt_callbacks[2](nil, { kind = "failed", message = "fixture model failure" })
-assert(clear_calls == 1, "failed prompt must keep the compose document intact")
+assert(#prompt_callbacks == 2, "accepted prompt must free the composer")
+prompt_callbacks[2](nil, { kind = "failed", message = "fixture failure" })
+assert(clear_calls == 1, "failed prompt without admission must preserve the draft")
 actions.send()
-assert(#prompt_callbacks == 3, "failed compose revision must be immediately retryable")
+assert(#prompt_callbacks == 3, "failed draft must be retryable")
+session_projections["session-send"].through_sequence = 2
+table.insert(session_projections["session-send"].updates, {
+  sequence = 2,
+  update = {
+    kind = "Message",
+    message = {
+      role = { kind = "User" },
+      content = { { kind = "Text", text = "follow-up" } },
+    },
+  },
+})
+for _, listener in ipairs(listeners) do
+  listener("sessions", { sessions = session_projections })
+end
+assert(clear_calls == 2, "retry accepted in transcript must clear")
 prompt_callbacks[3]({}, nil)
-assert(clear_calls == 2)
-state.compose.revision = 101
-actions.send()
-assert(#prompt_callbacks == 4, "edited compose revision must remain independently sendable")
 compose.serialize = original_serialize
 compose.clear = original_clear
 
