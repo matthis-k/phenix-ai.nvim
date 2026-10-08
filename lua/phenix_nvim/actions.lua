@@ -221,15 +221,13 @@ runtime.on_event(function(kind, value)
     end
   end
   for surface, items in pairs(queued) do
-    for _, item in ipairs(vim.deepcopy(items)) do
-      -- Resolve by the actual object, not a deepcopy: claims are identity-bound.
-      for _, actual in ipairs(items) do
-        local pending = actual.pending
-        if pending and pending.session_id ~= nil and not pending.confirmed then
-          confirm_queued(surface, pending, sessions[pending.session_id])
-        end
+    -- Snapshot the table of references because admission removes items.
+    local candidates = vim.list_extend({}, items)
+    for _, item in ipairs(candidates) do
+      local pending = item.pending
+      if pending and pending.session_id ~= nil and not pending.confirmed then
+        confirm_queued(surface, pending, sessions[pending.session_id])
       end
-      break
     end
   end
 end)
