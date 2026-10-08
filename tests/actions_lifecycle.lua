@@ -286,8 +286,6 @@ for _, listener in ipairs(listeners) do
   listener("sessions", { sessions = session_projections })
 end
 assert(clear_calls == 1, "accepted user prompt must clear before final response")
-prompt_callbacks[1]({}, nil)
-assert(clear_calls == 1, "final response must not clear an already accepted draft")
 
 -- A follow-up is queued in the per-chat pane while the earlier turn runs.
 prompt_text = "follow-up"
@@ -295,6 +293,7 @@ actions.send()
 assert(#prompt_callbacks == 1, "concurrent follow-up must stay in the local queue")
 assert(clear_calls == 2, "queued draft must clear after entering the visible queue")
 prompt_callbacks[1]({}, nil)
+assert(clear_calls == 2, "final response must not clear an already accepted draft")
 assert(#prompt_callbacks == 2, "settling the previous execution must dispatch queued follow-up")
 session_projections["session-send"].through_sequence = 2
 table.insert(session_projections["session-send"].updates, {
@@ -337,6 +336,51 @@ for _, listener in ipairs(listeners) do
 end
 assert(clear_calls == 3, "retried prompt accepted in transcript must clear")
 prompt_callbacks[4]({}, nil)
+
+-- The user can queue a changed draft before the first prompt appears in the
+-- session journal. Admission of the first prompt must preserve that later edit.
+prompt_text = "before-admission"
+state.compose.revision = 200
+actions.send()
+assert(#prompt_callbacks == 5)
+prompt_text = "before-admission-follow-up"
+state.compose.revision = 201
+actions.send()
+assert(#prompt_callbacks == 5, "pre-admission follow-up must queue, not dispatch concurrently")
+assert(clear_calls == 4, "pre-admission queued draft must leave the composer")
+
+session_projections["session-send"].through_sequence = 4
+table.insert(session_projections["session-send"].updates, {
+  sequence = 4,
+  update = {
+    kind = "Message",
+    message = {
+      role = { kind = "User" },
+      content = { { kind = "Text", text = "before-admission" } },
+    },
+  },
+})
+for _, listener in ipairs(listeners) do
+  listener("sessions", { sessions = session_projections })
+end
+assert(clear_calls == 4, "late admission must not clear a newer compose revision")
+prompt_callbacks[5]({}, nil)
+assert(#prompt_callbacks == 6, "settling admitted prompt must dispatch its queued follow-up")
+session_projections["session-send"].through_sequence = 5
+table.insert(session_projections["session-send"].updates, {
+  sequence = 5,
+  update = {
+    kind = "Message",
+    message = {
+      role = { kind = "User" },
+      content = { { kind = "Text", text = "before-admission-follow-up" } },
+    },
+  },
+})
+for _, listener in ipairs(listeners) do
+  listener("sessions", { sessions = session_projections })
+end
+prompt_callbacks[6]({}, nil)
 
 compose.serialize = original_serialize
 compose.clear = original_clear

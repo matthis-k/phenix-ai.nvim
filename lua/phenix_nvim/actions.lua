@@ -320,11 +320,6 @@ function M.send(options)
     util.notify("this compose revision is already being sent", vim.log.levels.WARN)
     return
   end
-  if previous ~= nil then
-    util.notify("Wait for the previous prompt to appear in the transcript before sending a follow-up", vim.log.levels.WARN)
-    return
-  end
-
   if active_runs[surface] ~= nil or paused_queues[surface] then
     table.insert(queue_for(surface), {
       session_id = surface.session_id,
@@ -332,6 +327,11 @@ function M.send(options)
     })
     render_queue(surface)
     compose.clear(document)
+    return
+  end
+  if previous ~= nil then
+    -- A session may still be opening. Preserve the new draft until it is bound.
+    util.notify("Wait for the previous prompt to reach its session before sending a follow-up", vim.log.levels.WARN)
     return
   end
 
