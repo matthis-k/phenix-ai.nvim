@@ -16,9 +16,6 @@ local M = {
 function M.setup(options)
   local resolved = config.setup(options)
   runtime.configure(resolved)
-  if resolved.backend ~= "p1" then
-    tools.enable_defaults()
-  end
   compose.ensure(state.compose)
   transcript.start()
   if resolved.auto_connect then
