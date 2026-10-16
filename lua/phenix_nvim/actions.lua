@@ -236,6 +236,24 @@ function M.close_session()
   end)
 end
 
+function M.load_session(session_id)
+  if type(session_id) ~= "string" or session_id == "" then
+    util.notify("Phenix session ID must not be empty", vim.log.levels.ERROR)
+    return
+  end
+  local surface = target_surface()
+  sessions.resume(session_id, function(result, err)
+    if err then
+      util.notify(err.message or vim.inspect(err), vim.log.levels.ERROR)
+      return
+    end
+    if surface then
+      sidebar.bind_session(session_id, surface)
+    end
+    return result
+  end)
+end
+
 function M.choose_session()
   local surface = target_surface()
   sessions.choose(function(value, error)
@@ -712,6 +730,18 @@ local function continue_provider_selection(provider, provider_name, generation)
 end
 
 function M.choose_selection()
+  if runtime.p1_active() then
+    runtime.choose_model(function(selection, error)
+      if error then
+        if error.kind ~= "cancelled" then
+          util.notify(error.message or vim.inspect(error), vim.log.levels.WARN)
+        end
+      elseif selection then
+        util.notify("Phenix model: " .. tostring(selection.selected), vim.log.levels.INFO)
+      end
+    end)
+    return
+  end
   selection_generation = selection_generation + 1
   local generation = selection_generation
   runtime.list_selections(function(result, error)

@@ -294,6 +294,21 @@ ask = function(form, label, callback)
   end
 end
 
+-- Render exactly the choices supplied by Phenix's ACP permission request.
+-- A missing or dismissed dialog returns cancellation, not authorization.
+function M.acp_permission(event, callback)
+  assert(type(event) == "table" and type(callback) == "function")
+  local options = event.options or {}
+  if #options == 0 then callback(nil); return end
+  local title = (event.tool_call and event.tool_call.title) or "Requested operation"
+  select(options, {
+    prompt = "Phenix permission · " .. tostring(title),
+    format_item = function(item) return item.name or item.optionId end,
+  }, function(selected)
+    callback(selected and selected.optionId or nil)
+  end)
+end
+
 function M.permission(request, reply)
   select({ "Allow once", "Deny" }, {
     prompt = "Phenix permission · " .. (request.description or "Allow this action?"),

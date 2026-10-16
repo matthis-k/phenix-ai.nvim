@@ -9,6 +9,7 @@ local runtime = {
   active_session_object = function() return active end,
   active_session = function() return "session-send" end,
   activate_session = function() end,
+  p1_active = function() return false end,
   status = function()
     return { connection = connection, session_id = "session-send" }
   end,

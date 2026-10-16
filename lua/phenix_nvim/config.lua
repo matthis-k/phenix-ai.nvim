@@ -1,6 +1,7 @@
 local M = {}
 
 local defaults = {
+  backend = "legacy",
   command = "phenix",
   args = { "--mode", "acp" },
   env = {},
@@ -27,6 +28,22 @@ end
 
 function M.setup(options)
   local resolved = vim.tbl_deep_extend("force", vim.deepcopy(defaults), options or {})
+  if resolved.backend ~= "legacy" and resolved.backend ~= "p1" then
+    error("phenix-ai.nvim backend must be legacy or p1")
+  end
+  if resolved.backend == "p1" then
+    local overrides = options or {}
+    -- P1's process composition and storage are configured inside Phenix.
+    for _, key in ipairs({ "env", "state_directory", "log_directory", "log_depth" }) do
+      if overrides[key] ~= nil then
+        error("phenix-ai.nvim " .. key .. " configures Phenix; set it in the runtime")
+      end
+    end
+    if overrides.command == nil then
+      resolved.command = defaults.backend == "p1" and defaults.command or "phenix-basic-acp"
+    end
+    if overrides.args == nil then resolved.args = {} end
+  end
   for _, key in ipairs({ "connect_timeout_ms", "request_timeout_ms", "prompt_timeout_ms" }) do
     if options ~= nil and options[key] ~= nil then
       error("phenix-ai.nvim " .. key .. " is not supported; configure execution timeouts and limits in Phenix")

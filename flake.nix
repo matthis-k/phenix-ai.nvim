@@ -28,6 +28,8 @@
           source = pkgs.lib.cleanSource ./.;
           luaBinding = phenix-ai.packages.${system}.phenix-binding-lua;
           phenixProduct = phenix-ai.packages.${system}.phenix;
+          basicAcp = phenix-ai.packages.${system}.phenix-basic-acp;
+          realAcp = phenix-ai.packages.${system}.phenix-basic-http-acp;
           plugin = pkgs.vimUtils.buildVimPlugin {
             pname = "phenix-ai.nvim";
             version = "0";
@@ -40,6 +42,40 @@
               mkdir -p "$out/share/phenix-ai.nvim"
               printf '%s\n' ${pkgs.lib.escapeShellArg (phenix-ai.rev or "dirty")} \
                 > "$out/share/phenix-ai.nvim/phenix-ai-revision"
+            '';
+          };
+          # Package each P1 composition with the same Neovim client.
+          # No native oldmain Lua module is installed in either product.
+          mkP1Plugin = pname: acpPackage: executable: pkgs.vimUtils.buildVimPlugin {
+            inherit pname;
+            version = "0";
+            src = source;
+            postInstall = ''
+              substituteInPlace "$out/lua/phenix_nvim/config.lua" \
+                --replace-fail 'backend = "legacy"' 'backend = "p1"' \
+                --replace-fail 'command = "phenix"' \
+                'command = "${acpPackage}/bin/${executable}"'
+              mkdir -p "$out/share/phenix-ai.nvim"
+              install -Dm644 ${source}/tests/p1_live_prompt.lua "$out/share/phenix-ai.nvim/p1_live_prompt.lua"
+              printf '%s\n' ${pkgs.lib.escapeShellArg (phenix-ai.rev or "dirty")} \
+                > "$out/share/phenix-ai.nvim/phenix-ai-revision"
+            '';
+          };
+          p1Plugin = mkP1Plugin "phenix-ai.nvim-basic" basicAcp "phenix-basic-acp";
+          realPlugin = mkP1Plugin "phenix-ai.nvim-live" realAcp "phenix-basic-http-acp";
+          realPrompt = pkgs.writeShellApplication {
+            name = "phenix-p1-live-prompt";
+            runtimeInputs = [ pkgs.neovim ];
+            text = ''
+              if [ "$#" -eq 0 ]; then
+                echo "Usage: phenix-p1-live-prompt PROMPT..." >&2
+                echo "Set OPENAI_API_KEY or PHENIX_MODEL_HTTP_API_KEY in the environment." >&2
+                exit 2
+              fi
+              export PHENIX_P1_PROMPT="$*"
+              exec nvim --headless -u NONE \
+                --cmd ${pkgs.lib.escapeShellArg "set rtp^=${realPlugin}"} \
+                -l ${realPlugin}/share/phenix-ai.nvim/p1_live_prompt.lua
             '';
           };
           providerAcceptance = pkgs.writeShellApplication {
@@ -78,6 +114,11 @@
           default = plugin;
           phenix-ai-nvim = plugin;
           phenix-ai-nvim-provider-acceptance = providerAcceptance;
+        } // pkgs.lib.optionalAttrs (builtins.hasAttr system phenix-ai.packages && builtins.hasAttr "phenix-basic-acp" phenix-ai.packages.${system}) {
+          phenix-ai-nvim-basic = p1Plugin;
+        } // pkgs.lib.optionalAttrs (builtins.hasAttr system phenix-ai.packages && builtins.hasAttr "phenix-basic-http-acp" phenix-ai.packages.${system}) {
+          phenix-ai-nvim-live = realPlugin;
+          phenix-ai-nvim-live-prompt = realPrompt;
         }
       );
 
@@ -89,6 +130,7 @@
           phenixProduct = phenix-ai.packages.${system}.phenix;
           phenixAcpFixture = phenix-ai.packages.${system}.phenix-acp-fixture;
           plugin = self.packages.${system}.phenix-ai-nvim;
+          p1Plugin = self.packages.${system}.phenix-ai-nvim-basic;
         in
         {
           client =
@@ -107,7 +149,7 @@
                 export XDG_CONFIG_HOME="$TMPDIR/config"
                 mkdir -p "$HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME" "$XDG_CONFIG_HOME"
 
-                test "$(grep -R -l 'require(\"phenix\")' ${source}/lua | wc -l)" -eq 1
+                test "$(grep -F -l 'pcall(require, "phenix")' ${source}/lua/phenix_nvim/runtime.lua | wc -l)" -eq 1
                 if grep -R '_phenix/' ${source}/lua; then
                   echo "frontend Lua must not contain raw Phenix wire method ids" >&2
                   exit 1
@@ -184,6 +226,42 @@
 
                 touch "$out"
               '';
+        } // pkgs.lib.optionalAttrs (builtins.hasAttr system phenix-ai.packages && builtins.hasAttr "phenix-basic-acp" phenix-ai.packages.${system}) {
+          # The oldmain flake lock remains valid while the Basic-only client
+          # is exercised against an explicit M1 override in the P1 workflow.
+          p1-product = pkgs.runCommand "phenix-ai-nvim-p1-product-check"
+            {
+              nativeBuildInputs = [ pkgs.neovim ];
+            }
+            ''
+              set -euo pipefail
+              export HOME="$TMPDIR/home"
+              export XDG_STATE_HOME="$TMPDIR/state"
+              export XDG_CACHE_HOME="$TMPDIR/cache"
+              export XDG_CONFIG_HOME="$TMPDIR/config"
+              mkdir -p "$HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME" "$XDG_CONFIG_HOME"
+              export PHENIX_BASIC_SQLITE_PATH="$TMPDIR/basic.sqlite"
+              export PHENIX_P1_BIN="${phenix-ai.packages.${system}.phenix-basic-acp}/bin/phenix-basic-acp"
+              test -x "$PHENIX_P1_BIN"
+              test ! -e "${p1Plugin}/lua/phenix.so"
+              grep -F 'backend = "p1"' "${p1Plugin}/lua/phenix_nvim/config.lua"
+              test "$(cat ${p1Plugin}/share/phenix-ai.nvim/phenix-ai-revision)" = \
+                ${pkgs.lib.escapeShellArg (phenix-ai.rev or "dirty")}
+              nvim --headless -u NONE \
+                --cmd ${pkgs.lib.escapeShellArg "set rtp^=${p1Plugin}"} \
+                -l ${source}/tests/p1_package_default.lua
+              nvim --headless -u NONE \
+                --cmd ${pkgs.lib.escapeShellArg "set rtp^=${p1Plugin}"} \
+                -l ${source}/tests/p1_client_product.lua
+              nvim --headless -u NONE \
+                --cmd ${pkgs.lib.escapeShellArg "set rtp^=${p1Plugin}"} \
+                -l ${source}/tests/p1_ui_product.lua
+              nvim --headless -u NONE \
+                --cmd ${pkgs.lib.escapeShellArg "set rtp^=${p1Plugin}"} \
+                -l ${source}/tests/p1_startup_recovery.lua
+              test -s "$PHENIX_BASIC_SQLITE_PATH"
+              touch "$out"
+            '';
         }
       );
     };
