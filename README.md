@@ -4,9 +4,41 @@ Canonical Neovim client for Phenix AI.
 
 This repository owns the Neovim-specific Lua client, UI, interaction model, product acceptance, and Nix package. It depends on `matthis-k/phenix-ai` for the frontend-neutral runtime, host-neutral Lua binding, and ACP/default-Harness executable.
 
-## Roadmap
+## P1 backend preview
 
-[Neovim P1-to-P2 client roadmap](spec/p1-p2-client-roadmap.md) tracks the Basic cutover, standalone Lua SDK, client feature gates, A2UI rendering and Advanced UI integration. The runtime and existing Neovim integration contracts remain authoritative.
+The existing Neovim windows, compose buffers, transcript renderer and keymaps can
+use the P1 runtime without the old native Lua module:
+
+```lua
+require("phenix_nvim").setup({
+  backend = "p1",
+  command = "phenix-basic-acp",
+  auto_connect = true,
+})
+```
+
+The command must resolve to the packaged **P1 ACP** executable. Neovim
+configures only the client connection. The Phenix composition owns its model,
+tools, permissions, storage and execution policy. Do not set `env`,
+`state_directory`, `log_directory` or `log_depth` in P1 mode.
+
+P1 mode currently supports creating and resuming sessions by ID with
+`:Phenix session load <id>`, text and
+resource-link prompts, cancellation, tool events and assistant streaming in
+the same transcript UI. `:Phenix select` displays the model binding reported
+by Phenix, without allowing an unsupported change. `:Phenix session select`
+lists only sessions created or loaded by this process; ACP v1 does not yet
+offer global persistent session enumeration. Model switching, authentication,
+routing changes, session close, images, client-side tool registration, logs
+and permission decisions still require Phenix runtime operations.
+Those features remain in the existing legacy UI but **do not silently
+fall back to legacy when using P1**.
+
+The Lua bridge is `require("phenix_client")`. It exposes operations,
+subscriptions and runtime-owned model catalogs, independent of Neovim's
+presentation. The P1 renderer adapter is
+`require("phenix_client.transcript")`. See `spec/p1-client-sdk.md`
+and the companion runtime PR for details.
 
 ## Nix
 
@@ -17,6 +49,67 @@ This repository owns the Neovim-specific Lua client, UI, interaction model, prod
 `phenix-nvim` consumes this package. Phenix AI core does not depend on this repository.
 
 The flake follows `github:matthis-k/phenix-ai`, and `flake.lock` pins the exact Phenix AI and transitive Nix dependency graph used by the standalone client. Normal validation does not update that lock implicitly.
+
+## Opt-in real-model P1 test
+
+With the HTTP preset from [phenix-ai PR #933](https://github.com/matthis-k/phenix-ai/pull/933),
+the `phenix-ai-nvim-live` Nix output installs the normal Neovim UI but
+launches `phenix-basic-http-acp` through the same P1 Lua SDK. It contains
+no oldmain native Lua module or alternative protocol. The scripted
+`phenix-ai-nvim-basic` output remains available for deterministic testing.
+
+Set a real credential **in the shell environment**, then launch a prompt:
+
+```sh
+export OPENAI_API_KEY="..."  # or PHENIX_MODEL_HTTP_API_KEY
+export PHENIX_MODEL_HTTP_MODEL="gpt-4.1-mini"
+# Until the default lock is switched to M1, select the tested P1 runtime:
+nix run \
+  --override-input phenix-ai github:matthis-k/phenix-ai/8ad88aec18c34034beb53afc385af370771488b3 \
+  .#phenix-ai-nvim-live-prompt -- "Describe the tools you can call"
+```
+
+The prompt runner puts the assistant response on stdout and session/model
+diagnostics on stderr. The unmodified default lock remains on the legacy
+runtime, so the live output requires the explicit override until cutover.
+
+For interactive use, install `phenix-ai-nvim-live` in Neovim, then run
+`:Phenix new`, write the prompt into the existing compose window and submit
+with the ordinary UI. `:Phenix capabilities` shows the ACP-negotiated
+session operations, available management operations, and selected Model
+identity. It is an observation, not an authorization grant.
+
+The HTTP endpoint defaults to OpenAI's compatible chat-completions URL;
+use `PHENIX_MODEL_HTTP_ENDPOINT` for a different compatible provider.
+The runtime manages the SQLite state file. Neovim never reads the API key
+or stores it in its configuration. Model routing/authentication changes,
+arbitrary editor tools, and interactive A2UI are not yet P1 features.
+
+This opt-in package and runner are conditional on the selected `phenix-ai`
+flake exporting `phenix-basic-http-acp`. Before merging the runtime PR,
+a developer can test by overriding the `phenix-ai` flake input to
+`github:matthis-k/phenix-ai/feat/p1-basic-http-real-model-preset-20261016`.
+
+## Basic P1 migration package
+
+The P1 migration currently ships an additional `phenix-ai-nvim-basic` package when
+the selected `phenix-ai` flake exposes `phenix-basic-acp`. This package contains
+the normal Neovim UI and standalone Lua client. Its defaults start the exact
+packaged Basic ACP binary, select `backend = "p1"`, and do not install the
+old native Lua binding. The existing `phenix-ai-nvim` package stays on its
+legacy default until the Basic cutover is accepted.
+
+The `p1-product` Nix check uses the installed Basic-only plugin and the real
+P1 runtime to verify chat, tool calls, restart, and journal replay. It is
+published only when the selected runtime has the Basic ACP artifact. The
+P1 client workflow checks it against an exact M1 revision without changing
+the legacy flake lock. Model mutation, provider authentication, session
+enumeration/close, images, and logs remain unavailable through P1 ACP v1;
+the frontend reports unsupported operations rather than using oldmain.
+
+See [the client roadmap](spec/p1-p2-client-roadmap.md) for the acceptance
+sequence and [runtime issue #891](https://github.com/matthis-k/phenix-ai/issues/891)
+for authorized management contracts.
 
 ## Connection lifecycle
 
@@ -109,6 +202,7 @@ The plugin exposes one command namespace instead of many top-level commands:
 :Phenix logs [session|execution|all]
 :Phenix new [sidebar|tab|curr_window|fullscreen]
 :Phenix session new
+:Phenix session load <id>
 :Phenix session close
 :Phenix session select
 :Phenix auth

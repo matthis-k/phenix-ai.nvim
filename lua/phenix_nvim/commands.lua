@@ -6,6 +6,7 @@ local M = {}
 local roots = {
   "auth",
   "cancel",
+  "capabilities",
   "image",
   "logs",
   "new",
@@ -54,6 +55,20 @@ function M.execute(options)
     else
       usage("Usage: Phenix cancel")
     end
+    return
+  end
+  if command == "capabilities" then
+    if #args ~= 0 then
+      usage("Usage: Phenix capabilities")
+      return
+    end
+    require("phenix_nvim.runtime").capabilities(function(report, err)
+      if err then
+        util.notify(err.message or vim.inspect(err), vim.log.levels.ERROR)
+        return
+      end
+      util.notify(vim.inspect(report), vim.log.levels.INFO)
+    end)
     return
   end
   if command == "auth" then
@@ -134,8 +149,12 @@ function M.execute(options)
   end
   if command == "session" then
     local subcommand = table.remove(args, 1)
+    if subcommand == "load" and #args == 1 then
+      actions.load_session(args[1])
+      return
+    end
     if #args ~= 0 then
-      usage("Usage: Phenix session <new|close|select>")
+      usage("Usage: Phenix session <new|close|select|load <id>>")
       return
     end
     if subcommand == "new" then
@@ -150,7 +169,7 @@ function M.execute(options)
       actions.choose_session()
       return
     end
-    usage("Usage: Phenix session <new|close|select>")
+    usage("Usage: Phenix session <new|close|select|load <id>>")
     return
   end
 
@@ -201,7 +220,7 @@ function M.complete(arglead, cmdline, cursorpos)
     return matches({ "all", "execution", "session" }, arglead)
   end
   if args[1] == "session" and #args == 1 then
-    return matches({ "close", "new", "select" }, arglead)
+    return matches({ "close", "load", "new", "select" }, arglead)
   end
   if args[1] == "new" and #args == 1 then
     return matches({ "curr_window", "fullscreen", "sidebar", "tab" }, arglead)

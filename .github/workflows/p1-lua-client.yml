@@ -1,0 +1,44 @@
+name: P1 Lua client SDK
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lua-client:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v31
+      - name: Use shared Phenix binary cache
+        if: ${{ vars.PHENIX_CACHIX_CACHE != '' }}
+        uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866
+        with:
+          name: ${{ vars.PHENIX_CACHIX_CACHE }}
+          skipPush: true
+      - name: Run deterministic SDK and ACP transport tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          nix shell nixpkgs#neovim -c bash -euo pipefail -c '
+            nvim --headless -u NONE --cmd "set rtp^=$PWD" -l tests/client_sdk.lua
+            nvim --headless -u NONE --cmd "set rtp^=$PWD" -l tests/p1_client_close.lua
+            nvim --headless -u NONE --cmd "set rtp^=$PWD" -l tests/p1_client_transport.lua
+            nvim --headless -u NONE --cmd "set rtp^=$PWD" -l tests/p1_model_picker.lua
+            nvim --headless -u NONE --cmd "set rtp^=$PWD" -l tests/p1_permission.lua
+            nvim --headless -u NONE --cmd "set rtp^=$PWD" -l tests/p1_transcript.lua
+            nvim --headless -u NONE --cmd "set rtp^=$PWD" -l tests/p1_ui_runtime.lua
+          '
+      - name: Verify the installed P1 Basic package and real session replay
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Exercise the same P1 Basic+HTTP runtime candidate used by the
+          # installed distribution gate, without changing the legacy default lock.
+          nix build --no-link --show-trace \
+            --override-input phenix-ai github:matthis-k/phenix-ai/8ad88aec18c34034beb53afc385af370771488b3 \
+            '.#checks.x86_64-linux.p1-product'

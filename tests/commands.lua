@@ -37,6 +37,7 @@ for _, name in ipairs({
   "new_session",
   "close_session",
   "choose_session",
+  "load_session",
   "new",
   "logs",
 }) do
@@ -135,6 +136,7 @@ local roots = commands.complete("", "Phenix ", #"Phenix ")
 assert(vim.tbl_contains(roots, "image"))
 assert(vim.tbl_contains(roots, "logs"))
 assert(vim.tbl_contains(roots, "session"))
+assert(vim.tbl_contains(roots, "capabilities"))
 assert(vim.tbl_contains(roots, "reference"))
 assert(vim.tbl_contains(roots, "new"))
 assert(not vim.tbl_contains(roots, "window"))
@@ -158,6 +160,15 @@ local sessions = commands.complete("", "Phenix session ", #"Phenix session ")
 assert(vim.tbl_contains(sessions, "new"))
 assert(vim.tbl_contains(sessions, "close"))
 assert(vim.tbl_contains(sessions, "select"))
+assert(vim.tbl_contains(sessions, "load"))
+
+execute("session", "load", "s1")
+assert(calls[#calls].name == "load_session")
+assert(calls[#calls].args[1] == "s1")
+local before_bad_load = #calls
+execute("session", "load")
+execute("session", "load", "s1", "extra")
+assert(#calls == before_bad_load, "session load requires exactly one id")
 
 for name, original in pairs(originals) do
   actions[name] = original

@@ -1,4 +1,6 @@
-local native = require("phenix")
+-- The old native binding is optional when the P1 backend is selected.
+local native_ok, native = pcall(require, "phenix")
+if not native_ok then native = {} end
 local config_api = require("phenix_nvim.config")
 local interaction = require("phenix_nvim.interaction")
 local tool_templates = require("phenix_nvim.tools")
@@ -964,6 +966,56 @@ end
 
 function M.session_state()
   return state.session_state
+end
+
+-- Keep the original UI-facing facade stable while migrating its backend.
+local p1 = require("phenix_nvim.runtime_p1")
+local legacy_configure = M.configure
+function M.configure(config)
+  p1.configure(config)
+  if not p1.active() then legacy_configure(config) end
+end
+
+function M.p1_active()
+  return p1.active()
+end
+
+function M.choose_model(callback)
+  if p1.active() then return p1.choose_model(callback) end
+  return nil, { kind = "unsupported", message = "Use the legacy selection picker" }
+end
+
+function M.capabilities(callback)
+  if p1.active() then return p1.capabilities(callback) end
+  if callback then
+    callback(nil, { kind = "unsupported", message = "Capability report is available on the P1 client" })
+  end
+end
+
+local legacy_on_event = M.on_event
+function M.on_event(callback)
+  -- Listeners may register before setup() has selected the P1 backend.
+  local stop_legacy = legacy_on_event(callback)
+  local stop_p1 = p1.on_event(callback)
+  return function()
+    stop_legacy()
+    stop_p1()
+  end
+end
+
+for _, name in ipairs({
+  "connect", "disconnect", "new_session", "resume_session",
+  "activate_session", "list_sessions", "close_session", "active_session",
+  "active_session_object", "prompt", "cancel_active", "list_selections",
+  "select", "list_authentication_methods", "authenticate", "decide_review",
+  "logs", "log_reference", "refresh_client_tools",
+  "refresh_session_state", "tick", "status", "session_state",
+}) do
+  local legacy = M[name]
+  M[name] = function(...)
+    if p1.active() then return p1[name](...) end
+    return legacy(...)
+  end
 end
 
 return M
