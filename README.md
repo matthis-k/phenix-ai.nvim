@@ -4,6 +4,10 @@ Canonical Neovim client for Phenix AI.
 
 This repository owns the Neovim-specific Lua client, UI, interaction model, product acceptance, and Nix package. It depends on `matthis-k/phenix-ai` for the frontend-neutral runtime, host-neutral Lua binding, and ACP/default-Harness executable.
 
+## Roadmap
+
+[Neovim P1-to-P2 client roadmap](spec/p1-p2-client-roadmap.md) tracks the Basic cutover, standalone Lua SDK, client feature gates, A2UI rendering and Advanced UI integration. The runtime and existing Neovim integration contracts remain authoritative.
+
 ## Nix
 
 `packages.<system>.default` and `packages.<system>.phenix-ai-nvim` expose the complete plugin. The package installs the matching native `phenix` Lua module and configures the client to launch the matching packaged `phenix` product with `--mode acp`.
