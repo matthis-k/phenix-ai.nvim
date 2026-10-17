@@ -346,8 +346,12 @@ end
 
 -- A method ID is only unique within its provider and connection. Preserve
 -- all three authoritative identities instead of submitting its UI label.
+local function authentication_provider_id(method)
+  return method.provider_id or method.provider
+end
+
 local function authentication_identity(method)
-  local provider_id = method.provider_id or method.provider
+  local provider_id = authentication_provider_id(method)
   local connection_id = method.connection_id or method.connection
   local method_id = method.method_id or method.id
   if type(provider_id) ~= "string" or provider_id == ""
@@ -436,7 +440,7 @@ local function authenticate_method(method, callback)
     return
   end
   local generation = auth_generation
-  local provider = method.provider_name or method.provider or method.name or "provider"
+  local provider = method.provider_name or authentication_provider_id(method) or method.name or "provider"
   util.input_secret(provider .. " API key: ", function(secret, input_error)
     if generation ~= auth_generation then
       return
@@ -458,9 +462,15 @@ local function authenticate_method(method, callback)
 end
 
 local function authentication_label(method)
-  local provider = method.provider_name or method.provider or "provider"
-  local name = method.name or method.id or "authentication"
-  local label = provider .. " / " .. name
+  local provider = method.provider_name or authentication_provider_id(method) or "provider"
+  local connection = method.connection_name or method.connection_label
+    or method.connection_id or method.connection
+  local name = method.label or method.name or method.method_id or method.id or "authentication"
+  local label = provider
+  if type(connection) == "string" and connection ~= "" then
+    label = label .. " / " .. connection
+  end
+  label = label .. " / " .. name
   if method.description ~= nil and method.description ~= "" then
     label = label .. "  ·  " .. method.description
   end
@@ -495,12 +505,14 @@ function M.authenticate()
   end
   auth_generation = auth_generation + 1
   local generation = auth_generation
-  runtime.list_authentication_methods(function(result, error)
+  runtime.list_authentication_methods(function(result, problem)
     if generation ~= auth_generation then
       return
     end
-    if error ~= nil then
-      util.notify(vim.inspect(error), vim.log.levels.ERROR)
+    if problem ~= nil then
+      -- Unsupported is a declared runtime capability, not a broken login.
+      local level = problem.kind == "unsupported" and vim.log.levels.WARN or vim.log.levels.ERROR
+      util.notify(problem.message or vim.inspect(problem), level)
       return
     end
     local methods = vim.deepcopy(result and result.methods or {})
@@ -508,14 +520,19 @@ function M.authenticate()
       util.notify("No Phenix authentication methods are available", vim.log.levels.WARN)
       return
     end
+    -- One offered method needs no provider or method dialog. The actual
+    -- credential input/browser challenge still comes from its declared kind.
+    if #methods == 1 then
+      authenticate_method(methods[1])
+      return
+    end
     local providers = {}
     local seen = {}
     for _, method in ipairs(methods) do
-      if type(method.provider) == "string" and method.provider ~= ""
-        and not seen[method.provider]
-      then
-        seen[method.provider] = true
-        providers[#providers + 1] = method.provider
+      local id = authentication_provider_id(method)
+      if type(id) == "string" and id ~= "" and not seen[id] then
+        seen[id] = true
+        providers[#providers + 1] = id
       end
     end
     table.sort(providers)
@@ -523,32 +540,35 @@ function M.authenticate()
       util.notify("Phenix did not advertise a valid authentication provider", vim.log.levels.ERROR)
       return
     end
-    vim.ui.select(providers, {
-      prompt = "Phenix provider",
-      format_item = function(provider)
-        for _, method in ipairs(methods) do
-          if method.provider == provider then
-            return method.provider_name or provider
-          end
-        end
-        return provider
-      end,
-    }, function(provider)
+    local function choose_provider(provider)
       if generation ~= auth_generation or provider == nil then
         return
       end
       local offered = {}
       local provider_name = provider
       for _, method in ipairs(methods) do
-        if method.provider == provider then
+        if authentication_provider_id(method) == provider then
           offered[#offered + 1] = method
           provider_name = method.provider_name or provider_name
         end
       end
-      -- One method starts immediately. The method picker is only shown
-      -- when Phenix advertises two or more choices for this provider.
       choose_authentication_method(offered, "Authenticate " .. provider_name)
-    end)
+    end
+    if #providers == 1 then
+      choose_provider(providers[1])
+      return
+    end
+    vim.ui.select(providers, {
+      prompt = "Phenix provider",
+      format_item = function(provider)
+        for _, method in ipairs(methods) do
+          if authentication_provider_id(method) == provider then
+            return method.provider_name or provider
+          end
+        end
+        return provider
+      end,
+    }, choose_provider)
   end)
 end
 
@@ -629,7 +649,7 @@ local function authenticate_provider(provider, callback)
     end
     local methods = {}
     for _, method in ipairs(result and result.methods or {}) do
-      if method.provider == provider then
+      if authentication_provider_id(method) == provider then
         table.insert(methods, method)
       end
     end
@@ -720,7 +740,7 @@ end
 local function provider_authentication_methods(methods, provider)
   local matches = {}
   for _, method in ipairs(methods or {}) do
-    if method.provider == provider then
+    if authentication_provider_id(method) == provider then
       table.insert(matches, method)
     end
   end
@@ -737,7 +757,7 @@ local function provider_display_name(methods, models, provider)
     end
   end
   for _, method in ipairs(methods or {}) do
-    if method.provider == provider
+    if authentication_provider_id(method) == provider
       and type(method.provider_name) == "string"
       and method.provider_name ~= ""
     then
@@ -754,7 +774,7 @@ local function provider_choices(models, methods)
     seen[provider] = true
   end
   for _, method in ipairs(methods or {}) do
-    local provider = method.provider
+    local provider = authentication_provider_id(method)
     if type(provider) == "string" and provider ~= "" and not seen[provider] then
       seen[provider] = true
       table.insert(providers, provider)
