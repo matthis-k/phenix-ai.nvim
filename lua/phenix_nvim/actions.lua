@@ -412,6 +412,13 @@ local function start_authentication(method, secret, callback)
 end
 
 local function authenticate_method(method, callback)
+  if authentication_identity(method) == nil then
+    finish_authentication(callback, nil, {
+      kind = "invalid_input",
+      message = "Authentication method has no complete provider/connection identity",
+    })
+    return
+  end
   if string.lower(tostring(method.kind or "")) ~= "api_token" then
     start_authentication(method, nil, callback)
     return
