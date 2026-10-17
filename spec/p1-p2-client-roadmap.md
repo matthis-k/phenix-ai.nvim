@@ -46,6 +46,42 @@ Each slice is a reviewable change with RED behavioral tests before implementatio
 
 **Priority override (2026-10-17):** N4's authentication and usable-model picker are prerequisites for calling either the live Basic UX or Advanced P2 Neovim product ready for end users. This is not a new protocol or a Neovim-only provider registry. The runtime's [#891](https://github.com/matthis-k/phenix-ai/issues/891) and [M1 roadmap](https://github.com/matthis-k/phenix-ai/blob/main/spec/m1-roadmap.md) own method, connection and model semantics. Prioritize this thin UI/SDK flow ahead of P2 A2UI polish; preserve P1's accepted deterministic baseline.
 
+## Coding handoff for N4–N6
+
+The N4–N6 table owns milestone status. The following packets identify the
+files and first executable tests for a fresh-session coding model. Use the
+existing `phenix_client` and `phenix_nvim.runtime_p1` modules; the exact
+private Lua file split is an implementation choice. Do not implement a new
+runtime management store in Lua to compensate for an unavailable Phenix
+operation.
+
+| Order | Existing entry points | Implement and verify |
+| --- | --- | --- |
+| **N4a: read catalog** | `lua/phenix_client/init.lua`, `lua/phenix_client/acp.lua`, `lua/phenix_nvim/runtime_p1.lua`, `tests/p1_model_picker.lua` | Map the runtime's provider/connection/profile/model metadata to the existing client query and Neovim picker. Keep the effective revision and provenance. Add a RED transport test: same display name on two connections must remain distinguishable; an unauthenticated connection is visible in auth setup but its unusable models are absent from model selection. Do not synthesize a provider catalog from local config. |
+| **N4b: API-key and OAuth actions** | Existing `phenix_nvim.integrations` picker/forms and `phenix_client` request/response API, runtime #891 | Query offered methods. No methods means ready/no prompt, one begins directly, multiple show a picker. Accept API keys only through the runtime's dedicated secret-safe submission flow and dispose prompt buffers/results immediately. Browser/device OAuth launch and status are displayed from authorized runtime operations. If a transport lacks those operations, return `unsupported` and keep the UI functional. Tests must ensure credentials never reach transcript, normal model events or persistent Neovim projection. |
+| **N4c: selection and race** | `lua/phenix_client/acp.lua`, `lua/phenix_nvim/runtime_p1.lua`, `tests/p1_client_transport.lua`, `tests/p1_ui_product.lua` | Reuse the existing standard ACP `session/set_config_option` path where the runtime supports it. Submit the selected provider/connection/profile/model identity and expected revision through an authorized operation. Show pending locally but update displayed selection only after the runtime response/event. Test stale revision, denied selection, revoked profile, reconnect and two simultaneous clients. No silent fallback when a saved model is unavailable. |
+| **N5a: default editor tools** | `lua/phenix_nvim/tools.lua`, `spec/nvim-integrations-implementation.md`, runtime-negotiated client-tool admission | Register one bounded, read-only editor context/navigation tool, then a review action. Advertise only currently installed/allowed tools; execute a handler only on the current authorized client generation. Negative fixture must prove a disabled or revoked tool never runs. Optional Lua eval/exec stays separately permission-gated. |
+| **N5b: UI/callback lifecycle** | `lua/phenix_nvim/runtime_p1.lua`, transcript and compose controllers, `tests/p1_ui_product.lua` | Test the existing submit/queue/cancel/reopen journey during reconnect and buffer close. Remove stale callback handles and re-query runtime state; the frontend must not replay a request merely to repair its projection. Assert ordered user/tool/assistant events and no duplicate accepted follow-up. |
+| **N6: final cutover proof** | `tests/p1_client_transport.lua`, `tests/p1_ui_product.lua`, `tests/p1_model_picker.lua`, `flake.nix` | Extend the real installed P1 product check with API-key onboarding, usable model selection, prompt, restart and a denied request. Record exact tested runtime/client SHAs and the features that remain unsupported. Keep the existing Basic SDK/protocol tests; only claim a feature once its runtime operation exists. |
+
+### P2 client handoff after N4
+
+| Packet | Start here | First RED integration result |
+| --- | --- | --- |
+| **C1–C2: projections and commands** | `phenix_client` subscription/query/action API and `phenix_nvim.runtime_p1`; runtime P2-IO1/IO2 | Two connected clients attach with separate cursors. A session change refreshes both projections; stale/denied mutation changes neither. Rebind to a new generation and revoke stale handlers. |
+| **C3: registry** | Existing `phenix_nvim.integrations` registry, `spec/nvim-integrations-implementation.md`, selected upstream A2UI schema | Add a Lua table registry for one text component, then input/button and recursive card. Make override, removal and catalog advertisement reflect actual supported implementations. Malformed nesting/data binding rejects before any UI handle exists. |
+| **C4–C5: negotiation and actions** | C3 renderer, runtime-selected A2UI catalog and supported transport | A text-only client cannot receive Form/SVG; a separately authorized client with the correct pinned catalog can render allowed controls. Reject forged/stale actions before Lua callback execution. Reconnect and window close invalidate old callbacks. |
+| **C6–C7: Advanced UI** | Existing transcript, sidebar and navigation integrations; runtime P2-4–P2-9 read-only projections | Add one source-backed stale-code view, job log cursor and child-session entry at a time. Real Advanced-verification product must survive restart, while Basic package runs with no Advanced plugin. Independent ACP interop remains a separate gate. |
+
+For each packet, read the relevant accepted runtime contract *first*. Write a
+failing Lua transport/renderer test and, where the feature crosses into the
+runtime, a packaged Neovim test. Run the repository's existing Neovim test
+commands and the pinned Nix check from `flake.nix` on the exact head.
+Leave Lua helper layout, picker styling, buffer internals and renderer details
+to the implementation model. Stop if a runtime operation, A2UI transport
+facility or authority rule is missing; link the runtime owner instead of
+inventing a new wire method or permissive local fallback.
+
 ## P2 client implementation slices
 
 P2 Advanced is an additive runtime preset. Neovim can use the same SDK, views and controls while its runtime gains capabilities. The P2-IO frontend track is separate from Advanced's release gate.
