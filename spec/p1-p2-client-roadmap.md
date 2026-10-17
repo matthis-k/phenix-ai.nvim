@@ -115,6 +115,8 @@ P1 runtime is accepted. **N0–N3: 4 accepted; N4–N6: 3 deferred/open; C1–C7
 
 Release evidence: [#48](https://github.com/matthis-k/phenix-ai.nvim/pull/48) merged at `aefc618f`; [#50](https://github.com/matthis-k/phenix-ai.nvim/pull/50) merged at `2bc128a7` after exact-head Source, Client integration and `lua-client` checks passed. The N3 default closure is the P1 Basic ACP plugin with no native `phenix.so`; `checks.<system>.p1-default-cutover` and `p1-product` exercise the installed product. The optional live HTTP Model remains a distinct composition.
 
+Presentation evidence: [#52](https://github.com/matthis-k/phenix-ai.nvim/pull/52) merged at `36bc9a87` for compact/human/protocol tool disclosure, and [#47](https://github.com/matthis-k/phenix-ai.nvim/pull/47) merged at `3d42a4ab` for the bounded, display-only local UI renderer. Both run inside `p1-default-cutover`; neither is A2UI negotiation or a runtime catalog. N4 remains blocked on the runtime-owned provider/auth/model operations from [#891](https://github.com/matthis-k/phenix-ai/issues/891); N5/N6 stay open until those operations and the declared integration matrix are verified.
+
 Cross-repository distribution promotion lives in [phenix-nvim #117](https://github.com/matthis-k/phenix-nvim/pull/117) and its distribution roadmap, rather than being inferred from client acceptance.
 
 Outstanding design questions: 0. Resolved architectural responsibilities remain fixed; **implementation: 4 accepted, 10 outstanding (3 later P1, 7 P2 client stages)**.
