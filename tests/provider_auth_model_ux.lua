@@ -18,6 +18,7 @@ local methods = {}
 local calls = {}
 local chosen_items = {}
 local prompts = {}
+local rendered_labels = {}
 local selected_model
 
 runtime.p1_active = function() return false end
@@ -33,17 +34,22 @@ util.notify = function() end
 vim.ui.select = function(items, opts, cb)
   prompts[#prompts + 1] = opts.prompt
   chosen_items[#chosen_items + 1] = vim.deepcopy(items)
+  local labels = {}
+  for _, item in ipairs(items) do
+    labels[#labels + 1] = opts.format_item and opts.format_item(item) or tostring(item)
+  end
+  rendered_labels[#rendered_labels + 1] = labels
   cb(items[1])
 end
 
 local function reset()
-  calls, chosen_items, prompts = {}, {}, {}
+  calls, chosen_items, prompts, rendered_labels = {}, {}, {}, {}
 end
 
 methods = {
-  { provider = "openai", connection_id = "api", provider_name = "OpenAI", id = "api", kind = "api_token", name = "API key" },
-  { provider = "openai", connection_id = "subscription", provider_name = "OpenAI", id = "oauth", kind = "oauth", name = "ChatGPT" },
-  { provider = "anthropic", connection_id = "api", provider_name = "Anthropic", id = "anthropic-key", kind = "ApiKey", name = "API key" },
+  { provider_id = "openai", connection_id = "api", provider_name = "OpenAI", method_id = "api", kind = "ApiKey", label = "API key" },
+  { provider_id = "openai", connection_id = "subscription", provider_name = "OpenAI", method_id = "oauth", kind = "OAuthAuthorizationCode", label = "ChatGPT" },
+  { provider_id = "anthropic", connection_id = "api", provider_name = "Anthropic", method_id = "anthropic-key", kind = "ApiKey", label = "API key" },
 }
 actions.authenticate()
 assert(#prompts == 1, "single-method provider skips method picker")
@@ -63,8 +69,12 @@ methods = {
   { provider = "openai", connection_id = "subscription", provider_name = "OpenAI", id = "oauth", kind = "oauth", name = "ChatGPT" },
 }
 actions.authenticate()
-assert(#prompts == 2, "multiple methods must show the second-level method picker")
-assert(#chosen_items[2] == 2)
+assert(#prompts == 1 and prompts[1] == "Authenticate OpenAI",
+  "single-provider multiple methods must skip redundant provider picker")
+assert(#chosen_items[1] == 2)
+assert(vim.tbl_contains(vim.tbl_map(function(item)
+  return item.connection_id
+end, chosen_items[1]), "subscription"), "OAuth connection must remain distinct")
 assert(calls[1].identity.method_id == "api"
   and calls[1].identity.connection_id == "api")
 
@@ -78,8 +88,12 @@ methods = {
     kind = "api_token", name = "Work key" },
 }
 actions.authenticate()
-assert(#chosen_items == 2 and #chosen_items[2] == 2,
+assert(#chosen_items == 1 and #chosen_items[1] == 2,
   "same-method different-connection entries must both remain selectable")
+assert(chosen_items[1][1].connection_id ~= chosen_items[1][2].connection_id)
+assert(rendered_labels[1][1]:find("personal", 1, true)
+  and rendered_labels[1][2]:find("work", 1, true),
+  "credential choices must show their different connection identities")
 assert(#calls == 1 and calls[1].identity.connection_id == "personal"
   and calls[1].identity.method_id == "api-key")
 
@@ -98,11 +112,52 @@ methods = { { provider = "openai", connection_id = "subscription",
 actions.authenticate()
 assert(opened == "https://example.test/authorize")
 assert(#calls == 1, "OAuth challenge was restarted while awaiting completion")
+
+-- An installed provider's challenge is data, not permission to ask the OS
+-- to open arbitrary URI handlers.
+local blocked_notices = {}
+util.notify = function(message, level)
+  blocked_notices[#blocked_notices + 1] = { message = message, level = level }
+end
+for _, unsafe_uri in ipairs({
+  "file:///tmp/phishing",
+  "javascript:alert(1)",
+  "http://example.test/authorize",
+  "https://user@example.test/authorize",
+  "https://example.test/\\evil",
+}) do
+  reset()
+  opened = nil
+  blocked_notices = {}
+  runtime.authenticate = function(identity, secret, cb)
+    calls[#calls + 1] = { identity = vim.deepcopy(identity), secret = secret }
+    cb({ kind = "external", url = unsafe_uri, attempt_id = "attempt-untrusted" }, nil)
+  end
+  actions.authenticate()
+  assert(opened == nil, "untrusted OAuth URI was launched: " .. unsafe_uri)
+  assert(#calls == 1 and #blocked_notices == 1,
+    "one denied authorization should produce one clear error")
+  assert(blocked_notices[1].message:find("authorization URL", 1, true),
+    "OAuth URI denial must be actionable")
+end
+util.notify = function() end
 runtime.authenticate = function(identity, secret, cb)
   calls[#calls + 1] = { identity = vim.deepcopy(identity), secret = secret }
   cb({ kind = "authenticated" }, nil)
 end
 vim.ui.open = originals.ui_open
+
+-- A single canonical provider_id/method_id tuple starts directly, without
+-- selecting a provider first or surfacing the legacy method format.
+reset()
+methods = { { provider_id = "openrouter", connection_id = "api",
+  method_id = "api-key", kind = "ApiKey", label = "API key" } }
+actions.authenticate()
+assert(#prompts == 0 and #chosen_items == 0,
+  "one available method must not show an unnecessary chooser")
+assert(#calls == 1 and calls[1].identity.provider_id == "openrouter"
+  and calls[1].identity.method_id == "api-key")
+assert(calls[1].secret == "fake-key-from-ui")
 
 reset()
 methods = {}
@@ -160,6 +215,20 @@ actions.choose_selection()
 assert(fallback == 1 and #prompts == 0,
   "P1 fallback must only use the ACP model picker when auth is unsupported")
 runtime.choose_model = original_choose_model
+
+-- The installed Basic preset advertises auth as unsupported. The command
+-- should report a missing capability, not a failed login or credential prompt.
+local notices = {}
+util.notify = function(message, level)
+  notices[#notices + 1] = { message = message, level = level }
+end
+reset()
+actions.authenticate()
+assert(#notices == 1 and notices[1].level == vim.log.levels.WARN
+  and notices[1].message:find("auth", 1, true),
+  "unsupported runtime authentication must be a clear warning")
+assert(#calls == 0 and #prompts == 0,
+  "unsupported runtime authentication must not request a credential")
 
 for key, value in pairs(originals) do
   if key == "ui_select" then vim.ui.select = value
