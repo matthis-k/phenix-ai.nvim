@@ -69,7 +69,7 @@ local denied
 sdk:set_model("unknown", function(value, err)
   denied = err
 end)
-assert(denied and denied.kind == "unsupported", "model switching not implemented in P1")
+assert(denied and denied.kind == "denied", "unadvertised model IDs must be rejected before ACP dispatch")
 local finish
 sdk:send(id, "hello", function(value, err)
   assert(not err)
