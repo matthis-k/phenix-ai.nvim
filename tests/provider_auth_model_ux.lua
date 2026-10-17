@@ -43,7 +43,7 @@ end
 methods = {
   { provider = "openai", connection_id = "api", provider_name = "OpenAI", id = "api", kind = "api_token", name = "API key" },
   { provider = "openai", connection_id = "subscription", provider_name = "OpenAI", id = "oauth", kind = "oauth", name = "ChatGPT" },
-  { provider = "anthropic", connection_id = "api", provider_name = "Anthropic", id = "anthropic-key", kind = "api_token", name = "API key" },
+  { provider = "anthropic", connection_id = "api", provider_name = "Anthropic", id = "anthropic-key", kind = "ApiKey", name = "API key" },
 }
 actions.authenticate()
 assert(#prompts == 1, "single-method provider skips method picker")
@@ -53,6 +53,8 @@ assert(chosen_items[2] == nil, "one-method provider should not show a method sel
 assert(#calls == 1 and calls[1].identity.provider_id == "anthropic"
   and calls[1].identity.connection_id == "api"
   and calls[1].identity.method_id == "anthropic-key")
+assert(calls[1].secret == "fake-key-from-ui",
+  "canonical ApiKey kind must request a secret, not launch OAuth")
 assert(calls[1].secret == "fake-key-from-ui")
 
 reset()
@@ -92,7 +94,7 @@ runtime.authenticate = function(identity, secret, cb)
     attempt_id = "attempt-1" }, nil)
 end
 methods = { { provider = "openai", connection_id = "subscription",
-  id = "oauth", kind = "oauth", name = "Subscription" } }
+  id = "oauth", kind = "OAuthAuthorizationCode", name = "Subscription" } }
 actions.authenticate()
 assert(opened == "https://example.test/authorize")
 assert(#calls == 1, "OAuth challenge was restarted while awaiting completion")
