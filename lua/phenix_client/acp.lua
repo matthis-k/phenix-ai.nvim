@@ -21,7 +21,7 @@ function M.new(options)
     job = nil, next_id = 0, requests = {}, waiting = {},
     subscribers = {}, partial = "", stderr = "",
     state = "idle", features = nil, catalogs = {}, active_session = nil,
-    permission_requests = {},
+    permission_requests = {}, auth_methods = {},
   }, Backend)
 end
 
