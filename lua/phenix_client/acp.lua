@@ -303,6 +303,37 @@ function Backend:call(op, args, callback)
     else
       finish(callback, nil, error_value("Model catalog not available for session", "unsupported"))
     end
+  elseif op == "models.select" then
+    local id = args.session_id or self.active_session
+    local catalog = id and self.catalogs[id]
+    if type(args.model_id) ~= "string" or not catalog then
+      finish(callback, nil, error_value("No selected ACP session", "unsupported"))
+      return
+    end
+    local admitted = false
+    for _, model in ipairs(catalog.models) do
+      if model.id == args.model_id then admitted = true; break end
+    end
+    if not admitted then
+      finish(callback, nil, error_value("Model was not offered by Phenix", "denied"))
+      return
+    end
+    self:_request("session/set_config_option", {
+      sessionId = id, configId = "model", value = args.model_id,
+    }, function(value, err)
+      if err then finish(callback, nil, err); return end
+      if type(value) ~= "table" or type(value.configOptions) ~= "table" then
+        finish(callback, nil, error_value("ACP model change omitted confirmed state", "protocol"))
+        return
+      end
+      self:_catalog(id, value.configOptions)
+      local updated = self.catalogs[id]
+      if not updated or updated.selected ~= args.model_id then
+        finish(callback, nil, error_value("Runtime did not confirm selected model", "protocol"))
+        return
+      end
+      finish(callback, { selected = updated.selected }, nil)
+    end)
   elseif op == "sessions.new" then
     self:_request("session/new", { cwd = self.cwd, mcpServers = {} },
       function(value, err)
