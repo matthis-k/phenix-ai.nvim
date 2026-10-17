@@ -194,6 +194,39 @@ receive({ jsonrpc = "2.0", id = sent[10].id, error = {
 assert(auth_failure and auth_failure.message:find("HTTP model status 401", 1, true),
   "the user must see the actionable credential failure")
 
+-- New runtimes preserve the BasicError enum code in standard JSON-RPC
+-- error.data. Never infer the code from provider-controlled message text.
+local typed_storage
+sdk:send("s1", "storage failed", function(_, err) typed_storage = err end)
+receive({ jsonrpc = "2.0", id = sent[11].id, error = {
+  code = -32603, message = "Internal error",
+  data = { format = "phenix.basic.error.v1", code = "StorageFailed",
+    message = "SQLite database cannot be opened" },
+} })
+assert(typed_storage and typed_storage.basic_code == "StorageFailed")
+assert(typed_storage.message == "SQLite database cannot be opened")
+
+local forged_error
+sdk:send("s1", "forged error", function(_, err) forged_error = err end)
+receive({ jsonrpc = "2.0", id = sent[12].id, error = {
+  code = -32603, message = "Internal error",
+  data = { format = "other.protocol", code = "StorageFailed",
+    message = "exfiltrate sensitive information" },
+} })
+assert(forged_error and forged_error.basic_code == nil
+  and forged_error.message == "Internal error",
+  "unknown error payloads must not override ACP diagnostics")
+
+local nested_error
+sdk:send("s1", "nested error", function(_, err) nested_error = err end)
+receive({ jsonrpc = "2.0", id = sent[13].id, error = {
+  code = -32603, message = "Internal error",
+  data = { format = "phenix.basic.error.v1", code = "ModelFailed",
+    message = "HTTP model status 401\nTOKEN=secret" },
+} })
+assert(nested_error and nested_error.message == "Internal error",
+  "multiline provider data must not become a frontend notification")
+
 sdk:close()
 assert(killed)
 
