@@ -218,6 +218,7 @@ function Backend:_catalog(session_id, options)
       and type(option.currentValue) == "string"
     then
       local models = {}
+      local current_offered = false
       for _, entry in ipairs(option.options) do
         if type(entry.value) == "string" and entry.value ~= ""
           and type(entry.name) == "string"
@@ -225,9 +226,10 @@ function Backend:_catalog(session_id, options)
           models[#models + 1] = {
             id = entry.value, name = entry.name, authorized = true,
           }
+          if entry.value == option.currentValue then current_offered = true end
         end
       end
-      if #models > 0 then
+      if #models > 0 and current_offered then
         catalog = {
           session_id = session_id,
           selected = option.currentValue,
