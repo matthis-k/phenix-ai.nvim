@@ -94,6 +94,9 @@
               nvim --headless -u NONE \
                 --cmd ${pkgs.lib.escapeShellArg "set rtp^=${p1Plugin}"} \
                 -l ${source}/tests/provider_auth_model_ux.lua
+              nvim --headless -u NONE \
+                --cmd ${pkgs.lib.escapeShellArg "set rtp^=${p1Plugin}"} \
+                -l ${source}/tests/p1_model_config.lua
               touch "$out"
             '';
           p1-default-cutover = pkgs.runCommand "phenix-ai-nvim-p1-default-cutover"
