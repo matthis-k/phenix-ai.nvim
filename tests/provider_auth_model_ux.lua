@@ -45,11 +45,10 @@ methods = {
   { provider = "anthropic", provider_name = "Anthropic", id = "anthropic-key", kind = "api_token", name = "API key" },
 }
 actions.authenticate()
-assert(#prompts == 2, "two-method provider must display provider and method selectors")
+assert(#prompts == 1, "single-method provider skips method picker")
 assert(prompts[1] == "Phenix provider")
-assert(prompts[2]:find("Authenticate", 1, true))
 assert(#chosen_items[1] == 2 and chosen_items[1][1] == "anthropic")
-assert(#chosen_items[2] == 1, "one-method provider should not show a method selector")
+assert(chosen_items[2] == nil, "one-method provider should not show a method selector")
 assert(#calls == 1 and calls[1].id == "anthropic-key")
 assert(calls[1].secret == "fake-key-from-ui")
 
