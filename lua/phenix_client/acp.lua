@@ -123,9 +123,21 @@ function Backend:_response(frame)
   if callback then
     self.requests[frame.id] = nil
     if frame.error then
+      local message = frame.error.message or "Phenix request failed"
+      local detail = frame.error.data
+      -- The Rust ACP controller reports actionable SQLite/ownership failures
+      -- in JSON-RPC error.data. Display only these known sanitized diagnostics;
+      -- never turn arbitrary provider response data into a notification.
+      if type(detail) == "string" and #detail <= 1024
+        and (detail:find("SQLite", 1, true)
+          or detail:find("PHENIX_BASIC_SQLITE_PATH", 1, true)
+          or detail:find("session already owned", 1, true))
+      then
+        message = detail
+      end
       finish(callback, nil, {
-        kind = "remote", message = frame.error.message or "Phenix request failed",
-        code = frame.error.code, data = frame.error.data,
+        kind = "remote", message = message,
+        code = frame.error.code, data = detail,
       })
     else
       finish(callback, frame.result, nil)
