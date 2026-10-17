@@ -184,6 +184,16 @@ receive({ jsonrpc = "2.0", id = sent[9].id, error = {
 } })
 assert(remote_error and remote_error.message == "Internal error")
 
+local auth_failure
+sdk:send("s1", "invalid credential", function(_, err) auth_failure = err end)
+assert(sent[10].method == "session/prompt")
+receive({ jsonrpc = "2.0", id = sent[10].id, error = {
+  code = -32603, message = "Internal error",
+  data = "ModelFailed: HTTP model status 401",
+} })
+assert(auth_failure and auth_failure.message:find("HTTP model status 401", 1, true),
+  "the user must see the actionable credential failure")
+
 sdk:close()
 assert(killed)
 
