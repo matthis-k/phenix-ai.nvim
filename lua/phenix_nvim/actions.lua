@@ -294,12 +294,13 @@ local function choice_label(item, selected)
 end
 
 local function open_external_auth(result)
-  local uri = result and result.uri
+  local uri = result and (result.url or result.uri)
   if type(uri) ~= "string" or uri == "" then
     return false
   end
-  if result.instructions ~= nil and result.instructions ~= "" then
-    util.notify(result.instructions, vim.log.levels.INFO)
+  local instructions = result.instructions or result.prompt
+  if instructions ~= nil and instructions ~= "" then
+    util.notify(instructions, vim.log.levels.INFO)
   end
   if type(vim.ui.open) == "function" then
     local call_ok, handle, open_error = pcall(vim.ui.open, uri)
@@ -330,81 +331,83 @@ runtime.on_event(function(kind, status)
   connection_state = next_state
 end)
 
-local AUTH_POLL_INTERVAL_MS = 1000
-local AUTH_POLL_ATTEMPTS = 600
-
 local function authentication_kind(result)
   return result and string.lower(tostring(result.kind or "")) or ""
 end
 
-local function finish_authentication(callback, value, error)
+local function finish_authentication(callback, value, problem)
   if callback ~= nil then
-    util.safe_call(callback, value, error)
-  elseif error ~= nil then
-    util.notify(vim.inspect(error), vim.log.levels.ERROR)
+    util.safe_call(callback, value, problem)
+  elseif problem ~= nil then
+    util.notify(problem.message or vim.inspect(problem),
+      problem.kind == "pending" and vim.log.levels.INFO or vim.log.levels.ERROR)
   end
 end
 
-local function poll_authentication(method, generation, attempt, callback)
-  if generation ~= auth_generation then
-    return
+-- A method ID is only unique within its provider and connection. Preserve
+-- all three authoritative identities instead of submitting its UI label.
+local function authentication_identity(method)
+  local provider_id = method.provider_id or method.provider
+  local connection_id = method.connection_id or method.connection
+  local method_id = method.method_id or method.id
+  if type(provider_id) ~= "string" or provider_id == ""
+    or type(connection_id) ~= "string" or connection_id == ""
+    or type(method_id) ~= "string" or method_id == ""
+  then
+    return nil
   end
-  runtime.authenticate(method.id, nil, function(result, error)
-    if generation ~= auth_generation then
-      return
-    end
-    if error ~= nil then
-      finish_authentication(callback, nil, error)
-      return
-    end
-    local kind = authentication_kind(result)
-    if kind == "authenticated" then
-      util.notify((method.provider or "Phenix") .. " authentication completed", vim.log.levels.INFO)
-      finish_authentication(callback, result, nil)
-      return
-    end
-    if kind ~= "external" then
-      finish_authentication(callback, nil, { message = "Phenix returned an unknown authentication state" })
-      return
-    end
-    if attempt >= AUTH_POLL_ATTEMPTS then
-      finish_authentication(callback, nil, { message = "Phenix authentication timed out" })
-      return
-    end
-    vim.defer_fn(function()
-      poll_authentication(method, generation, attempt + 1, callback)
-    end, AUTH_POLL_INTERVAL_MS)
-  end)
+  return {
+    provider_id = provider_id,
+    connection_id = connection_id,
+    method_id = method_id,
+  }
 end
 
 local function start_authentication(method, secret, callback)
+  local identity = authentication_identity(method)
+  if identity == nil then
+    finish_authentication(callback, nil, {
+      kind = "invalid_input",
+      message = "Phenix advertised authentication without provider/connection/method identity",
+    })
+    return
+  end
   auth_generation = auth_generation + 1
   local generation = auth_generation
-  runtime.authenticate(method.id, secret, function(result, error)
+  runtime.authenticate(identity, secret, function(result, problem)
     if generation ~= auth_generation then
       return
     end
-    if error ~= nil then
-      finish_authentication(callback, nil, error)
+    if problem ~= nil then
+      finish_authentication(callback, nil, problem)
       return
     end
     local kind = authentication_kind(result)
     if kind == "authenticated" then
-      util.notify((method.provider or "Phenix") .. " authentication completed", vim.log.levels.INFO)
+      util.notify(identity.provider_id .. " authentication completed", vim.log.levels.INFO)
       finish_authentication(callback, result, nil)
       return
     end
-    if kind ~= "external" then
-      finish_authentication(callback, nil, { message = "Phenix returned an unknown authentication state" })
+    if kind ~= "external" and kind ~= "openbrowser" and kind ~= "deviceauthorization" then
+      finish_authentication(callback, nil, {
+        kind = "protocol", message = "Phenix returned an unknown authentication state",
+      })
       return
     end
     if not open_external_auth(result) then
-      finish_authentication(callback, nil, { message = "Phenix authentication did not provide a valid authorization URL" })
+      finish_authentication(callback, nil, {
+        kind = "protocol", message = "Phenix authentication did not provide an authorization URL",
+      })
       return
     end
-    vim.defer_fn(function()
-      poll_authentication(method, generation, 1, callback)
-    end, AUTH_POLL_INTERVAL_MS)
+    -- AuthChallenge has an attempt ID, but ProviderAuth::status currently
+    -- describes profiles, not challenge completion. Calling begin again is
+    -- NOT a status poll. A future runtime status/notification operation may
+    -- resume this attempt without creating a second OAuth challenge.
+    finish_authentication(callback, nil, {
+      kind = "pending",
+      message = "Authorization opened. Recheck Phenix authentication status after completing it.",
+    })
   end)
 end
 
