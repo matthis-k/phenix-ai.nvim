@@ -55,6 +55,13 @@ assert(backend.catalogs.s1.selected == "provider/one",
 -- Selection cannot inherit the last-active session if several catalogs are
 -- available. The SDK must supply a stable session ID for each mutation.
 backend:_catalog("s2", { model_option("provider/two") })
+backend:call("models.list", {}, function(value, problem)
+  assert(value == nil and problem.kind == "invalid_input",
+    "implicit model query must not select the last active session")
+end)
+backend:call("models.list", { session_id = "s1" }, function(value, problem)
+  assert(not problem and value.selected == "provider/one")
+end)
 local attempts = 0
 backend._request = function(_, method, params, callback)
   attempts = attempts + 1
