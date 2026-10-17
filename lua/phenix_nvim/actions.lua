@@ -295,7 +295,17 @@ end
 
 local function open_external_auth(result)
   local uri = result and (result.url or result.uri)
-  if type(uri) ~= "string" or uri == "" then
+  -- Browser authentication is provider-approved, but plugin output is not
+  -- inherently a safe URI for opening on the user's machine. Do not invoke
+  -- OS handlers for file:, javascript:, shell-like or plaintext remote links.
+  if type(uri) ~= "string" or #uri > 4096
+    or not uri:match("^https://[^/%?#]+")
+    or uri:find("[%c%s\\]")
+  then
+    return false
+  end
+  local authority = uri:match("^https://([^/%?#]+)")
+  if authority:find("@", 1, true) then
     return false
   end
   local instructions = result.instructions or result.prompt
