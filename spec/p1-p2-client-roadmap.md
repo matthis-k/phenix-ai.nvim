@@ -1,7 +1,7 @@
 # Neovim client roadmap: P1 Basic to P2 Advanced
 
-Status: planned. P1 Basic is accepted in `phenix-ai`, but Neovim's P1 backend is not the default or an accepted replacement yet.
-Updated: 2026-10-16
+Status: P1 Basic Neovim default ACCEPTED (N0–N3); broader runtime management, integrations and P2 Advanced remain open.
+Updated: 2026-10-17
 Owner: `phenix-ai.nvim`. Distribution work lives in [phenix-nvim's roadmap](https://github.com/matthis-k/phenix-nvim/blob/main/spec/p1-p2-distribution-roadmap.md).
 
 ## Authority and references
@@ -11,7 +11,7 @@ This file tracks implementation order and acceptance in the standalone client. I
 - [Phenix M1 roadmap](https://github.com/matthis-k/phenix-ai/blob/main/spec/m1-roadmap.md), especially post-P1 session projections, P2-IO1 through P2-IO4, A2UI and I/O.
 - [Phenix Advanced roadmap](https://github.com/matthis-k/phenix-ai/blob/main/spec/p2-advanced-agent-roadmap.md), for memory, workspace, jobs, session trees, code intelligence and inspection.
 - [Runtime management issue #891](https://github.com/matthis-k/phenix-ai/issues/891), for authorized model/routing/configuration changes, durable follow-ups, approval, subscriptions and shared sessions.
-- [Existing P1 migration PR #48](https://github.com/matthis-k/phenix-ai.nvim/pull/48) and its `spec/p1-client-sdk.md`, for current ACP Basic coverage. The PR is an implementation input, not full migration acceptance.
+- [Merged P1 client #48](https://github.com/matthis-k/phenix-ai.nvim/pull/48) (`aefc618f`) and [default cutover #50](https://github.com/matthis-k/phenix-ai.nvim/pull/50) (`2bc128a7`), for the installed Basic ACP SDK/UI and N3 package acceptance. The client contract is in `spec/p1-client-sdk.md`; missing management remains in runtime #891.
 - [Neovim integration behavior](nvim-integrations.md), [mechanical APIs and test cases](nvim-integrations-implementation.md) and [value/capability boundary](nvim-integrations-value-capability.md). These remain authoritative for local Lua adapters, tool schemas and callback lifetime.
 
 Dependency direction is `phenix-nvim -> phenix-ai.nvim -> phenix-ai`. The runtime is the only authority for sessions, graphs, tools, models, permissions, configuration and persistence. This client owns Neovim rendering, editor context, Lua-facing interaction and frontend capability advertisement. The distribution supplies package pins, keymaps, theme and optional overrides.
@@ -71,8 +71,12 @@ ACP remains ACP, MCP remains MCP, and A2UI remains A2UI. When a standard transpo
 - Merge and propagate upstream runtime changes before pinning this client's `flake.lock` to their exact revision. Then update `phenix-nvim` to an internally consistent runtime/client pair. Never change a lock to point at a non-existent package.
 - Update this milestone table in the owning client PR. Link evidence to actual final commit checks. Planning alone is not implementation or acceptance.
 
-## Status at plan creation
+## Current acceptance and outstanding stages
 
-P1 runtime: accepted. N0-N2: partial work in open PR #48. N3-N6: not accepted. C1-C7: planned. The existing Neovim integration specifications describe later functionality but do not prove it implemented against the M1 Basic product.
+P1 runtime is accepted. **N0–N3: 4 accepted; N4–N6: 3 deferred/open; C1–C7: 7 planned.** The accepted client is the installed ACP Basic package, not full parity with the legacy frontend. In particular, authorized model/routing mutations, authentication, global session listing/close and client tool registration remain unavailable pending runtime [#891](https://github.com/matthis-k/phenix-ai/issues/891). N5 and N6 stay open until the declared integration matrix is independently verified.
 
-Outstanding design questions: 0. Accepted cross-repository responsibilities and protocol decisions remain in force. Deferred implementation stages: N3-N6 and C1-C7, pending their listed runtime dependencies.
+Release evidence: [#48](https://github.com/matthis-k/phenix-ai.nvim/pull/48) merged at `aefc618f`; [#50](https://github.com/matthis-k/phenix-ai.nvim/pull/50) merged at `2bc128a7` after exact-head Source, Client integration and `lua-client` checks passed. The N3 default closure is the P1 Basic ACP plugin with no native `phenix.so`; `checks.<system>.p1-default-cutover` and `p1-product` exercise the installed product. The optional live HTTP Model remains a distinct composition.
+
+Cross-repository distribution promotion lives in [phenix-nvim #117](https://github.com/matthis-k/phenix-nvim/pull/117) and its distribution roadmap, rather than being inferred from client acceptance.
+
+Outstanding design questions: 0. Resolved architectural responsibilities remain fixed; **implementation: 4 accepted, 10 outstanding (3 later P1, 7 P2 client stages)**.
