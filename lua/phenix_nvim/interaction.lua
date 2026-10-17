@@ -60,17 +60,17 @@ local function fallback_select(items, options, callback)
 
   vim.keymap.set("n", "<CR>", function()
     choose(vim.api.nvim_win_get_cursor(win)[1] - 1)
-  end, { buffer = buffer, nowait = true, silent = true })
+  end, { buf = buffer, nowait = true, silent = true })
   vim.keymap.set("n", "<Esc>", function()
     choose(0)
-  end, { buffer = buffer, nowait = true, silent = true })
+  end, { buf = buffer, nowait = true, silent = true })
   vim.keymap.set("n", "q", function()
     choose(0)
-  end, { buffer = buffer, nowait = true, silent = true })
+  end, { buf = buffer, nowait = true, silent = true })
   for index = 1, math.min(#items, 9) do
     vim.keymap.set("n", tostring(index), function()
       choose(index)
-    end, { buffer = buffer, nowait = true, silent = true })
+    end, { buf = buffer, nowait = true, silent = true })
   end
   vim.api.nvim_create_autocmd("WinClosed", {
     pattern = tostring(win),

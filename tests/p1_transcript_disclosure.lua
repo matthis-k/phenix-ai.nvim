@@ -29,6 +29,16 @@ vim.api.nvim_win_set_buf(win, bufnr)
 buffer.attach_window(win)
 vim.api.nvim_win_set_cursor(win, { 1, 0 })
 assert(vim.api.nvim_buf_get_lines(bufnr, 0, 1, false)[1]:find("workspace.shell", 1, true))
+-- Deprecated nvim_buf_add_highlight() was replaced with extmarks; both
+-- the fixed-width tool label and dynamic status must remain visible.
+local style_ns = assert(vim.api.nvim_get_namespaces()["phenix-transcript-style"])
+local extmarks = vim.api.nvim_buf_get_extmarks(bufnr, style_ns, 0, -1, { details = true })
+local groups = {}
+for _, mark in ipairs(extmarks) do
+  groups[mark[4].hl_group] = true
+end
+assert(groups.PhenixToolLabel and groups.PhenixToolRunning,
+  "tool label and running status must have extmark highlights")
 assert(buffer.set_tool_mode(win, nil, "human"), "tool disclosure could not open")
 local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
 assert(vim.inspect(lines):find("printf hello", 1, true))

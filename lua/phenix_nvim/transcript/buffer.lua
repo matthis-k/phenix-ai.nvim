@@ -231,7 +231,7 @@ function M.attach_window(key, win)
   vim.keymap.set("n", "<CR>", function()
     M.toggle_tool(vim.api.nvim_get_current_win())
   end, {
-    buffer = M.ensure(resolved),
+    buf = M.ensure(resolved),
     silent = true,
     desc = "Cycle Phenix disclosure: compact / human / protocol",
   })
@@ -239,7 +239,7 @@ function M.attach_window(key, win)
     vim.keymap.set("n", key, function()
       M.set_tool_mode(vim.api.nvim_get_current_win(), nil, mode)
     end, {
-      buffer = M.ensure(resolved),
+      buf = M.ensure(resolved),
       silent = true,
       desc = "Phenix tool view: " .. mode,
     })
@@ -406,11 +406,17 @@ local function style_node(view, node, start_row, lines)
   end
   if node.kind == "tool" then
     local status, hl_group = tool_view.status(node.state)
-    vim.api.nvim_buf_add_highlight(target, style_namespace, "PhenixToolLabel", start_row, 0, 4)
+    vim.api.nvim_buf_set_extmark(target, style_namespace, start_row, 0, {
+      end_col = 4,
+      hl_group = "PhenixToolLabel",
+    })
     local header = lines[1] or ""
     local offset = header:find(status, 1, true)
     if offset ~= nil then
-      vim.api.nvim_buf_add_highlight(target, style_namespace, hl_group, start_row, offset - 1, offset - 1 + #status)
+      vim.api.nvim_buf_set_extmark(target, style_namespace, start_row, offset - 1, {
+        end_col = offset - 1 + #status,
+        hl_group = hl_group,
+      })
     end
     return
   end
@@ -424,7 +430,11 @@ local function style_node(view, node, start_row, lines)
   elseif node.kind == "review" then
     group_name = "DiagnosticInfo"
   end
-  vim.api.nvim_buf_add_highlight(target, style_namespace, group_name, start_row, 0, -1)
+  vim.api.nvim_buf_set_extmark(target, style_namespace, start_row, 0, {
+    end_col = #(lines[1] or ""),
+    hl_group = group_name,
+    hl_eol = true,
+  })
 end
 
 function M.render_node(node, key)
