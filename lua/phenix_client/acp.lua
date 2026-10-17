@@ -21,7 +21,7 @@ function M.new(options)
     job = nil, next_id = 0, requests = {}, waiting = {},
     subscribers = {}, partial = "", stderr = "",
     state = "idle", features = nil, catalogs = {}, active_session = nil,
-    permission_requests = {}, auth_methods = {},
+    permission_requests = {},
   }, Backend)
 end
 
@@ -201,24 +201,6 @@ function Backend:start(callback)
       -- Runtime control operations are not yet published by the P1 ACP host.
       management = { models = false, model_selection = false },
     }
-    self.auth_methods = {}
-    local seen_auth = {}
-    for _, method in ipairs(value.authMethods or {}) do
-      if type(method) == "table" and type(method.id) == "string"
-        and method.id ~= "" and not seen_auth[method.id]
-        and type(method.name) == "string"
-        and (method.type == nil or method.type == "agent")
-      then
-        seen_auth[method.id] = true
-        self.auth_methods[#self.auth_methods + 1] = {
-          id = method.id, name = method.name,
-          description = method.description, kind = "agent",
-          provider = "phenix", provider_name = "Phenix",
-          authenticated = false,
-        }
-      end
-    end
-    self.features.management.authentication = #self.auth_methods > 0
     self.state = "ready"
     local waiting = self.waiting
     self.waiting = {}
