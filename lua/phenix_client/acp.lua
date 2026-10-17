@@ -312,7 +312,17 @@ function Backend:call(op, args, callback)
   if op == "permissions.respond" then
     self:_permission_response(args.request_id, args.option_id, callback)
   elseif op == "models.list" then
-    local id = args.session_id or self.active_session
+    local id = args.session_id
+    if id == nil then
+      for session in pairs(self.catalogs) do
+        if id ~= nil then
+          finish(callback, nil, error_value(
+            "Model catalog query requires a session with multiple catalogs", "invalid_input"))
+          return
+        end
+        id = session
+      end
+    end
     local catalog = id and self.catalogs[id]
     if catalog then
       finish(callback, vim.deepcopy(catalog), nil)
