@@ -783,34 +783,43 @@ local function continue_provider_selection(provider, provider_name, generation)
 end
 
 function M.choose_selection()
-  if runtime.p1_active() then
-    runtime.choose_model(function(selection, error)
-      if error then
-        if error.kind ~= "cancelled" then
-          util.notify(error.message or vim.inspect(error), vim.log.levels.WARN)
-        end
-      elseif selection then
-        util.notify("Phenix model: " .. tostring(selection.selected), vim.log.levels.INFO)
-      end
-    end)
-    return
-  end
   selection_generation = selection_generation + 1
   local generation = selection_generation
-  runtime.list_selections(function(result, error)
+
+  -- The installed P1 ACP preset currently exposes only a standard model
+  -- config option. Prefer provider-first selection once the authoritative
+  -- runtime offers auth/catalog operations. Fall back to the ACP picker
+  -- only when those management operations are explicitly unsupported.
+  runtime.list_authentication_methods(function(auth_result, auth_error)
     if generation ~= selection_generation then
       return
     end
-    if error ~= nil then
-      util.notify(vim.inspect(error), vim.log.levels.ERROR)
+    if auth_error ~= nil then
+      if runtime.p1_active() and auth_error.kind == "unsupported" then
+        runtime.choose_model(function(selection, problem)
+          if generation ~= selection_generation then
+            return
+          end
+          if problem then
+            if problem.kind ~= "cancelled" then
+              util.notify(problem.message or vim.inspect(problem), vim.log.levels.WARN)
+            end
+          elseif selection then
+            util.notify("Phenix model: " .. tostring(selection.selected), vim.log.levels.INFO)
+          end
+        end)
+        return
+      end
+      util.notify(vim.inspect(auth_error), vim.log.levels.ERROR)
       return
     end
-    runtime.list_authentication_methods(function(auth_result, auth_error)
+
+    runtime.list_selections(function(result, error)
       if generation ~= selection_generation then
         return
       end
-      if auth_error ~= nil then
-        util.notify(vim.inspect(auth_error), vim.log.levels.ERROR)
+      if error ~= nil then
+        util.notify(vim.inspect(error), vim.log.levels.ERROR)
         return
       end
 
@@ -829,7 +838,8 @@ function M.choose_selection()
           local auth_methods = provider_authentication_methods(methods, provider)
           local requires_auth = provider_needs_authentication(auth_methods)
           local suffix = requires_auth and "  ·  authentication required" or ""
-          return selected_marker(result, candidates) .. provider_display_name(auth_methods, candidates, provider) .. suffix
+          return selected_marker(result, candidates)
+            .. provider_display_name(auth_methods, candidates, provider) .. suffix
         end,
       }, function(provider)
         if generation ~= selection_generation or provider == nil then
@@ -839,18 +849,20 @@ function M.choose_selection()
         local auth_methods = provider_authentication_methods(methods, provider)
         local provider_name = provider_display_name(auth_methods, candidates, provider)
         if provider_needs_authentication(auth_methods) then
-          choose_authentication_method(auth_methods, "Authenticate " .. provider_name, function(_, auth_error_value)
-            if generation ~= selection_generation then
-              return
-            end
-            if auth_error_value ~= nil then
-              if auth_error_value.kind ~= "cancelled" then
-                util.notify(vim.inspect(auth_error_value), vim.log.levels.ERROR)
+          choose_authentication_method(
+            auth_methods, "Authenticate " .. provider_name, function(_, auth_problem)
+              if generation ~= selection_generation then
+                return
               end
-              return
+              if auth_problem ~= nil then
+                if auth_problem.kind ~= "cancelled" and auth_problem.kind ~= "pending" then
+                  util.notify(vim.inspect(auth_problem), vim.log.levels.ERROR)
+                end
+                return
+              end
+              continue_provider_selection(provider, provider_name, generation)
             end
-            continue_provider_selection(provider, provider_name, generation)
-          end)
+          )
           return
         end
         if #candidates == 0 then
