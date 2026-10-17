@@ -81,6 +81,21 @@
           p1Plugin = self.packages.${system}.default;
         in
         {
+          provider-auth-ui = pkgs.runCommand "phenix-ai-nvim-provider-auth-ui"
+            { nativeBuildInputs = [ pkgs.neovim ]; }
+            ''
+              set -euo pipefail
+              export HOME="$TMPDIR/home"
+              export XDG_STATE_HOME="$TMPDIR/state"
+              mkdir -p "$HOME" "$XDG_STATE_HOME"
+              nvim --headless -u NONE \
+                --cmd ${pkgs.lib.escapeShellArg "set rtp^=${p1Plugin}"} \
+                -l ${source}/tests/commands.lua
+              nvim --headless -u NONE \
+                --cmd ${pkgs.lib.escapeShellArg "set rtp^=${p1Plugin}"} \
+                -l ${source}/tests/provider_auth_model_ux.lua
+              touch "$out"
+            '';
           p1-default-cutover = pkgs.runCommand "phenix-ai-nvim-p1-default-cutover"
             { nativeBuildInputs = [ pkgs.neovim ]; }
             ''

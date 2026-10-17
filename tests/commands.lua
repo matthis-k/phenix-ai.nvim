@@ -71,6 +71,7 @@ execute("new", "curr_window")
 execute("new", "fullscreen")
 execute("auth")
 execute("select")
+execute("model")
 execute("logs")
 execute("logs", "all")
 execute("logs", "execution")
@@ -100,6 +101,7 @@ assert(vim.deep_equal(names, {
   "new",
   "authenticate",
   "choose_selection",
+  "choose_selection",
   "logs",
   "logs",
   "logs",
@@ -115,9 +117,9 @@ assert(calls[14].args[1] == "sidebar")
 assert(calls[15].args[1] == "tab")
 assert(calls[16].args[1] == "curr_window")
 assert(calls[17].args[1] == "fullscreen")
-assert(calls[20].args[1] == "session")
-assert(calls[21].args[1] == "all")
-assert(calls[22].args[1] == "execution")
+assert(calls[21].args[1] == "session")
+assert(calls[22].args[1] == "all")
+assert(calls[23].args[1] == "execution")
 
 local before_invalid = #calls
 execute("toggle", "unexpected")
@@ -125,6 +127,7 @@ execute("send", "unexpected")
 execute("cancel", "unexpected")
 execute("auth", "unexpected")
 execute("select", "unexpected")
+execute("model", "unexpected")
 execute("logs", "all", "extra")
 execute("new", "unexpected")
 execute("new", "sidebar", "extra")
@@ -135,6 +138,7 @@ assert(#calls == before_invalid, "commands with unexpected or removed arguments 
 local roots = commands.complete("", "Phenix ", #"Phenix ")
 assert(vim.tbl_contains(roots, "image"))
 assert(vim.tbl_contains(roots, "logs"))
+assert(vim.tbl_contains(roots, "model"))
 assert(vim.tbl_contains(roots, "session"))
 assert(vim.tbl_contains(roots, "capabilities"))
 assert(vim.tbl_contains(roots, "reference"))
