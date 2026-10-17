@@ -306,7 +306,19 @@ function Backend:call(op, args, callback)
       finish(callback, nil, error_value("Model catalog not available for session", "unsupported"))
     end
   elseif op == "models.select" then
-    local id = args.session_id or self.active_session
+    local id = args.session_id
+    if id == nil then
+      -- The old SDK overload is only unambiguous with one live catalog.
+      -- In particular, never silently select for the last-loaded session.
+      for session in pairs(self.catalogs) do
+        if id ~= nil then
+          finish(callback, nil, error_value(
+            "Model selection requires a session with multiple catalogs", "invalid_input"))
+          return
+        end
+        id = session
+      end
+    end
     local catalog = id and self.catalogs[id]
     if type(args.model_id) ~= "string" or not catalog then
       finish(callback, nil, error_value("No selected ACP session", "unsupported"))
