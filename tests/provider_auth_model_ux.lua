@@ -18,6 +18,7 @@ local methods = {}
 local calls = {}
 local chosen_items = {}
 local prompts = {}
+local rendered_labels = {}
 local selected_model
 
 runtime.p1_active = function() return false end
@@ -33,11 +34,16 @@ util.notify = function() end
 vim.ui.select = function(items, opts, cb)
   prompts[#prompts + 1] = opts.prompt
   chosen_items[#chosen_items + 1] = vim.deepcopy(items)
+  local labels = {}
+  for _, item in ipairs(items) do
+    labels[#labels + 1] = opts.format_item and opts.format_item(item) or tostring(item)
+  end
+  rendered_labels[#rendered_labels + 1] = labels
   cb(items[1])
 end
 
 local function reset()
-  calls, chosen_items, prompts = {}, {}, {}
+  calls, chosen_items, prompts, rendered_labels = {}, {}, {}, {}
 end
 
 methods = {
@@ -85,6 +91,9 @@ actions.authenticate()
 assert(#chosen_items == 1 and #chosen_items[1] == 2,
   "same-method different-connection entries must both remain selectable")
 assert(chosen_items[1][1].connection_id ~= chosen_items[1][2].connection_id)
+assert(rendered_labels[1][1]:find("personal", 1, true)
+  and rendered_labels[1][2]:find("work", 1, true),
+  "credential choices must show their different connection identities")
 assert(#calls == 1 and calls[1].identity.connection_id == "personal"
   and calls[1].identity.method_id == "api-key")
 
