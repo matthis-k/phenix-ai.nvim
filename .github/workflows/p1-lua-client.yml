@@ -33,6 +33,9 @@ jobs:
             nvim --headless -u NONE --cmd "set rtp^=$PWD" -l tests/provider_auth_model_ux.lua
             nvim --headless -u NONE --cmd "set rtp^=$PWD" -l tests/p1_permission.lua
             nvim --headless -u NONE --cmd "set rtp^=$PWD" -l tests/p1_transcript.lua
+            nvim --headless -u NONE --cmd "set rtp^=$PWD" -l tests/p1_transcript_tail.lua
+            nvim --headless -u NONE --cmd "set rtp^=$PWD" -l tests/p1_transcript_updates.lua
+            nvim --headless -u NONE --cmd "set rtp^=$PWD" -l tests/p1_transcript_disclosure.lua
             nvim --headless -u NONE --cmd "set rtp^=$PWD" -l tests/p1_ui_runtime.lua
           '
       - name: Verify the installed P1 Basic package and real session replay

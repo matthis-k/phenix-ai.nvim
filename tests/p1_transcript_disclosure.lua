@@ -1,5 +1,8 @@
 -- Installed P1 transcript presentation: compact/human/protocol are
 -- Neovim-only display controls. They never modify Phenix session authority.
+vim.deprecate = function(name)
+  error("deprecated API: " .. name)
+end
 local tool_view = require("phenix_nvim.transcript.tool_view")
 local buffer = require("phenix_nvim.transcript.buffer")
 local node = {
@@ -46,4 +49,25 @@ assert(buffer.toggle_tool(win), "tool disclosure could not advance")
 lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
 assert(vim.inspect(lines):find("Stream", 1, true), "protocol mode not displayed")
 buffer.detach_window(win)
+-- Inspect the actual bytes covered, not just the presence of highlight groups.
+for _, state in ipairs({ "running", "completed", "failed" }) do
+  for _, mode in ipairs({ "compact", "human", "protocol" }) do
+    node.state = state
+    node.callable_id = state .. ".worker"
+    buffer.render_projection({ order = { node.id }, nodes = { [node.id] = node } })
+    vim.api.nvim_win_set_cursor(win, { 1, 0 })
+    assert(buffer.set_tool_mode(win, buffer.default_key(), mode))
+    local header = vim.api.nvim_buf_get_lines(bufnr, 0, 1, false)[1]
+    local status, status_group = tool_view.status(state)
+    local covered = {}
+    for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(bufnr, style_ns, 0, -1, { details = true })) do
+      local details = mark[4]
+      covered[details.hl_group] = { text = header:sub(mark[3] + 1, details.end_col), col = mark[3] }
+    end
+    assert(covered[status_group].text == status, "status highlight covers incorrect bytes")
+    assert(covered[status_group].col == #header - #status,
+      state .. "/" .. mode .. ": status highlight covers callable substring, not suffix")
+    assert(covered.PhenixToolLabel.text == "Tool", state .. "/" .. mode .. ": label covers marker, not Tool")
+  end
+end
 print("P1 installed transcript character-cell disclosure accepted")

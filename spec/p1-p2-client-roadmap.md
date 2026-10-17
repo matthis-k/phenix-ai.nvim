@@ -1,7 +1,7 @@
 # Neovim client roadmap: P1 Basic to P2 Advanced
 
 Status: P1 Basic Neovim default ACCEPTED (N0–N3); broader runtime management, integrations and P2 Advanced remain open.
-Updated: 2026-10-17
+Updated: 2026-10-18
 Owner: `phenix-ai.nvim`. Distribution work lives in [phenix-nvim's roadmap](https://github.com/matthis-k/phenix-nvim/blob/main/spec/p1-p2-distribution-roadmap.md).
 
 ## Authority and references
@@ -116,6 +116,19 @@ P1 runtime is accepted. **N0–N3: 4 accepted; N4–N6: 3 deferred/open; C1–C7
 Release evidence: [#48](https://github.com/matthis-k/phenix-ai.nvim/pull/48) merged at `aefc618f`; [#50](https://github.com/matthis-k/phenix-ai.nvim/pull/50) merged at `2bc128a7` after exact-head Source, Client integration and `lua-client` checks passed. The N3 default closure is the P1 Basic ACP plugin with no native `phenix.so`; `checks.<system>.p1-default-cutover` and `p1-product` exercise the installed product. The optional live HTTP Model remains a distinct composition.
 
 Presentation evidence: [#52](https://github.com/matthis-k/phenix-ai.nvim/pull/52) merged at `36bc9a87` for compact/human/protocol tool disclosure, and [#47](https://github.com/matthis-k/phenix-ai.nvim/pull/47) merged at `3d42a4ab` for the bounded, display-only local UI renderer. Both run inside `p1-default-cutover`; neither is A2UI negotiation or a runtime catalog. N4 remains blocked on the runtime-owned provider/auth/model operations from [#891](https://github.com/matthis-k/phenix-ai/issues/891); N5/N6 stay open until those operations and the declared integration matrix are verified.
+
+Phase 0 client hardening (2026-10-18): `tests/p1_transcript_tail.lua`,
+`tests/p1_transcript_updates.lua` and `tests/p1_transcript_disclosure.lua`
+reproduce deprecated nonempty-tail indexing, first/middle node grow/shrink
+corruption on subsequent updates, and highlights covering the disclosure marker
+or a status substring in a callable name at baseline `82a2a2f`. They pass after
+the focused renderer fixes on Neovim 0.12.4 and 0.13.0-nightly+7737589 with
+deprecations fatal. Coverage includes ASCII, emoji, multibyte and combining
+tails, wrapped follow-tail, three-node boundaries, disclosure routing, and exact
+highlighted bytes for all three statuses and compact/human/protocol markers.
+The same tests run in the existing SDK workflow and installed
+`p1-default-cutover` flake check. This is local presentation/API maintenance,
+not runtime/distribution work or acceptance of N4, N5, N6 or any P2 stage.
 
 Cross-repository distribution promotion lives in [phenix-nvim #117](https://github.com/matthis-k/phenix-nvim/pull/117) and its distribution roadmap, rather than being inferred from client acceptance.
 

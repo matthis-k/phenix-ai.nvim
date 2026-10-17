@@ -350,7 +350,7 @@ end
 
 local write_handlers = vim.api.nvim_get_autocmds({
   event = "BufWriteCmd",
-  buffer = compose_buffer,
+  buf = compose_buffer,
 })
 assert(#write_handlers == 1, "compose buffer must send through exactly one BufWriteCmd handler")
 
