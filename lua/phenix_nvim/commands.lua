@@ -9,6 +9,7 @@ local roots = {
   "capabilities",
   "image",
   "logs",
+  "model",
   "new",
   "reference",
   "select",
@@ -79,11 +80,11 @@ function M.execute(options)
     end
     return
   end
-  if command == "select" then
+  if command == "model" or command == "select" then
     if #args == 0 then
       actions.choose_selection()
     else
-      usage("Usage: Phenix select")
+      usage("Usage: Phenix model")
     end
     return
   end

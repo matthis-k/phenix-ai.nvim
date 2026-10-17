@@ -1,5 +1,5 @@
 -- ACP v1 transport for the non-plugin Lua client SDK.
--- Only requests supported by P1 are exposed. No model-management RPC exists yet.
+-- ACP session config options remain the runtime-authoritative model surface.
 local M = {}
 local Backend = {}
 Backend.__index = Backend
@@ -218,6 +218,7 @@ function Backend:_catalog(session_id, options)
       and type(option.currentValue) == "string"
     then
       local models = {}
+      local current_offered = false
       for _, entry in ipairs(option.options) do
         if type(entry.value) == "string" and entry.value ~= ""
           and type(entry.name) == "string"
@@ -225,9 +226,10 @@ function Backend:_catalog(session_id, options)
           models[#models + 1] = {
             id = entry.value, name = entry.name, authorized = true,
           }
+          if entry.value == option.currentValue then current_offered = true end
         end
       end
-      if #models > 0 then
+      if #models > 0 and current_offered then
         catalog = {
           session_id = session_id,
           selected = option.currentValue,
@@ -247,6 +249,7 @@ function Backend:_catalog(session_id, options)
   -- One session without a catalog cannot suppress another session's
   -- still-authoritative runtime-advertised model choices.
   self.features.management.models = next(self.catalogs) ~= nil
+  self.features.management.model_selection = next(self.catalogs) ~= nil
   if catalog then
     local listeners = {}
     for _, subscriber in ipairs(self.subscribers) do
@@ -302,6 +305,37 @@ function Backend:call(op, args, callback)
     else
       finish(callback, nil, error_value("Model catalog not available for session", "unsupported"))
     end
+  elseif op == "models.select" then
+    local id = args.session_id or self.active_session
+    local catalog = id and self.catalogs[id]
+    if type(args.model_id) ~= "string" or not catalog then
+      finish(callback, nil, error_value("No selected ACP session", "unsupported"))
+      return
+    end
+    local admitted = false
+    for _, model in ipairs(catalog.models) do
+      if model.id == args.model_id then admitted = true; break end
+    end
+    if not admitted then
+      finish(callback, nil, error_value("Model was not offered by Phenix", "denied"))
+      return
+    end
+    self:_request("session/set_config_option", {
+      sessionId = id, configId = "model", value = args.model_id,
+    }, function(value, err)
+      if err then finish(callback, nil, err); return end
+      if type(value) ~= "table" or type(value.configOptions) ~= "table" then
+        finish(callback, nil, error_value("ACP model change omitted confirmed state", "protocol"))
+        return
+      end
+      self:_catalog(id, value.configOptions)
+      local updated = self.catalogs[id]
+      if not updated or updated.selected ~= args.model_id then
+        finish(callback, nil, error_value("Runtime did not confirm selected model", "protocol"))
+        return
+      end
+      finish(callback, { selected = updated.selected }, nil)
+    end)
   elseif op == "sessions.new" then
     self:_request("session/new", { cwd = self.cwd, mcpServers = {} },
       function(value, err)
