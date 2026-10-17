@@ -486,14 +486,46 @@ function M.authenticate()
       util.notify("No Phenix authentication methods are available", vim.log.levels.WARN)
       return
     end
-    vim.ui.select(methods, {
-      prompt = "Phenix authentication",
-      format_item = authentication_label,
-    }, function(method)
-      if generation ~= auth_generation or method == nil then
+    local providers = {}
+    local seen = {}
+    for _, method in ipairs(methods) do
+      if type(method.provider) == "string" and method.provider ~= ""
+        and not seen[method.provider]
+      then
+        seen[method.provider] = true
+        providers[#providers + 1] = method.provider
+      end
+    end
+    table.sort(providers)
+    if #providers == 0 then
+      util.notify("Phenix did not advertise a valid authentication provider", vim.log.levels.ERROR)
+      return
+    end
+    vim.ui.select(providers, {
+      prompt = "Phenix provider",
+      format_item = function(provider)
+        for _, method in ipairs(methods) do
+          if method.provider == provider then
+            return method.provider_name or provider
+          end
+        end
+        return provider
+      end,
+    }, function(provider)
+      if generation ~= auth_generation or provider == nil then
         return
       end
-      authenticate_method(method)
+      local offered = {}
+      local provider_name = provider
+      for _, method in ipairs(methods) do
+        if method.provider == provider then
+          offered[#offered + 1] = method
+          provider_name = method.provider_name or provider_name
+        end
+      end
+      -- One method starts immediately. The method picker is only shown
+      -- when Phenix advertises two or more choices for this provider.
+      choose_authentication_method(offered, "Authenticate " .. provider_name)
     end)
   end)
 end
