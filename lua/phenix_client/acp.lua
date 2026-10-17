@@ -131,7 +131,9 @@ function Backend:_response(frame)
       if type(detail) == "string" and #detail <= 1024
         and (detail:find("SQLite", 1, true)
           or detail:find("PHENIX_BASIC_SQLITE_PATH", 1, true)
-          or detail:find("session already owned", 1, true))
+          or detail:find("session already owned", 1, true)
+          or detail:find("HTTP model status 401", 1, true)
+          or detail:find("HTTP model status 403", 1, true))
       then
         message = detail
       end
