@@ -113,6 +113,11 @@
               nvim --headless -u NONE \
                 --cmd ${pkgs.lib.escapeShellArg "set rtp^=${self.packages.${system}.default}"} \
                 -l ${source}/tests/p1_package_default.lua
+              # Local display-only projections; not an ACP extension or
+              # an agent-facing A2UI protocol. Verify in the installed plugin.
+              nvim --headless -u NONE \
+                --cmd ${pkgs.lib.escapeShellArg "set rtp^=${self.packages.${system}.default}"} \
+                -l ${source}/tests/structured_ui.lua
               nvim --headless -u NONE \
                 --cmd ${pkgs.lib.escapeShellArg "set rtp^=${self.packages.${system}.default}"} \
                 -l ${source}/tests/p1_transcript_disclosure.lua
