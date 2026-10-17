@@ -419,7 +419,19 @@ local function authenticate_method(method, callback)
     })
     return
   end
-  if string.lower(tostring(method.kind or "")) ~= "api_token" then
+  local kind = string.lower(tostring(method.kind or ""))
+  local api_key = kind == "apikey" or kind == "api_key" or kind == "api_token"
+  local oauth = kind == "oauth" or kind == "oauthauthorizationcode"
+    or kind == "oauthdevicecode" or kind == "oauth_authorization_code"
+    or kind == "oauth_device_code"
+  if not api_key and not oauth then
+    finish_authentication(callback, nil, {
+      kind = "unsupported",
+      message = "Phenix advertised an unrecognized authentication kind",
+    })
+    return
+  end
+  if oauth then
     start_authentication(method, nil, callback)
     return
   end
