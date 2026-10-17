@@ -294,12 +294,13 @@ local function choice_label(item, selected)
 end
 
 local function open_external_auth(result)
-  local uri = result and result.uri
+  local uri = result and (result.url or result.uri)
   if type(uri) ~= "string" or uri == "" then
     return false
   end
-  if result.instructions ~= nil and result.instructions ~= "" then
-    util.notify(result.instructions, vim.log.levels.INFO)
+  local instructions = result.instructions or result.prompt
+  if instructions ~= nil and instructions ~= "" then
+    util.notify(instructions, vim.log.levels.INFO)
   end
   if type(vim.ui.open) == "function" then
     local call_ok, handle, open_error = pcall(vim.ui.open, uri)
@@ -330,86 +331,107 @@ runtime.on_event(function(kind, status)
   connection_state = next_state
 end)
 
-local AUTH_POLL_INTERVAL_MS = 1000
-local AUTH_POLL_ATTEMPTS = 600
-
 local function authentication_kind(result)
   return result and string.lower(tostring(result.kind or "")) or ""
 end
 
-local function finish_authentication(callback, value, error)
+local function finish_authentication(callback, value, problem)
   if callback ~= nil then
-    util.safe_call(callback, value, error)
-  elseif error ~= nil then
-    util.notify(vim.inspect(error), vim.log.levels.ERROR)
+    util.safe_call(callback, value, problem)
+  elseif problem ~= nil then
+    util.notify(problem.message or vim.inspect(problem),
+      problem.kind == "pending" and vim.log.levels.INFO or vim.log.levels.ERROR)
   end
 end
 
-local function poll_authentication(method, generation, attempt, callback)
-  if generation ~= auth_generation then
-    return
+-- A method ID is only unique within its provider and connection. Preserve
+-- all three authoritative identities instead of submitting its UI label.
+local function authentication_identity(method)
+  local provider_id = method.provider_id or method.provider
+  local connection_id = method.connection_id or method.connection
+  local method_id = method.method_id or method.id
+  if type(provider_id) ~= "string" or provider_id == ""
+    or type(connection_id) ~= "string" or connection_id == ""
+    or type(method_id) ~= "string" or method_id == ""
+  then
+    return nil
   end
-  runtime.authenticate(method.id, nil, function(result, error)
-    if generation ~= auth_generation then
-      return
-    end
-    if error ~= nil then
-      finish_authentication(callback, nil, error)
-      return
-    end
-    local kind = authentication_kind(result)
-    if kind == "authenticated" then
-      util.notify((method.provider or "Phenix") .. " authentication completed", vim.log.levels.INFO)
-      finish_authentication(callback, result, nil)
-      return
-    end
-    if kind ~= "external" then
-      finish_authentication(callback, nil, { message = "Phenix returned an unknown authentication state" })
-      return
-    end
-    if attempt >= AUTH_POLL_ATTEMPTS then
-      finish_authentication(callback, nil, { message = "Phenix authentication timed out" })
-      return
-    end
-    vim.defer_fn(function()
-      poll_authentication(method, generation, attempt + 1, callback)
-    end, AUTH_POLL_INTERVAL_MS)
-  end)
+  return {
+    provider_id = provider_id,
+    connection_id = connection_id,
+    method_id = method_id,
+  }
 end
 
 local function start_authentication(method, secret, callback)
+  local identity = authentication_identity(method)
+  if identity == nil then
+    finish_authentication(callback, nil, {
+      kind = "invalid_input",
+      message = "Phenix advertised authentication without provider/connection/method identity",
+    })
+    return
+  end
   auth_generation = auth_generation + 1
   local generation = auth_generation
-  runtime.authenticate(method.id, secret, function(result, error)
+  runtime.authenticate(identity, secret, function(result, problem)
     if generation ~= auth_generation then
       return
     end
-    if error ~= nil then
-      finish_authentication(callback, nil, error)
+    if problem ~= nil then
+      finish_authentication(callback, nil, problem)
       return
     end
     local kind = authentication_kind(result)
     if kind == "authenticated" then
-      util.notify((method.provider or "Phenix") .. " authentication completed", vim.log.levels.INFO)
+      util.notify(identity.provider_id .. " authentication completed", vim.log.levels.INFO)
       finish_authentication(callback, result, nil)
       return
     end
-    if kind ~= "external" then
-      finish_authentication(callback, nil, { message = "Phenix returned an unknown authentication state" })
+    if kind ~= "external" and kind ~= "openbrowser" and kind ~= "deviceauthorization" then
+      finish_authentication(callback, nil, {
+        kind = "protocol", message = "Phenix returned an unknown authentication state",
+      })
       return
     end
     if not open_external_auth(result) then
-      finish_authentication(callback, nil, { message = "Phenix authentication did not provide a valid authorization URL" })
+      finish_authentication(callback, nil, {
+        kind = "protocol", message = "Phenix authentication did not provide an authorization URL",
+      })
       return
     end
-    vim.defer_fn(function()
-      poll_authentication(method, generation, 1, callback)
-    end, AUTH_POLL_INTERVAL_MS)
+    -- AuthChallenge has an attempt ID, but ProviderAuth::status currently
+    -- describes profiles, not challenge completion. Calling begin again is
+    -- NOT a status poll. A future runtime status/notification operation may
+    -- resume this attempt without creating a second OAuth challenge.
+    finish_authentication(callback, nil, {
+      kind = "pending",
+      message = "Authorization opened. Recheck Phenix authentication status after completing it.",
+    })
   end)
 end
 
 local function authenticate_method(method, callback)
-  if string.lower(tostring(method.kind or "")) ~= "api_token" then
+  if authentication_identity(method) == nil then
+    finish_authentication(callback, nil, {
+      kind = "invalid_input",
+      message = "Authentication method has no complete provider/connection identity",
+    })
+    return
+  end
+  local kind = string.lower(tostring(method.kind or ""))
+  local api_key = kind == "apikey" or kind == "api_key" or kind == "api_token"
+  local oauth = kind == "oauth" or kind == "oauthauthorizationcode"
+    or kind == "oauthdevicecode" or kind == "oauth_authorization_code"
+    or kind == "oauth_device_code"
+  if not api_key and not oauth then
+    finish_authentication(callback, nil, {
+      kind = "unsupported",
+      message = "Phenix advertised an unrecognized authentication kind",
+    })
+    return
+  end
+  if oauth then
     start_authentication(method, nil, callback)
     return
   end
@@ -773,34 +795,43 @@ local function continue_provider_selection(provider, provider_name, generation)
 end
 
 function M.choose_selection()
-  if runtime.p1_active() then
-    runtime.choose_model(function(selection, error)
-      if error then
-        if error.kind ~= "cancelled" then
-          util.notify(error.message or vim.inspect(error), vim.log.levels.WARN)
-        end
-      elseif selection then
-        util.notify("Phenix model: " .. tostring(selection.selected), vim.log.levels.INFO)
-      end
-    end)
-    return
-  end
   selection_generation = selection_generation + 1
   local generation = selection_generation
-  runtime.list_selections(function(result, error)
+
+  -- The installed P1 ACP preset currently exposes only a standard model
+  -- config option. Prefer provider-first selection once the authoritative
+  -- runtime offers auth/catalog operations. Fall back to the ACP picker
+  -- only when those management operations are explicitly unsupported.
+  runtime.list_authentication_methods(function(auth_result, auth_error)
     if generation ~= selection_generation then
       return
     end
-    if error ~= nil then
-      util.notify(vim.inspect(error), vim.log.levels.ERROR)
+    if auth_error ~= nil then
+      if runtime.p1_active() and auth_error.kind == "unsupported" then
+        runtime.choose_model(function(selection, problem)
+          if generation ~= selection_generation then
+            return
+          end
+          if problem then
+            if problem.kind ~= "cancelled" then
+              util.notify(problem.message or vim.inspect(problem), vim.log.levels.WARN)
+            end
+          elseif selection then
+            util.notify("Phenix model: " .. tostring(selection.selected), vim.log.levels.INFO)
+          end
+        end)
+        return
+      end
+      util.notify(vim.inspect(auth_error), vim.log.levels.ERROR)
       return
     end
-    runtime.list_authentication_methods(function(auth_result, auth_error)
+
+    runtime.list_selections(function(result, error)
       if generation ~= selection_generation then
         return
       end
-      if auth_error ~= nil then
-        util.notify(vim.inspect(auth_error), vim.log.levels.ERROR)
+      if error ~= nil then
+        util.notify(vim.inspect(error), vim.log.levels.ERROR)
         return
       end
 
@@ -819,7 +850,8 @@ function M.choose_selection()
           local auth_methods = provider_authentication_methods(methods, provider)
           local requires_auth = provider_needs_authentication(auth_methods)
           local suffix = requires_auth and "  ·  authentication required" or ""
-          return selected_marker(result, candidates) .. provider_display_name(auth_methods, candidates, provider) .. suffix
+          return selected_marker(result, candidates)
+            .. provider_display_name(auth_methods, candidates, provider) .. suffix
         end,
       }, function(provider)
         if generation ~= selection_generation or provider == nil then
@@ -829,18 +861,20 @@ function M.choose_selection()
         local auth_methods = provider_authentication_methods(methods, provider)
         local provider_name = provider_display_name(auth_methods, candidates, provider)
         if provider_needs_authentication(auth_methods) then
-          choose_authentication_method(auth_methods, "Authenticate " .. provider_name, function(_, auth_error_value)
-            if generation ~= selection_generation then
-              return
-            end
-            if auth_error_value ~= nil then
-              if auth_error_value.kind ~= "cancelled" then
-                util.notify(vim.inspect(auth_error_value), vim.log.levels.ERROR)
+          choose_authentication_method(
+            auth_methods, "Authenticate " .. provider_name, function(_, auth_problem)
+              if generation ~= selection_generation then
+                return
               end
-              return
+              if auth_problem ~= nil then
+                if auth_problem.kind ~= "cancelled" and auth_problem.kind ~= "pending" then
+                  util.notify(vim.inspect(auth_problem), vim.log.levels.ERROR)
+                end
+                return
+              end
+              continue_provider_selection(provider, provider_name, generation)
             end
-            continue_provider_selection(provider, provider_name, generation)
-          end)
+          )
           return
         end
         if #candidates == 0 then

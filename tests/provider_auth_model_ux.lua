@@ -12,6 +12,7 @@ local originals = {
   ui_select = vim.ui.select,
   input_secret = util.input_secret,
   notify = util.notify,
+  ui_open = vim.ui.open,
 }
 local methods = {}
 local calls = {}
@@ -23,8 +24,8 @@ runtime.p1_active = function() return false end
 runtime.list_authentication_methods = function(cb)
   cb({ methods = vim.deepcopy(methods) }, nil)
 end
-runtime.authenticate = function(id, secret, cb)
-  calls[#calls + 1] = { id = id, secret = secret }
+runtime.authenticate = function(identity, secret, cb)
+  calls[#calls + 1] = { identity = vim.deepcopy(identity), secret = secret }
   cb({ kind = "authenticated" }, nil)
 end
 util.input_secret = function(_, cb) cb("fake-key-from-ui", nil) end
@@ -40,27 +41,68 @@ local function reset()
 end
 
 methods = {
-  { provider = "openai", provider_name = "OpenAI", id = "api", kind = "api_token", name = "API key" },
-  { provider = "openai", provider_name = "OpenAI", id = "oauth", kind = "oauth", name = "ChatGPT" },
-  { provider = "anthropic", provider_name = "Anthropic", id = "anthropic-key", kind = "api_token", name = "API key" },
+  { provider = "openai", connection_id = "api", provider_name = "OpenAI", id = "api", kind = "api_token", name = "API key" },
+  { provider = "openai", connection_id = "subscription", provider_name = "OpenAI", id = "oauth", kind = "oauth", name = "ChatGPT" },
+  { provider = "anthropic", connection_id = "api", provider_name = "Anthropic", id = "anthropic-key", kind = "ApiKey", name = "API key" },
 }
 actions.authenticate()
 assert(#prompts == 1, "single-method provider skips method picker")
 assert(prompts[1] == "Phenix provider")
 assert(#chosen_items[1] == 2 and chosen_items[1][1] == "anthropic")
 assert(chosen_items[2] == nil, "one-method provider should not show a method selector")
-assert(#calls == 1 and calls[1].id == "anthropic-key")
+assert(#calls == 1 and calls[1].identity.provider_id == "anthropic"
+  and calls[1].identity.connection_id == "api"
+  and calls[1].identity.method_id == "anthropic-key")
+assert(calls[1].secret == "fake-key-from-ui",
+  "canonical ApiKey kind must request a secret, not launch OAuth")
 assert(calls[1].secret == "fake-key-from-ui")
 
 reset()
 methods = {
-  { provider = "openai", provider_name = "OpenAI", id = "api", kind = "api_token", name = "API key" },
-  { provider = "openai", provider_name = "OpenAI", id = "oauth", kind = "oauth", name = "ChatGPT" },
+  { provider = "openai", connection_id = "api", provider_name = "OpenAI", id = "api", kind = "api_token", name = "API key" },
+  { provider = "openai", connection_id = "subscription", provider_name = "OpenAI", id = "oauth", kind = "oauth", name = "ChatGPT" },
 }
 actions.authenticate()
 assert(#prompts == 2, "multiple methods must show the second-level method picker")
 assert(#chosen_items[2] == 2)
-assert(calls[1].id == "api")
+assert(calls[1].identity.method_id == "api"
+  and calls[1].identity.connection_id == "api")
+
+-- Two accounts may advertise the exact same method ID. Submitting only
+-- the method string would authenticate the wrong connection.
+reset()
+methods = {
+  { provider = "openai", connection_id = "personal", id = "api-key",
+    kind = "api_token", name = "Personal key" },
+  { provider = "openai", connection_id = "work", id = "api-key",
+    kind = "api_token", name = "Work key" },
+}
+actions.authenticate()
+assert(#chosen_items == 2 and #chosen_items[2] == 2,
+  "same-method different-connection entries must both remain selectable")
+assert(#calls == 1 and calls[1].identity.connection_id == "personal"
+  and calls[1].identity.method_id == "api-key")
+
+-- Browser authorization must be initiated only once. ProviderAuth::begin is
+-- not a polling API; its separate status mechanism is not yet installed.
+reset()
+local opened
+vim.ui.open = function(uri) opened = uri; return true end
+runtime.authenticate = function(identity, secret, cb)
+  calls[#calls + 1] = { identity = vim.deepcopy(identity), secret = secret }
+  cb({ kind = "external", uri = "https://example.test/authorize",
+    attempt_id = "attempt-1" }, nil)
+end
+methods = { { provider = "openai", connection_id = "subscription",
+  id = "oauth", kind = "OAuthAuthorizationCode", name = "Subscription" } }
+actions.authenticate()
+assert(opened == "https://example.test/authorize")
+assert(#calls == 1, "OAuth challenge was restarted while awaiting completion")
+runtime.authenticate = function(identity, secret, cb)
+  calls[#calls + 1] = { identity = vim.deepcopy(identity), secret = secret }
+  cb({ kind = "authenticated" }, nil)
+end
+vim.ui.open = originals.ui_open
 
 reset()
 methods = {}
@@ -94,8 +136,34 @@ assert(
   "account variants must retain their exact model ID"
 )
 
+-- The installed P1 frontend must adopt provider-first selection once
+-- runtime management is available. Before that, retain the standard ACP
+-- picker when authentication methods are explicitly unsupported.
+runtime.p1_active = function() return true end
+reset()
+selected_model = nil
+actions.choose_selection()
+assert(selected_model == "account-one" and #prompts == 3,
+  "P1 management-capable runtime bypassed provider-first model choice")
+
+local fallback = 0
+runtime.list_authentication_methods = function(cb)
+  cb(nil, { kind = "unsupported", message = "auth not installed" })
+end
+local original_choose_model = runtime.choose_model
+runtime.choose_model = function(cb)
+  fallback = fallback + 1
+  cb({ selected = "phenix.model.scripted" }, nil)
+end
+reset()
+actions.choose_selection()
+assert(fallback == 1 and #prompts == 0,
+  "P1 fallback must only use the ACP model picker when auth is unsupported")
+runtime.choose_model = original_choose_model
+
 for key, value in pairs(originals) do
   if key == "ui_select" then vim.ui.select = value
+  elseif key == "ui_open" then vim.ui.open = value
   elseif key == "input_secret" then util.input_secret = value
   elseif key == "notify" then util.notify = value
   else runtime[key] = value end

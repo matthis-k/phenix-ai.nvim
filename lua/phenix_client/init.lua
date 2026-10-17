@@ -171,9 +171,18 @@ function Client:list_models(session_or_callback, callback)
   self:_call("list_models", { session_id = session_id }, callback)
 end
 
-function Client:set_model(model_id, callback)
+-- Supply the session explicitly when multiple ACP sessions coexist. The
+-- historical (model, callback) form remains safe only with one catalog.
+function Client:set_model(session_or_model, model_or_callback, callback)
+  local session_id, model_id
+  if model_or_callback == nil or type(model_or_callback) == "function" then
+    model_id, callback = session_or_model, model_or_callback
+  else
+    session_id, model_id = session_or_model, model_or_callback
+    assert(type(session_id) == "string" and session_id ~= "")
+  end
   assert(type(model_id) == "string" and model_id ~= "")
-  self:_call("set_model", { model_id = model_id }, callback)
+  self:_call("set_model", { session_id = session_id, model_id = model_id }, callback)
 end
 
 function Client:new_session(callback)

@@ -162,6 +162,38 @@ assert(retained and retained.selected == "phenix.model.scripted")
 assert(absent and absent.kind == "unsupported")
 assert(#sent == 7, "per-session model discovery must not add custom ACP RPCs")
 
+-- The ACP controller places the safe Storage failure in error.data, not
+-- necessarily in message. Preserve its actionable diagnosis in the UI.
+local storage_error
+sdk:send("s1", "diagnostic", function(_, err) storage_error = err end)
+assert(sent[8].method == "session/prompt")
+receive({ jsonrpc = "2.0", id = sent[8].id, error = {
+  code = -32603, message = "Internal error",
+  data = "PHENIX_BASIC_SQLITE_PATH is required for session ownership",
+} })
+assert(storage_error and storage_error.kind == "remote")
+assert(storage_error.message:find("PHENIX_BASIC_SQLITE_PATH", 1, true))
+
+-- An unknown provider's error data is not trusted as UI diagnostic text.
+local remote_error
+sdk:send("s1", "provider-error", function(_, err) remote_error = err end)
+assert(sent[9].method == "session/prompt")
+receive({ jsonrpc = "2.0", id = sent[9].id, error = {
+  code = -32603, message = "Internal error",
+  data = "opaque provider response",
+} })
+assert(remote_error and remote_error.message == "Internal error")
+
+local auth_failure
+sdk:send("s1", "invalid credential", function(_, err) auth_failure = err end)
+assert(sent[10].method == "session/prompt")
+receive({ jsonrpc = "2.0", id = sent[10].id, error = {
+  code = -32603, message = "Internal error",
+  data = "ModelFailed: HTTP model status 401",
+} })
+assert(auth_failure and auth_failure.message:find("HTTP model status 401", 1, true),
+  "the user must see the actionable credential failure")
+
 sdk:close()
 assert(killed)
 

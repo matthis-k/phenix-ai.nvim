@@ -15,6 +15,8 @@ local backend = {
         { id = "provider/two", name = "Runtime Two" },
       } })
     elseif op == "models.select" then
+      assert(args.session_id == "selected-session",
+        "model mutation must target the same session as the catalog")
       requested = args.model_id
       cb({ selected = args.model_id })
     else
