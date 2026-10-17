@@ -1,5 +1,5 @@
 -- ACP v1 transport for the non-plugin Lua client SDK.
--- Only requests supported by P1 are exposed. No model-management RPC exists yet.
+-- ACP session config options remain the runtime-authoritative model surface.
 local M = {}
 local Backend = {}
 Backend.__index = Backend
@@ -247,6 +247,7 @@ function Backend:_catalog(session_id, options)
   -- One session without a catalog cannot suppress another session's
   -- still-authoritative runtime-advertised model choices.
   self.features.management.models = next(self.catalogs) ~= nil
+  self.features.management.model_selection = next(self.catalogs) ~= nil
   if catalog then
     local listeners = {}
     for _, subscriber in ipairs(self.subscribers) do
