@@ -216,6 +216,20 @@ assert(fallback == 1 and #prompts == 0,
   "P1 fallback must only use the ACP model picker when auth is unsupported")
 runtime.choose_model = original_choose_model
 
+-- The installed Basic preset advertises auth as unsupported. The command
+-- should report a missing capability, not a failed login or credential prompt.
+local notices = {}
+util.notify = function(message, level)
+  notices[#notices + 1] = { message = message, level = level }
+end
+reset()
+actions.authenticate()
+assert(#notices == 1 and notices[1].level == vim.log.levels.WARN
+  and notices[1].message:find("auth", 1, true),
+  "unsupported runtime authentication must be a clear warning")
+assert(#calls == 0 and #prompts == 0,
+  "unsupported runtime authentication must not request a credential")
+
 for key, value in pairs(originals) do
   if key == "ui_select" then vim.ui.select = value
   elseif key == "ui_open" then vim.ui.open = value
