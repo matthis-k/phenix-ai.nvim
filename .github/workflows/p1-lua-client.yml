@@ -29,6 +29,8 @@ jobs:
             nvim --headless -u NONE --cmd "set rtp^=$PWD" -l tests/p1_client_close.lua
             nvim --headless -u NONE --cmd "set rtp^=$PWD" -l tests/p1_client_transport.lua
             nvim --headless -u NONE --cmd "set rtp^=$PWD" -l tests/p1_model_picker.lua
+            nvim --headless -u NONE --cmd "set rtp^=$PWD" -l tests/commands.lua
+            nvim --headless -u NONE --cmd "set rtp^=$PWD" -l tests/provider_auth_model_ux.lua
             nvim --headless -u NONE --cmd "set rtp^=$PWD" -l tests/p1_permission.lua
             nvim --headless -u NONE --cmd "set rtp^=$PWD" -l tests/p1_transcript.lua
             nvim --headless -u NONE --cmd "set rtp^=$PWD" -l tests/p1_ui_runtime.lua
