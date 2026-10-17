@@ -541,7 +541,10 @@ local function model_selections(result)
       and item.model ~= ""
     then
       local thinking = item.thinking or ""
-      local key = item.provider .. "\0" .. item.model .. "\0" .. thinking
+      -- Provider identities can share a model name while using different
+      -- endpoints, accounts or billing. Selection IDs are runtime-owned.
+      local key = type(item.id) == "string" and item.id ~= ""
+        and item.id or (item.provider .. "\0" .. item.model .. "\0" .. thinking)
       if not seen[key] then
         seen[key] = true
         table.insert(models, item)
@@ -653,6 +656,14 @@ local function choose_thinking(result, models, provider, provider_name, model, g
     prompt = "Thinking for " .. model,
     format_item = function(item)
       local label = item.thinking or "default"
+      local account = item.profile_name or item.profile_id
+      local connection = item.connection_name or item.connection_id
+      if type(connection) == "string" and connection ~= "" then
+        label = label .. " / " .. connection
+      end
+      if type(account) == "string" and account ~= "" then
+        label = label .. " / " .. account
+      end
       return (item.id == result.selected and "✓ " or "  ") .. label
     end,
   }, function(item)
