@@ -150,8 +150,8 @@ local function last_character_column(line)
   if line == "" then
     return 0
   end
-  local characters = vim.str_utfindex(line)
-  return vim.str_byteindex(line, math.max(characters - 1, 0))
+  local characters = vim.str_utfindex(line, "utf-32")
+  return vim.str_byteindex(line, "utf-32", math.max(characters - 1, 0))
 end
 
 local function tail_visible(win, key)
@@ -359,7 +359,14 @@ end
 local function replace(view, start_row, finish_row, lines)
   local target = M.ensure(view.key)
   vim.bo[target].modifiable = true
-  vim.api.nvim_buf_set_lines(target, start_row, finish_row, false, lines)
+  if finish_row > start_row then
+    -- Do not include the next node's row-zero boundary in the replacement:
+    -- set_lines would collapse its left-gravity start mark into this node.
+    local last = vim.api.nvim_buf_get_lines(target, finish_row - 1, finish_row, false)[1]
+    vim.api.nvim_buf_set_text(target, start_row, 0, finish_row - 1, #last, lines)
+  else
+    vim.api.nvim_buf_set_lines(target, start_row, finish_row, false, lines)
+  end
   vim.bo[target].modifiable = false
 end
 
@@ -406,18 +413,16 @@ local function style_node(view, node, start_row, lines)
   end
   if node.kind == "tool" then
     local status, hl_group = tool_view.status(node.state)
-    vim.api.nvim_buf_set_extmark(target, style_namespace, start_row, 0, {
-      end_col = 4,
+    local header = lines[1] or ""
+    local label_start = assert(header:find(" Tool  ", 1, true))
+    vim.api.nvim_buf_set_extmark(target, style_namespace, start_row, label_start, {
+      end_col = label_start + #"Tool",
       hl_group = "PhenixToolLabel",
     })
-    local header = lines[1] or ""
-    local offset = header:find(status, 1, true)
-    if offset ~= nil then
-      vim.api.nvim_buf_set_extmark(target, style_namespace, start_row, offset - 1, {
-        end_col = offset - 1 + #status,
-        hl_group = hl_group,
-      })
-    end
+    vim.api.nvim_buf_set_extmark(target, style_namespace, start_row, #header - #status, {
+      end_col = #header,
+      hl_group = hl_group,
+    })
     return
   end
   local group_name = "Comment"

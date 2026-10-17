@@ -121,6 +121,12 @@
               nvim --headless -u NONE \
                 --cmd ${pkgs.lib.escapeShellArg "set rtp^=${self.packages.${system}.default}"} \
                 -l ${source}/tests/p1_transcript_disclosure.lua
+              nvim --headless -u NONE \
+                --cmd ${pkgs.lib.escapeShellArg "set rtp^=${self.packages.${system}.default}"} \
+                -l ${source}/tests/p1_transcript_tail.lua
+              nvim --headless -u NONE \
+                --cmd ${pkgs.lib.escapeShellArg "set rtp^=${self.packages.${system}.default}"} \
+                -l ${source}/tests/p1_transcript_updates.lua
               touch "$out"
             '';
           p1-product = pkgs.runCommand "phenix-ai-nvim-p1-product-check"
