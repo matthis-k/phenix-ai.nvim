@@ -112,6 +112,35 @@ methods = { { provider = "openai", connection_id = "subscription",
 actions.authenticate()
 assert(opened == "https://example.test/authorize")
 assert(#calls == 1, "OAuth challenge was restarted while awaiting completion")
+
+-- An installed provider's challenge is data, not permission to ask the OS
+-- to open arbitrary URI handlers.
+local blocked_notices = {}
+util.notify = function(message, level)
+  blocked_notices[#blocked_notices + 1] = { message = message, level = level }
+end
+for _, unsafe_uri in ipairs({
+  "file:///tmp/phishing",
+  "javascript:alert(1)",
+  "http://example.test/authorize",
+  "https://user@example.test/authorize",
+  "https://example.test/\\evil",
+}) do
+  reset()
+  opened = nil
+  blocked_notices = {}
+  runtime.authenticate = function(identity, secret, cb)
+    calls[#calls + 1] = { identity = vim.deepcopy(identity), secret = secret }
+    cb({ kind = "external", url = unsafe_uri, attempt_id = "attempt-untrusted" }, nil)
+  end
+  actions.authenticate()
+  assert(opened == nil, "untrusted OAuth URI was launched: " .. unsafe_uri)
+  assert(#calls == 1 and #blocked_notices == 1,
+    "one denied authorization should produce one clear error")
+  assert(blocked_notices[1].message:find("authorization URL", 1, true),
+    "OAuth URI denial must be actionable")
+end
+util.notify = function() end
 runtime.authenticate = function(identity, secret, cb)
   calls[#calls + 1] = { identity = vim.deepcopy(identity), secret = secret }
   cb({ kind = "authenticated" }, nil)
