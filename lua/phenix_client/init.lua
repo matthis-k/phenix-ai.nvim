@@ -175,7 +175,7 @@ end
 -- historical (model, callback) form remains safe only with one catalog.
 function Client:set_model(session_or_model, model_or_callback, callback)
   local session_id, model_id
-  if type(model_or_callback) == "function" then
+  if model_or_callback == nil or type(model_or_callback) == "function" then
     model_id, callback = session_or_model, model_or_callback
   else
     session_id, model_id = session_or_model, model_or_callback
