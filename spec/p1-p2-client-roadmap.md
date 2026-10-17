@@ -132,4 +132,20 @@ not runtime/distribution work or acceptance of N4, N5, N6 or any P2 stage.
 
 Cross-repository distribution promotion lives in [phenix-nvim #117](https://github.com/matthis-k/phenix-nvim/pull/117) and its distribution roadmap, rather than being inferred from client acceptance.
 
+Runtime pin integration (2026-10-18): `flake.lock` now resolves runtime
+`fa7135c896b0c6cb66c02c0fed40bbe2acb2868d` (merged runtime #971/#972), with
+Nix-resolved source hash `sha256-9gzB1/VS8857THd/UTF5oTuCMwERERqQ/1iC4LqYX8A=`.
+Upstream actual-main [Nix CI run 39078891177](https://github.com/matthis-k/phenix-ai/actions/runs/39078891177)
+and [official ACP interop run 39078890848](https://github.com/matthis-k/phenix-ai/actions/runs/39078890848)
+passed on that exact runtime revision. The P1 workflow no longer overrides the
+lock with `8ad88aec`; both installed-product CI gates test the locked runtime.
+Local `nix flake check -L` passed `provider-auth-ui`, `p1-default-cutover` and
+`p1-product` on x86_64-linux (aarch64-linux was not executed). The 12 deterministic
+SDK workflow tests plus `p1_model_config` and `structured_ui`, and the installed
+`p1_package_default`, `p1_client_product`, `p1_ui_product` and
+`p1_startup_recovery` tests passed on Neovim 0.12.4 and
+0.13.0-dev-1892+g9b7ec59580. This verifies the pinned deterministic Basic
+integration and existing auth/model UI fixtures, not operational authentication,
+live-provider onboarding, N4/N5/N6 acceptance or distribution promotion.
+
 Outstanding design questions: 0. Resolved architectural responsibilities remain fixed; **implementation: 4 accepted, 10 outstanding (3 later P1, 7 P2 client stages)**.

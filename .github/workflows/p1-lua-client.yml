@@ -42,8 +42,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Exercise the same P1 Basic+HTTP runtime candidate used by the
-          # installed distribution gate, without changing the legacy default lock.
-          nix build --no-link --show-trace \
-            --override-input phenix-ai github:matthis-k/phenix-ai/8ad88aec18c34034beb53afc385af370771488b3 \
+          # Exercise the installed Basic runtime selected by flake.lock.
+          nix build --no-link --no-update-lock-file --show-trace \
             '.#checks.x86_64-linux.p1-product'
