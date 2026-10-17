@@ -41,9 +41,9 @@ local function reset()
 end
 
 methods = {
-  { provider = "openai", connection_id = "api", provider_name = "OpenAI", id = "api", kind = "api_token", name = "API key" },
-  { provider = "openai", connection_id = "subscription", provider_name = "OpenAI", id = "oauth", kind = "oauth", name = "ChatGPT" },
-  { provider = "anthropic", connection_id = "api", provider_name = "Anthropic", id = "anthropic-key", kind = "ApiKey", name = "API key" },
+  { provider_id = "openai", connection_id = "api", provider_name = "OpenAI", method_id = "api", kind = "ApiKey", label = "API key" },
+  { provider_id = "openai", connection_id = "subscription", provider_name = "OpenAI", method_id = "oauth", kind = "OAuthAuthorizationCode", label = "ChatGPT" },
+  { provider_id = "anthropic", connection_id = "api", provider_name = "Anthropic", method_id = "anthropic-key", kind = "ApiKey", label = "API key" },
 }
 actions.authenticate()
 assert(#prompts == 1, "single-method provider skips method picker")
@@ -63,8 +63,12 @@ methods = {
   { provider = "openai", connection_id = "subscription", provider_name = "OpenAI", id = "oauth", kind = "oauth", name = "ChatGPT" },
 }
 actions.authenticate()
-assert(#prompts == 2, "multiple methods must show the second-level method picker")
-assert(#chosen_items[2] == 2)
+assert(#prompts == 1 and prompts[1] == "Authenticate OpenAI",
+  "single-provider multiple methods must skip redundant provider picker")
+assert(#chosen_items[1] == 2)
+assert(vim.tbl_contains(vim.tbl_map(function(item)
+  return item.connection_id
+end, chosen_items[1]), "subscription"), "OAuth connection must remain distinct")
 assert(calls[1].identity.method_id == "api"
   and calls[1].identity.connection_id == "api")
 
@@ -78,8 +82,9 @@ methods = {
     kind = "api_token", name = "Work key" },
 }
 actions.authenticate()
-assert(#chosen_items == 2 and #chosen_items[2] == 2,
+assert(#chosen_items == 1 and #chosen_items[1] == 2,
   "same-method different-connection entries must both remain selectable")
+assert(chosen_items[1][1].connection_id ~= chosen_items[1][2].connection_id)
 assert(#calls == 1 and calls[1].identity.connection_id == "personal"
   and calls[1].identity.method_id == "api-key")
 
@@ -103,6 +108,18 @@ runtime.authenticate = function(identity, secret, cb)
   cb({ kind = "authenticated" }, nil)
 end
 vim.ui.open = originals.ui_open
+
+-- A single canonical provider_id/method_id tuple starts directly, without
+-- selecting a provider first or surfacing the legacy method format.
+reset()
+methods = { { provider_id = "openrouter", connection_id = "api",
+  method_id = "api-key", kind = "ApiKey", label = "API key" } }
+actions.authenticate()
+assert(#prompts == 0 and #chosen_items == 0,
+  "one available method must not show an unnecessary chooser")
+assert(#calls == 1 and calls[1].identity.provider_id == "openrouter"
+  and calls[1].identity.method_id == "api-key")
+assert(calls[1].secret == "fake-key-from-ui")
 
 reset()
 methods = {}
