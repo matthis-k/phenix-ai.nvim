@@ -272,7 +272,7 @@ local function ensure_buffer(view)
   vim.api.nvim_buf_set_name(buffer, "phenix://logs/" .. tostring(next_buffer_id))
   views[buffer] = view
   vim.api.nvim_create_autocmd("BufWipeout", {
-    buffer = buffer,
+    buf = buffer,
     once = true,
     callback = function()
       views[buffer] = nil
@@ -387,10 +387,18 @@ local function render(view)
   vim.api.nvim_buf_set_lines(buffer, 0, -1, false, lines)
   vim.api.nvim_buf_clear_namespace(buffer, namespace, 0, -1)
   for row, group in pairs(headline_rows) do
-    vim.api.nvim_buf_add_highlight(buffer, namespace, group, row - 1, 0, -1)
+    vim.api.nvim_buf_set_extmark(buffer, namespace, row - 1, 0, {
+      end_col = #(lines[row] or ""),
+      hl_group = group,
+      hl_eol = true,
+    })
   end
   for row in pairs(row_to_reference) do
-    vim.api.nvim_buf_add_highlight(buffer, namespace, "Underlined", row - 1, 2, -1)
+    vim.api.nvim_buf_set_extmark(buffer, namespace, row - 1, 2, {
+      end_col = #(lines[row] or ""),
+      hl_group = "Underlined",
+      hl_eol = true,
+    })
   end
   vim.bo[buffer].modifiable = false
 
@@ -514,19 +522,19 @@ end
 
 attach = function(buffer)
   vim.keymap.set("n", "<CR>", toggle, {
-    buffer = buffer,
+    buf = buffer,
     silent = true,
     desc = "Toggle Phenix log details",
   })
   for _, key in ipairs({ "gf", "gF" }) do
     vim.keymap.set("n", key, follow_reference, {
-      buffer = buffer,
+      buf = buffer,
       silent = true,
       desc = "Open Phenix log content reference",
     })
   end
   vim.keymap.set("n", "gd", follow_scope, {
-    buffer = buffer,
+    buf = buffer,
     silent = true,
     desc = "Open correlated Phenix logs",
   })
@@ -564,7 +572,7 @@ attach = function(buffer)
   }) do
     vim.keymap.set("n", spec[1], function()
       jump(spec[2], spec[3])
-    end, { buffer = buffer, silent = true, desc = spec[4] })
+    end, { buf = buffer, silent = true, desc = spec[4] })
   end
   vim.keymap.set("n", "r", function()
     local view = current_view()
@@ -572,14 +580,14 @@ attach = function(buffer)
       view.next_cursor = nil
       load(view, false)
     end
-  end, { buffer = buffer, silent = true, desc = "Refresh Phenix logs" })
+  end, { buf = buffer, silent = true, desc = "Refresh Phenix logs" })
   vim.keymap.set("n", "q", function()
     pcall(vim.cmd, "tabclose")
-  end, { buffer = buffer, silent = true, desc = "Close Phenix logs" })
+  end, { buf = buffer, silent = true, desc = "Close Phenix logs" })
   vim.keymap.set("n", "]l", function()
     M.more()
   end, {
-    buffer = buffer,
+    buf = buffer,
     silent = true,
     desc = "Load more Phenix log records",
   })

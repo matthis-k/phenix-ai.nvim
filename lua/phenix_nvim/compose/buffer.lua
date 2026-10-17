@@ -238,32 +238,32 @@ function M.ensure(document)
   vim.keymap.set("n", "<CR>", function()
     require("phenix_nvim.actions").send({ document = document })
   end, {
-    buffer = target,
+    buf = target,
     desc = "Send Phenix prompt",
     silent = true,
   })
   vim.keymap.set("n", "p", function()
     paste(document, "p")
   end, {
-    buffer = target,
+    buf = target,
     desc = "Paste text or clipboard image",
     silent = true,
   })
   vim.keymap.set("n", "P", function()
     paste(document, "P")
   end, {
-    buffer = target,
+    buf = target,
     desc = "Paste text or clipboard image before cursor",
     silent = true,
   })
   vim.api.nvim_create_autocmd("BufWriteCmd", {
-    buffer = target,
+    buf = target,
     callback = function()
       require("phenix_nvim.actions").send({ document = document })
     end,
   })
   vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, {
-    buffer = target,
+    buf = target,
     callback = function()
       if view.buffer ~= target then
         return
@@ -277,7 +277,7 @@ function M.ensure(document)
     end,
   })
   vim.api.nvim_create_autocmd("QuitPre", {
-    buffer = target,
+    buf = target,
     callback = function()
       if vim.api.nvim_buf_is_valid(target) then
         vim.bo[target].modified = false
@@ -285,7 +285,7 @@ function M.ensure(document)
     end,
   })
   vim.api.nvim_create_autocmd("BufWipeout", {
-    buffer = target,
+    buf = target,
     callback = function()
       if view.buffer ~= target then
         return

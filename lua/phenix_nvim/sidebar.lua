@@ -285,7 +285,7 @@ local function sync_surface(surface)
   local function map_children(key, callback, description)
     for _, win in ipairs({ transcript_win, compose_win }) do
       vim.keymap.set("n", key, callback, {
-        buffer = vim.api.nvim_win_get_buf(win),
+        buf = vim.api.nvim_win_get_buf(win),
         silent = true,
         desc = description,
       })
