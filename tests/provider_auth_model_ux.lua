@@ -134,6 +134,31 @@ assert(
   "account variants must retain their exact model ID"
 )
 
+-- The installed P1 frontend must adopt provider-first selection once
+-- runtime management is available. Before that, retain the standard ACP
+-- picker when authentication methods are explicitly unsupported.
+runtime.p1_active = function() return true end
+reset()
+selected_model = nil
+actions.choose_selection()
+assert(selected_model == "account-one" and #prompts == 3,
+  "P1 management-capable runtime bypassed provider-first model choice")
+
+local fallback = 0
+runtime.list_authentication_methods = function(cb)
+  cb(nil, { kind = "unsupported", message = "auth not installed" })
+end
+local original_choose_model = runtime.choose_model
+runtime.choose_model = function(cb)
+  fallback = fallback + 1
+  cb({ selected = "phenix.model.scripted" }, nil)
+end
+reset()
+actions.choose_selection()
+assert(fallback == 1 and #prompts == 0,
+  "P1 fallback must only use the ACP model picker when auth is unsupported")
+runtime.choose_model = original_choose_model
+
 for key, value in pairs(originals) do
   if key == "ui_select" then vim.ui.select = value
   elseif key == "ui_open" then vim.ui.open = value
