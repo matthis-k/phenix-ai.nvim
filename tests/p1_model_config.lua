@@ -52,4 +52,26 @@ backend:call("models.select", { model_id = "provider/two" }, function(v, err)
 end)
 assert(backend.catalogs.s1.selected == "provider/one",
   "projection follows runtime response, never requested input")
+-- Selection cannot inherit the last-active session if several catalogs are
+-- available. The SDK must supply a stable session ID for each mutation.
+backend:_catalog("s2", { model_option("provider/two") })
+local attempts = 0
+backend._request = function(_, method, params, callback)
+  attempts = attempts + 1
+  assert(method == "session/set_config_option")
+  assert(params.sessionId == "s1")
+  callback({ configOptions = { model_option("provider/two") } }, nil)
+end
+backend:call("models.select", { model_id = "provider/two" }, function(value, problem)
+  assert(value == nil and problem.kind == "invalid_input",
+    "implicit model selection with two sessions must be denied")
+end)
+assert(attempts == 0, "ambiguous request escaped into ACP")
+backend:call("models.select", {
+  session_id = "s1", model_id = "provider/two",
+}, function(value, problem)
+  assert(value and not problem)
+end)
+assert(attempts == 1, "explicit session was not used")
+
 print("ACP model selection rejects forged, denied and unconfirmed changes")
