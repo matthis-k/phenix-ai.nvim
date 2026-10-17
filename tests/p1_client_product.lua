@@ -38,7 +38,14 @@ assert(not catalog_error and catalog.selected == "phenix.model.scripted", vim.in
 assert(#catalog.models == 1 and catalog.models[1].id == "phenix.model.scripted")
 local denied
 first:set_model("uninstalled.provider", function(_, e) denied = e end)
-assert(denied and denied.kind == "unsupported", "P1 must reject unsupported model mutations")
+assert(denied and denied.kind == "denied", "P1 must deny a model absent from the runtime catalog")
+local unchanged
+first:list_models(function(value, e)
+  assert(not e)
+  unchanged = value
+end)
+assert(unchanged and unchanged.selected == catalog.selected,
+  "rejected selection must not mutate the authoritative catalog")
 
 local function send(client, prompt)
   local response, failure
