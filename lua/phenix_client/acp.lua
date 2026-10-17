@@ -125,21 +125,38 @@ function Backend:_response(frame)
     if frame.error then
       local message = frame.error.message or "Phenix request failed"
       local detail = frame.error.data
-      -- The Rust ACP controller reports actionable SQLite/ownership failures
-      -- in JSON-RPC error.data. Display only these known sanitized diagnostics;
-      -- never turn arbitrary provider response data into a notification.
-      if type(detail) == "string" and #detail <= 1024
-        and (detail:find("SQLite", 1, true)
-          or detail:find("PHENIX_BASIC_SQLITE_PATH", 1, true)
-          or detail:find("session already owned", 1, true)
-          or detail:find("HTTP model status 401", 1, true)
-          or detail:find("HTTP model status 403", 1, true))
+      -- JSON-RPC error.data is application-owned. Only a tagged BasicError
+      -- with a canonical code can override the generic ACP message. Older
+      -- runtimes are accepted through a small exact-prefix compatibility path.
+      local basic_code
+      local basic_codes = {
+        Conflict = true, Denied = true, Indeterminate = true,
+        InvalidCursor = true, InvalidInput = true, InvalidReply = true,
+        ModelFailed = true, NotFound = true, StorageFailed = true,
+        ToolFailed = true, TurnLimit = true,
+      }
+      if type(detail) == "table"
+        and detail.format == "phenix.basic.error.v1"
+        and basic_codes[detail.code] == true
+        and type(detail.message) == "string"
+        and #detail.message > 0 and #detail.message <= 1024
+        and not detail.message:find("[%c]")
+      then
+        basic_code = detail.code
+        message = detail.message
+      elseif type(detail) == "string" and #detail <= 1024
+        and not detail:find("[%c]")
+        and (detail:match("^PHENIX_BASIC_SQLITE_PATH ")
+          or detail:match("^StorageFailed: SQLite ")
+          or detail:match("^session already owned")
+          or detail:match("^ModelFailed: HTTP model status 401$")
+          or detail:match("^ModelFailed: HTTP model status 403$"))
       then
         message = detail
       end
       finish(callback, nil, {
         kind = "remote", message = message,
-        code = frame.error.code, data = detail,
+        code = frame.error.code, basic_code = basic_code, data = detail,
       })
     else
       finish(callback, frame.result, nil)
