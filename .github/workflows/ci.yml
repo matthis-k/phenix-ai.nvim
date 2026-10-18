@@ -21,6 +21,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: cachix/install-nix-action@v31
+      - name: Restore shared Nix store (read-only)
+        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7
+        with:
+          primary-key: phenix-client-store-${{ runner.os }}-${{ hashFiles('flake.lock') }}-${{ github.sha }}
+          restore-prefixes-first-match: |
+            phenix-client-store-${{ runner.os }}-${{ hashFiles('flake.lock') }}-
+            phenix-client-store-${{ runner.os }}-
+          save: false
       - run: nix flake check --no-build --no-write-lock-file --show-trace
       - name: Fast Lua source and test syntax
         run: nix build --no-link --no-write-lock-file '.#checks.x86_64-linux.lua-syntax'
@@ -36,6 +44,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: cachix/install-nix-action@v31
+      - name: Restore and publish client Nix store
+        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7
+        with:
+          primary-key: phenix-client-store-${{ runner.os }}-${{ hashFiles('flake.lock') }}-${{ github.sha }}
+          restore-prefixes-first-match: |
+            phenix-client-store-${{ runner.os }}-${{ hashFiles('flake.lock') }}-
+            phenix-client-store-${{ runner.os }}-
+          gc-max-store-size-linux: "4G"
+          save: ${{ github.ref == 'refs/heads/main' }}
       - name: Use shared Phenix cache
         if: ${{ vars.PHENIX_CACHIX_CACHE != '' }}
         uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
