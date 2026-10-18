@@ -163,4 +163,21 @@ live-provider onboarding, N4/N5/N6 acceptance or distribution promotion.
 The distribution must pin this promoted client together with the same runtime;
 no runtime or distribution files are changed here.
 
+Runtime #974 pin promotion (2026-10-18): `flake.lock` now resolves merged
+runtime `562c9531b05d16ff4f7d01052844e5ad3c0a8a35` (runtime #974, additive
+Responses/Anthropic inference codecs; no client API change) with Nix-resolved
+source hash `sha256-kiXnujPcNUEAt8TlXvWzvgZFJR+QJuUS1r2rEwprjSY=`; nixpkgs is
+unchanged. Upstream actual-main workflows passed on that exact revision:
+[Nix CI run 39097066582](https://github.com/matthis-k/phenix-ai/actions/runs/39097066582),
+[official ACP interop run 39097066381](https://github.com/matthis-k/phenix-ai/actions/runs/39097066381),
+[formatting run 39097066274](https://github.com/matthis-k/phenix-ai/actions/runs/39097066274) and
+[flake CI caller run 39097066359](https://github.com/matthis-k/phenix-ai/actions/runs/39097066359).
+Local `nix flake check -L` passed `provider-auth-ui`, `p1-default-cutover` and
+`p1-product` on x86_64-linux (aarch64-linux was not executed). Existing client
+CI continues to test the lock unchanged. This is deterministic lock verification
+only: the additive codecs do not establish operational authentication,
+live-provider onboarding, N4/N5/N6 acceptance or distribution promotion. The
+distribution must pin this promoted client together with the same runtime; no
+runtime or distribution files are changed here.
+
 Outstanding design questions: 0. Resolved architectural responsibilities remain fixed; **implementation: 4 accepted, 10 outstanding (3 later P1, 7 P2 client stages)**.
