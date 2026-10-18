@@ -191,6 +191,37 @@ assert(
   "account variants must retain their exact model ID"
 )
 
+-- Runtime-denied, unavailable and unauthenticated models must never be
+-- offered as selectable choices. An auth-only provider remains visible so the
+-- user can authenticate first and fetch its freshly authorized model catalog.
+reset()
+methods = {
+  { provider_id = "z-auth", connection_id = "api", method_id = "key",
+    kind = "ApiKey", authenticated = false },
+}
+runtime.list_selections = function(cb)
+  cb({ selected = "ready", available = {
+    { id = "ready", provider = "a-ready", model = "usable",
+      presentation = { kind = "model" }, authenticated = true,
+      authorized = true, selectable = true },
+    { id = "denied", provider = "a-ready", model = "denied",
+      presentation = { kind = "model" }, authorized = false },
+    { id = "unavailable", provider = "a-ready", model = "unavailable",
+      presentation = { kind = "model" }, selectable = false },
+    { id = "needs-auth", provider = "a-ready", model = "needs-auth",
+      presentation = { kind = "model" }, authenticated = false },
+  } }, nil)
+end
+selected_model = nil
+actions.choose_selection()
+assert(#chosen_items[1] == 2 and chosen_items[1][1] == "a-ready"
+  and chosen_items[1][2] == "z-auth",
+  "providers needing authentication must remain available for onboarding")
+assert(#chosen_items[2] == 1 and chosen_items[2][1] == "usable",
+  "unusable runtime model entries must not be offered to the picker")
+assert(selected_model == "ready",
+  "only a currently usable runtime model identity may be submitted")
+
 -- The installed P1 frontend must adopt provider-first selection once
 -- runtime management is available. Before that, retain the standard ACP
 -- picker when authentication methods are explicitly unsupported.
