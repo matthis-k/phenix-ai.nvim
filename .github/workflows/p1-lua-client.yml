@@ -38,10 +38,6 @@ jobs:
             nvim --headless -u NONE --cmd "set rtp^=$PWD" -l tests/p1_transcript_disclosure.lua
             nvim --headless -u NONE --cmd "set rtp^=$PWD" -l tests/p1_ui_runtime.lua
           '
-      - name: Verify the installed P1 Basic package and real session replay
-        shell: bash
-        run: |
-          set -euo pipefail
-          # Exercise the installed Basic runtime selected by flake.lock.
-          nix build --no-link --no-update-lock-file --show-trace \
-            '.#checks.x86_64-linux.p1-product'
+      # Full installed Basic and session-replay acceptance remains in
+      # ci.yml's required Client integration nix flake check (p1-product).
+      # Keep this job focused on the independent ACP/Lua SDK contracts.
