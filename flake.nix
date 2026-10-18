@@ -81,6 +81,18 @@
           p1Plugin = self.packages.${system}.default;
         in
         {
+          # Fast syntax-only gate, independent of Basic runtime/Cargo products.
+          # Run first on PRs so malformed Lua tests do not fail only after a
+          # costly full Nix integration build.
+          lua-syntax = pkgs.runCommand "phenix-ai-nvim-lua-syntax"
+            { nativeBuildInputs = [ pkgs.luajit ]; }
+            ''
+              set -euo pipefail
+              while IFS= read -r -d '' file; do
+                luajit -b "$file" /dev/null
+              done < <(find ${source}/lua ${source}/tests -type f -name '*.lua' -print0)
+              touch "$out"
+            '';
           provider-auth-ui = pkgs.runCommand "phenix-ai-nvim-provider-auth-ui"
             { nativeBuildInputs = [ pkgs.neovim ]; }
             ''
