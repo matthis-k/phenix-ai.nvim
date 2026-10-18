@@ -93,6 +93,21 @@
               done < <(find ${source}/lua ${source}/tests -type f -name '*.lua' -print0)
               touch "$out"
             '';
+          # Run UI-only regressions before building the Basic ACP binary.
+          ui-fast = pkgs.runCommand "phenix-ai-nvim-ui-fast"
+            { nativeBuildInputs = [ pkgs.neovim ]; }
+            ''
+              set -euo pipefail
+              export HOME="$TMPDIR/home"
+              export XDG_STATE_HOME="$TMPDIR/state"
+              mkdir -p "$HOME" "$XDG_STATE_HOME"
+              for test in p1_transcript_tail p1_transcript_updates p1_model_picker provider_auth_model_ux queue_lifecycle; do
+                nvim --headless -u NONE \
+                  --cmd ${pkgs.lib.escapeShellArg "set rtp^=${source}"} \
+                  -l "${source}/tests/$test.lua"
+              done
+              touch "$out"
+            '';
           provider-auth-ui = pkgs.runCommand "phenix-ai-nvim-provider-auth-ui"
             { nativeBuildInputs = [ pkgs.neovim ]; }
             ''
