@@ -275,6 +275,24 @@ assert(clear_calls == 2)
 state.compose.revision = 101
 actions.send()
 assert(#prompt_callbacks == 4, "edited compose revision must remain independently sendable")
+
+-- Ordinary typing does not necessarily increment the attachment revision.
+-- It must preserve the new draft if the earlier prompt settles afterward.
+local buffer = compose.ensure(state.compose)
+local sent_revision = state.compose.revision
+vim.api.nvim_buf_set_lines(buffer, 0, -1, false, { "new draft while model runs" })
+assert(state.compose.revision == sent_revision,
+  "fixture must exercise a buffer edit without an attachment revision change")
+actions.send()
+assert(#prompt_callbacks == 4,
+  "editing an in-flight composer must not dispatch a concurrent ACP prompt")
+prompt_callbacks[4]({}, nil)
+assert(clear_calls == 2, "in-flight result erased newer unsent text")
+assert(vim.api.nvim_buf_get_lines(buffer, 0, 1, false)[1] == "new draft while model runs")
+actions.send()
+assert(#prompt_callbacks == 5, "newer draft should submit after prior turn settles")
+prompt_callbacks[5]({}, nil)
+assert(clear_calls == 3, "unchanged second draft should clear after successful submission")
 compose.serialize = original_serialize
 compose.clear = original_clear
 
