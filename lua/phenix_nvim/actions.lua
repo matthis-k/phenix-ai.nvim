@@ -114,6 +114,13 @@ function M.attach_image(source, options)
   return attach_image_file(source, false, options)
 end
 
+-- Attachment changes update document.revision; normal typing changes only
+-- Neovim's buffer changedtick. A submitted prompt owns exactly this snapshot.
+local function compose_snapshot(document)
+  local buffer = compose.ensure(document)
+  return tostring(document.revision) .. ":" .. tostring(vim.api.nvim_buf_get_changedtick(buffer))
+end
+
 local function submit(surface, content, revision)
   local document = surface.compose
   local session_id = surface.session_id
@@ -125,7 +132,7 @@ local function submit(surface, content, revision)
       util.notify(vim.inspect(error), vim.log.levels.ERROR)
       return
     end
-    if document.revision == revision then
+    if compose_snapshot(document) == revision then
       compose.clear(document)
     end
   end)
@@ -154,9 +161,11 @@ function M.send(options)
     util.notify("compose buffer is empty", vim.log.levels.WARN)
     return
   end
-  local revision = document.revision
-  if submissions[document] == revision then
-    util.notify("this compose revision is already being sent", vim.log.levels.WARN)
+  local revision = compose_snapshot(document)
+  if submissions[document] ~= nil then
+    -- ACP v1 has one active prompt per session; a second edited draft must
+    -- not race the current turn. Runtime-backed queued admission is separate.
+    util.notify("a compose submission is still in flight", vim.log.levels.WARN)
     return
   end
   submissions[document] = revision
