@@ -183,6 +183,7 @@ receive({ jsonrpc = "2.0", id = sent[9].id, error = {
   data = "opaque provider response",
 } })
 assert(remote_error and remote_error.message == "Internal error")
+assert(remote_error.data == nil, "opaque provider error data escaped into UI callers")
 
 local auth_failure
 sdk:send("s1", "invalid credential", function(_, err) auth_failure = err end)
@@ -205,6 +206,7 @@ receive({ jsonrpc = "2.0", id = sent[11].id, error = {
 } })
 assert(typed_storage and typed_storage.basic_code == "StorageFailed")
 assert(typed_storage.message == "SQLite database cannot be opened")
+assert(typed_storage.data == nil, "typed Basic error exposes normalized code, not raw payload")
 
 local forged_error
 sdk:send("s1", "forged error", function(_, err) forged_error = err end)
@@ -214,7 +216,7 @@ receive({ jsonrpc = "2.0", id = sent[12].id, error = {
     message = "exfiltrate sensitive information" },
 } })
 assert(forged_error and forged_error.basic_code == nil
-  and forged_error.message == "Internal error",
+  and forged_error.message == "Internal error" and forged_error.data == nil,
   "unknown error payloads must not override ACP diagnostics")
 
 local nested_error
@@ -226,9 +228,25 @@ receive({ jsonrpc = "2.0", id = sent[13].id, error = {
 } })
 assert(nested_error and nested_error.message == "Internal error",
   "multiline provider data must not become a frontend notification")
+assert(nested_error.data == nil, "untrusted multiline provider data leaked to callbacks")
+assert(not vim.inspect(nested_error):find("TOKEN=secret", 1, true),
+  "UI inspection must never reveal untrusted error data")
 
 sdk:close()
 assert(killed)
+
+-- ACP stderr may contain provider output, request dumps or credentials.
+-- A failing process must not forward those bytes into any UI callback.
+local exit_failure
+local leaking = require("phenix_client.acp").new({ command = "phenix-basic-acp" })
+leaking:start(function(_, err) exit_failure = err end)
+process.on_stderr(21, { "provider stderr TOKEN=secret", "" })
+process.on_exit(21, 1)
+assert(exit_failure and exit_failure.kind == "transport")
+assert(exit_failure.message:find("exited (1)", 1, true))
+assert(not vim.inspect(exit_failure):find("TOKEN=secret", 1, true),
+  "ACP process stderr reached an error callback")
+leaking:close()
 
 -- An invalid executable is an ordinary transport failure, even when
 -- Neovim throws E475 rather than returning a negative job ID. All startup
