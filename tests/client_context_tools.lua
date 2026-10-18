@@ -117,9 +117,15 @@ local full_buffer = by_id["nvim.context.buffer"].handler({
 assert(full_buffer.text == "éx\nsecond")
 assert(full_buffer.truncated == false)
 
+-- Cursor columns are zero-based UTF-8 byte offsets. The first character is
+-- two bytes wide, so column 2 points at the following ASCII character.
+vim.api.nvim_win_set_cursor(0, { 1, 2 })
 local location = by_id["nvim.context.current_location"].handler()
 assert(type(location.uri) == "string" and location.uri ~= "")
-assert(location.range == nil)
+assert(vim.deep_equal(location.range, {
+  start = { line = 0, column = 2 },
+  ["end"] = { line = 0, column = 2 },
+}), "current location must preserve the exact cursor byte offset")
 
 local listed = by_id["nvim.context.buffers"].handler()
 assert(#listed >= 1)
