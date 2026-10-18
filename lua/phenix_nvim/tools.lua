@@ -268,6 +268,9 @@ end
 local function quickfix_tool(input)
   input = input or {}
   local limit = bounded_integer(input.limit, 100, 500, "limit")
+  if limit == 0 then
+    return {}
+  end
   local result = {}
   for _, item in ipairs(vim.fn.getqflist()) do
     local item_location = quickfix_location(item)
