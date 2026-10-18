@@ -88,7 +88,7 @@
             { nativeBuildInputs = [ pkgs.luajit ]; }
             ''
               set -euo pipefail
-              while IFS= read -r -d '' file; do
+              while IFS= read -r -d "" file; do
                 luajit -b "$file" /dev/null
               done < <(find ${source}/lua ${source}/tests -type f -name '*.lua' -print0)
               touch "$out"
