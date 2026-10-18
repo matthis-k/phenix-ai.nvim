@@ -19,7 +19,7 @@ function M.new(options)
     command = command, args = options.args or {},
     cwd = options.cwd or vim.fn.getcwd(),
     job = nil, next_id = 0, requests = {}, waiting = {},
-    subscribers = {}, partial = "", stderr = "",
+    subscribers = {}, partial = "",
     state = "idle", features = nil, catalogs = {}, active_session = nil,
     permission_requests = {},
   }, Backend)
@@ -123,7 +123,14 @@ function Backend:_response(frame)
   if callback then
     self.requests[frame.id] = nil
     if frame.error then
-      local message = frame.error.message or "Phenix request failed"
+      -- Remote error data can contain provider bodies and credentials.
+      -- Only expose a bounded diagnostic and the known Basic error code.
+      local message = frame.error.message
+      if type(message) ~= "string" or #message == 0 or #message > 1024
+        or message:find("[%c]")
+      then
+        message = "Phenix request failed"
+      end
       local detail = frame.error.data
       -- JSON-RPC error.data is application-owned. Only a tagged BasicError
       -- with a canonical code can override the generic ACP message. Older
@@ -156,7 +163,7 @@ function Backend:_response(frame)
       end
       finish(callback, nil, {
         kind = "remote", message = message,
-        code = frame.error.code, basic_code = basic_code, data = detail,
+        code = frame.error.code, basic_code = basic_code,
       })
     else
       finish(callback, frame.result, nil)
@@ -196,11 +203,12 @@ function Backend:start(callback)
   local options = {
     cwd = self.cwd,
     on_stdout = function(_, data) self:_stdout(data) end,
-    on_stderr = function(_, data)
-      self.stderr = (self.stderr .. table.concat(data, "\n")):sub(-2048)
-    end,
+    -- Stderr is not a trusted diagnostic channel. Providers may print
+    -- credentials or response bodies there; never forward it to Lua UI
+    -- callbacks. The exit code remains enough to report transport failure.
+    on_stderr = function() end,
     on_exit = function(_, code)
-      self:_fail(error_value("Phenix ACP exited (" .. tostring(code) .. "): " .. self.stderr))
+      self:_fail(error_value("Phenix ACP exited (" .. tostring(code) .. ")"))
     end,
   }
   -- Neovim may throw (e.g. E475 for a non-executable command) rather
