@@ -24,6 +24,8 @@ jobs:
       - run: nix flake check --no-build --no-write-lock-file --show-trace
       - name: Fast Lua source and test syntax
         run: nix build --no-link --no-write-lock-file '.#checks.x86_64-linux.lua-syntax'
+      - name: Fast headless Neovim UI regressions
+        run: nix build --no-link --no-write-lock-file '.#checks.x86_64-linux.ui-fast'
 
   client:
     name: Client integration
