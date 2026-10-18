@@ -194,6 +194,7 @@ assert(
 -- Runtime-denied, unavailable and unauthenticated models must never be
 -- offered as selectable choices. An auth-only provider remains visible so the
 -- user can authenticate first and fetch its freshly authorized model catalog.
+local saved_list_selections = runtime.list_selections
 reset()
 methods = {
   { provider_id = "z-auth", connection_id = "api", method_id = "key",
@@ -221,6 +222,9 @@ assert(#chosen_items[2] == 1 and chosen_items[2][1] == "usable",
   "unusable runtime model entries must not be offered to the picker")
 assert(selected_model == "ready",
   "only a currently usable runtime model identity may be submitted")
+
+runtime.list_selections = saved_list_selections
+methods = {}
 
 -- The installed P1 frontend must adopt provider-first selection once
 -- runtime management is available. Before that, retain the standard ACP
