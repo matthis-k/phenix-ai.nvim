@@ -158,6 +158,8 @@ vim.fn.setqflist({}, "r", {
 })
 local quickfix = by_id["nvim.context.quickfix"].handler({})
 assert(#quickfix == 1 and quickfix[1].text == "fixture quickfix")
+local empty_quickfix = by_id["nvim.context.quickfix"].handler({ limit = 0 })
+assert(#empty_quickfix == 0, "zero quickfix limit must return no entries")
 
 local viewport = by_id["nvim.context.viewport"].handler({})
 assert(viewport.truncated == false)
