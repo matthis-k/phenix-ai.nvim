@@ -148,4 +148,19 @@ SDK workflow tests plus `p1_model_config` and `structured_ui`, and the installed
 integration and existing auth/model UI fixtures, not operational authentication,
 live-provider onboarding, N4/N5/N6 acceptance or distribution promotion.
 
+Runtime #973 pin promotion (2026-10-18): following client #63, `flake.lock`
+resolves merged runtime `892388d76ef2f07e934c6922cb8cedc4cc5f6b7c` with
+Nix-resolved source hash `sha256-d6RpBbJ0MMPWoHC9c3fHU0ivG0JJDunqWQgZ/+K0BjE=`;
+nixpkgs is unchanged. All existing upstream actual-main workflows passed on
+that exact revision, including the Nix matrix and official ACP interop.
+Local `nix flake check -L` passed `provider-auth-ui`, `p1-default-cutover` and
+`p1-product` on x86_64-linux, exercising the installed client and pinned Basic
+ACP runtime, chat/UI, SQLite replay and failed-launch recovery; aarch64-linux
+was not executed. Existing client CI continues to test the lock unchanged.
+This is deterministic integration verification only: the independently packaged
+OS Secret Service backend does not establish operational authentication,
+live-provider onboarding, N4/N5/N6 acceptance or distribution promotion.
+The distribution must pin this promoted client together with the same runtime;
+no runtime or distribution files are changed here.
+
 Outstanding design questions: 0. Resolved architectural responsibilities remain fixed; **implementation: 4 accepted, 10 outstanding (3 later P1, 7 P2 client stages)**.
