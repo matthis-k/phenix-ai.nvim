@@ -187,7 +187,10 @@ local function current_location_tool()
   local snapshot = context.snapshot()
   return {
     uri = snapshot.uri,
-    range = nil,
+    range = {
+      start = vim.deepcopy(snapshot.cursor),
+      ["end"] = vim.deepcopy(snapshot.cursor),
+    },
   }
 end
 
