@@ -139,6 +139,10 @@
               nvim --headless -u NONE \
                 --cmd ${pkgs.lib.escapeShellArg "set rtp^=${self.packages.${system}.default}"} \
                 -l ${source}/tests/p1_transcript_updates.lua
+              # Presentation-only queue: runtime admission is owned by #891.
+              nvim --headless -u NONE \
+                --cmd ${pkgs.lib.escapeShellArg "set rtp^=${self.packages.${system}.default}"} \
+                -l ${source}/tests/queue_lifecycle.lua
               touch "$out"
             '';
           p1-product = pkgs.runCommand "phenix-ai-nvim-p1-product-check"
