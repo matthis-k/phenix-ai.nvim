@@ -600,6 +600,9 @@ local function model_selections(result)
       and item.provider ~= ""
       and type(item.model) == "string"
       and item.model ~= ""
+      and item.authorized ~= false
+      and item.selectable ~= false
+      and item.authenticated ~= false
     then
       local thinking = item.thinking or ""
       -- Provider identities can share a model name while using different
@@ -660,50 +663,20 @@ local function selected_marker(result, candidates)
   return "  "
 end
 
-local function authenticate_provider(provider, callback)
-  runtime.list_authentication_methods(function(result, error)
-    if error ~= nil then
-      finish_authentication(callback, nil, error)
-      return
-    end
-    local methods = {}
-    for _, method in ipairs(result and result.methods or {}) do
-      if authentication_provider_id(method) == provider then
-        table.insert(methods, method)
-      end
-    end
-    local provider_name = methods[1] and methods[1].provider_name or provider
-    choose_authentication_method(methods, "Authenticate " .. provider_name, callback)
-  end)
-end
-
+-- The model list has already been filtered using runtime-provided readiness.
+-- A failed or revoked selection is rejected by Phenix; the frontend cannot
+-- authenticate an unrelated connection and retry a stale model identity.
 local function apply_model_selection(item, provider_name)
-  local function select_now()
-    runtime.select(item.id, function(result, error)
-      if error ~= nil then
-        util.notify(vim.inspect(error), vim.log.levels.ERROR)
-        return
-      end
-      local label = (provider_name or item.provider) .. " / " .. item.model
-      if item.thinking ~= nil and item.thinking ~= "" then
-        label = label .. " / " .. item.thinking
-      end
-      util.notify(label, vim.log.levels.INFO)
-    end)
-  end
-
-  if item.authenticated ~= false then
-    select_now()
-    return
-  end
-  authenticate_provider(item.provider, function(_, error)
+  runtime.select(item.id, function(result, error)
     if error ~= nil then
-      if error.kind ~= "cancelled" then
-        util.notify(vim.inspect(error), vim.log.levels.ERROR)
-      end
+      util.notify(vim.inspect(error), vim.log.levels.ERROR)
       return
     end
-    select_now()
+    local label = (provider_name or item.provider) .. " / " .. item.model
+    if item.thinking ~= nil and item.thinking ~= "" then
+      label = label .. " / " .. item.thinking
+    end
+    util.notify(label, vim.log.levels.INFO)
   end)
 end
 
