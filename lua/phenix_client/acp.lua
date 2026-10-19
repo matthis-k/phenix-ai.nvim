@@ -491,7 +491,7 @@ function Backend:call(op, args, callback)
       if err then
         if err.code == -32601 then
           finish(callback, nil, error_value(
-            "Phenix does not grant credential management", "unsupported"))
+            "Phenix authentication unavailable: no credential management grant", "unsupported"))
         else
           finish(callback, nil, err)
         end
