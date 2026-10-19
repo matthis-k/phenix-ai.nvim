@@ -27,6 +27,9 @@
           pkgs = nixpkgs.legacyPackages.${system};
           source = pkgs.lib.cleanSource ./.;
           basicAcp = phenix-ai.packages.${system}.phenix-basic-acp;
+          # The managed host exists only once its runtime implementation is
+          # accepted and pinned. Do not alter the default Basic composition.
+          hasManaged = builtins.hasAttr "phenix-basic-managed-acp" phenix-ai.packages.${system};
           realAcp = phenix-ai.packages.${system}.phenix-basic-http-acp;
           # Package each P1 composition with the same Neovim client.
           # No native oldmain Lua module is installed in either product.
@@ -45,6 +48,9 @@
             '';
           };
           p1Plugin = mkP1Plugin "phenix-ai.nvim-basic" basicAcp "phenix-basic-acp";
+          managedPlugin = mkP1Plugin "phenix-ai.nvim-managed"
+            phenix-ai.packages.${system}.phenix-basic-managed-acp
+            "phenix-basic-managed-acp";
           realPlugin = mkP1Plugin "phenix-ai.nvim-live" realAcp "phenix-basic-http-acp";
           realPrompt = pkgs.writeShellApplication {
             name = "phenix-p1-live-prompt";
@@ -66,6 +72,9 @@
           default = p1Plugin;
           phenix-ai-nvim = p1Plugin;
           phenix-ai-nvim-basic = p1Plugin;
+        }
+        // pkgs.lib.optionalAttrs hasManaged {
+          phenix-ai-nvim-managed = managedPlugin;
         }
         // pkgs.lib.optionalAttrs (builtins.hasAttr "phenix-basic-http-acp" phenix-ai.packages.${system}) {
           phenix-ai-nvim-live = realPlugin;
@@ -198,6 +207,30 @@
               nvim --headless -u NONE \
                 --cmd ${pkgs.lib.escapeShellArg "set rtp^=${p1Plugin}"} \
                 -l ${source}/tests/p1_startup_recovery.lua
+              test -s "$PHENIX_BASIC_SQLITE_PATH"
+              touch "$out"
+            '';
+        }
+        // pkgs.lib.optionalAttrs (builtins.hasAttr "phenix-basic-managed-acp" phenix-ai.packages.${system}) {
+          p1-managed-provider-product = pkgs.runCommand "phenix-ai-nvim-managed-provider-product"
+            { nativeBuildInputs = [ pkgs.neovim ]; }
+            ''
+              set -euo pipefail
+              export HOME="$TMPDIR/home"
+              export XDG_STATE_HOME="$TMPDIR/state"
+              export XDG_CACHE_HOME="$TMPDIR/cache"
+              export XDG_CONFIG_HOME="$TMPDIR/config"
+              mkdir -p "$HOME" "$XDG_STATE_HOME" "$XDG_CACHE_HOME" "$XDG_CONFIG_HOME"
+              export PHENIX_BASIC_SQLITE_PATH="$TMPDIR/managed-basic.sqlite"
+              export PHENIX_P1_MANAGED_BIN="${phenix-ai.packages.${system}.phenix-basic-managed-acp}/bin/phenix-basic-managed-acp"
+              managedPlugin="${self.packages.${system}.phenix-ai-nvim-managed}"
+              test -x "$PHENIX_P1_MANAGED_BIN"
+              test "$(cat "$managedPlugin/share/phenix-ai.nvim/phenix-ai-revision")" = \
+                ${pkgs.lib.escapeShellArg (phenix-ai.rev or "dirty")}
+              grep -F '/bin/phenix-basic-managed-acp' "$managedPlugin/lua/phenix_nvim/config.lua"
+              nvim --headless -u NONE \
+                --cmd ${pkgs.lib.escapeShellArg "set rtp^=${self.packages.${system}.phenix-ai-nvim-managed}"} \
+                -l ${source}/tests/p1_managed_provider_product.lua
               test -s "$PHENIX_BASIC_SQLITE_PATH"
               touch "$out"
             '';
