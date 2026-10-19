@@ -71,6 +71,13 @@ function Backend:_response(frame)
   if frame.method == "session/update" then
     local params = frame.params or {}
     if type(params.sessionId) == "string" and type(params.update) == "table" then
+      -- ACP config_option_update carries the complete authoritative option
+      -- set. An empty set retracts the previous model catalog.
+      if params.update.sessionUpdate == "config_option_update"
+        and type(params.update.configOptions) == "table"
+      then
+        self:_catalog(params.sessionId, params.update.configOptions)
+      end
       local listeners = {}
       for _, callback in ipairs(self.subscribers) do listeners[#listeners + 1] = callback end
       for _, callback in ipairs(listeners) do
@@ -250,6 +257,7 @@ end
 -- Treat ACP session config options as runtime-returned state, never as
 -- frontend configuration. A catalog is scoped to the session which sent it.
 function Backend:_catalog(session_id, options)
+  local previous = self.catalogs[session_id]
   local catalog = nil
   for _, option in ipairs(options or {}) do
     if option.id == "model" and option.category == "model"
@@ -289,14 +297,16 @@ function Backend:_catalog(session_id, options)
   -- still-authoritative runtime-advertised model choices.
   self.features.management.models = next(self.catalogs) ~= nil
   self.features.management.model_selection = next(self.catalogs) ~= nil
-  if catalog then
+  -- A missing or invalid runtime catalog revokes the previous projection.
+  -- Observers must be told when choices disappear, not only when added.
+  if catalog or previous then
     local listeners = {}
     for _, subscriber in ipairs(self.subscribers) do
       listeners[#listeners + 1] = subscriber
     end
     for _, subscriber in ipairs(listeners) do
       subscriber({ type = "models.changed", session_id = session_id,
-        catalog = vim.deepcopy(catalog) })
+        catalog = catalog and vim.deepcopy(catalog) or nil })
     end
   end
 end
