@@ -149,7 +149,7 @@ client:import_credential("openai", "api", "work", secret, function(value, err)
   imported, imported_error = value, err
 end)
 transport:_response({ jsonrpc = "2.0", id = outgoing.id,
-  error = { code = -32602, message = "Invalid params", data = {
+  error = { code = -32602, message = "fake-test-key-DO-NOT-LOG", data = {
     format = "phenix.provider.error.v1", code = "Denied",
     message = "fake-test-key-DO-NOT-LOG",
   } },
