@@ -11,6 +11,10 @@ local function finish(callback, value, err)
   if callback then callback(value, err) end
 end
 
+local function nullish(value)
+  return value == nil or value == vim.NIL
+end
+
 function M.new(options)
   options = options or {}
   local command = options.command or "phenix-basic-acp"
@@ -143,6 +147,16 @@ function Backend:_response(frame)
       -- with a canonical code can override the generic ACP message. Older
       -- runtimes are accepted through a small exact-prefix compatibility path.
       local basic_code
+      local provider_code
+      local provider_codes = {
+        InvalidInput = true, Denied = true, NotFound = true,
+        Unavailable = true, Conflict = true, AuthenticationRequired = true,
+      }
+      if type(detail) == "table" and detail.format == "phenix.provider.error.v1"
+        and provider_codes[detail.code] == true
+      then
+        provider_code = detail.code
+      end
       local basic_codes = {
         Conflict = true, Denied = true, Indeterminate = true,
         InvalidCursor = true, InvalidInput = true, InvalidReply = true,
@@ -171,6 +185,7 @@ function Backend:_response(frame)
       finish(callback, nil, {
         kind = "remote", message = message,
         code = frame.error.code, basic_code = basic_code,
+        provider_code = provider_code,
       })
     else
       finish(callback, frame.result, nil)
@@ -376,6 +391,148 @@ function Backend:call(op, args, callback)
         end
       end
       finish(callback, vim.deepcopy(value), nil)
+    end)
+  elseif op == "providers.auth.status" then
+    if type(args.provider_id) ~= "string" or args.provider_id == ""
+      or type(args.connection_id) ~= "string" or args.connection_id == ""
+    then
+      finish(callback, nil, error_value("Missing provider connection", "invalid_input"))
+      return
+    end
+    self:_request("_phenix/providers/auth/status", {
+      scope = "user", provider_id = args.provider_id,
+      connection_id = args.connection_id,
+    }, function(value, err)
+      if err then
+        if err.code == -32601 then
+          finish(callback, nil, error_value(
+            "Phenix does not expose provider authentication status", "unsupported"))
+        else
+          finish(callback, nil, err)
+        end
+        return
+      end
+      if type(value) ~= "table" or value.provider_id ~= args.provider_id
+        or value.connection_id ~= args.connection_id
+        or type(value.profiles) ~= "table"
+      then
+        finish(callback, nil, error_value("Invalid provider authentication status", "protocol"))
+        return
+      end
+      local seen = {}
+      for _, profile in ipairs(value.profiles) do
+        if type(profile) ~= "table" or type(profile.id) ~= "string"
+          or profile.id == "" or seen[profile.id]
+          or type(profile.method_id) ~= "string" or profile.method_id == ""
+          or type(profile.valid) ~= "boolean"
+        then
+          finish(callback, nil, error_value("Invalid provider profile identity", "protocol"))
+          return
+        end
+        seen[profile.id] = true
+      end
+      finish(callback, vim.deepcopy(value), nil)
+    end)
+  elseif op == "providers.models" then
+    if type(args.provider_id) ~= "string" or args.provider_id == ""
+      or type(args.connection_id) ~= "string" or args.connection_id == ""
+      or type(args.limit) ~= "number" or args.limit < 1
+      or args.limit > 256 or args.limit % 1 ~= 0
+    then
+      finish(callback, nil, error_value("Invalid provider model query", "invalid_input"))
+      return
+    end
+    self:_request("_phenix/providers/models", {
+      scope = "user", provider_id = args.provider_id,
+      connection_id = args.connection_id, profile_id = args.profile_id,
+      cursor = args.cursor, limit = args.limit,
+    }, function(value, err)
+      if err then
+        if err.code == -32601 then
+          finish(callback, nil, error_value(
+            "Phenix does not expose provider model discovery", "unsupported"))
+        else
+          finish(callback, nil, err)
+        end
+        return
+      end
+      if type(value) ~= "table" or type(value.models) ~= "table"
+        or type(value.revision) ~= "number"
+        or (args.profile_id == nil and not nullish(value.profile_id))
+        or (args.profile_id ~= nil and value.profile_id ~= args.profile_id)
+        or #value.models > args.limit
+        or (not nullish(value.next_cursor) and type(value.next_cursor) ~= "string")
+      then
+        finish(callback, nil, error_value("Invalid provider model page", "protocol"))
+        return
+      end
+      for _, model in ipairs(value.models) do
+        if type(model) ~= "table" or type(model.id) ~= "string"
+          or model.id == "" or type(model.label) ~= "string"
+          or model.connection_id ~= args.connection_id
+          or type(model.protocol_id) ~= "string" or model.protocol_id == ""
+          or type(model.endpoint_id) ~= "string" or model.endpoint_id == ""
+          or type(model.selectable) ~= "boolean"
+          or (model.origin ~= "Discovered" and model.origin ~= "Declared"
+            and model.origin ~= "Merged")
+        then
+          finish(callback, nil, error_value("Invalid provider model identity", "protocol"))
+          return
+        end
+      end
+      -- Discovery is inspection only. Selection remains an independent
+      -- revision-checked, authorized runtime operation.
+      finish(callback, vim.deepcopy(value), nil)
+    end)
+  elseif op == "credentials.import" or op == "credentials.revoke" then
+    -- These are independent launcher-granted operations, NOT provider
+    -- authentication. No credential bytes are kept in backend state or
+    -- passed to user-visible diagnostics.
+    for _, key in ipairs({ "provider_id", "connection_id", "profile_id" }) do
+      local value = args[key]
+      if type(value) ~= "string" or value == ""
+        or #value > 64 or value:find("[^%w_-]")
+      then
+        finish(callback, nil, error_value("Invalid credential identity", "invalid_input"))
+        return
+      end
+    end
+    if op == "credentials.import"
+      and (type(args.secret) ~= "string" or args.secret == ""
+        or #args.secret > 65536 or args.secret:find("%z"))
+    then
+      finish(callback, nil, error_value("Invalid credential secret", "invalid_input"))
+      return
+    end
+    local path = op == "credentials.import" and "_phenix/credentials/import"
+      or "_phenix/credentials/revoke"
+    local params = {
+      provider_id = args.provider_id,
+      connection_id = args.connection_id,
+      profile_id = args.profile_id,
+    }
+    if op == "credentials.import" then params.secret = args.secret end
+    self:_request(path, params, function(value, err)
+      if err then
+        if err.code == -32601 then
+          finish(callback, nil, error_value(
+            "Phenix does not grant credential management", "unsupported"))
+        else
+          -- Credential responses must never surface arbitrary provider/host
+          -- prose. Even a malformed error.message may echo the submitted key.
+          finish(callback, nil, {
+            kind = err.kind, code = err.code, provider_code = err.provider_code,
+            message = "Phenix credential operation rejected",
+          })
+        end
+        return
+      end
+      if type(value) ~= "table" or value.ok ~= true then
+        finish(callback, nil, error_value("Invalid credential operation result", "protocol"))
+        return
+      end
+      finish(callback, { stored = op == "credentials.import",
+        revoked = op == "credentials.revoke", authenticated = false }, nil)
     end)
   elseif op == "models.list" then
     local id = args.session_id

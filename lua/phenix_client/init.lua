@@ -8,6 +8,10 @@ local operations = {
   -- Read-only ACP extension feature probe. A host without this extension
   -- returns Method not found; no frontend capability or grant is invented.
   list_providers = { name = "providers.list" },
+  get_provider_auth_status = { name = "providers.auth.status" },
+  get_provider_models = { name = "providers.models" },
+  import_credential = { name = "credentials.import" },
+  revoke_credential = { name = "credentials.revoke" },
   list_models = { permission = { "management", "models" }, name = "models.list" },
   set_model = { permission = { "management", "model_selection" }, name = "models.select" },
   new_session = { permission = { "session_operations", "new" }, name = "sessions.new" },
@@ -168,6 +172,64 @@ end
 function Client:list_providers(callback)
   assert(callback == nil or type(callback) == "function")
   self:_call("list_providers", {}, callback)
+end
+
+-- Provider status and model discovery are read-only plugin-owned queries.
+-- These do not imply entitlement, introduce a selected account or mutate
+-- the ACP session's effective model.
+function Client:get_provider_auth_status(provider_id, connection_id, callback)
+  assert(type(provider_id) == "string" and provider_id ~= "")
+  assert(type(connection_id) == "string" and connection_id ~= "")
+  assert(callback == nil or type(callback) == "function")
+  self:_call("get_provider_auth_status", {
+    provider_id = provider_id, connection_id = connection_id,
+  }, callback)
+end
+
+function Client:get_provider_models(provider_id, connection_id, options, callback)
+  assert(type(provider_id) == "string" and provider_id ~= "")
+  assert(type(connection_id) == "string" and connection_id ~= "")
+  if type(options) == "function" then callback, options = options, nil end
+  options = options or {}
+  assert(type(options) == "table")
+  assert(callback == nil or type(callback) == "function")
+  local limit = options.limit or 64
+  assert(type(limit) == "number" and limit >= 1 and limit <= 256
+    and limit % 1 == 0)
+  assert(options.profile_id == nil or
+    (type(options.profile_id) == "string" and options.profile_id ~= ""))
+  assert(options.cursor == nil or type(options.cursor) == "string")
+  self:_call("get_provider_models", {
+    provider_id = provider_id, connection_id = connection_id,
+    profile_id = options.profile_id, cursor = options.cursor,
+    limit = limit,
+  }, callback)
+end
+
+-- Credentials are never saved in Lua state or a client-side provider catalog.
+-- A successful import means stored, not authenticated; the provider plugin
+-- must independently establish valid authentication before model selection.
+function Client:import_credential(provider_id, connection_id, profile_id, secret, callback)
+  for _, id in ipairs({ provider_id, connection_id, profile_id }) do
+    assert(type(id) == "string" and id ~= "")
+  end
+  assert(type(secret) == "string" and secret ~= "")
+  assert(callback == nil or type(callback) == "function")
+  self:_call("import_credential", {
+    provider_id = provider_id, connection_id = connection_id,
+    profile_id = profile_id, secret = secret,
+  }, callback)
+end
+
+function Client:revoke_credential(provider_id, connection_id, profile_id, callback)
+  for _, id in ipairs({ provider_id, connection_id, profile_id }) do
+    assert(type(id) == "string" and id ~= "")
+  end
+  assert(callback == nil or type(callback) == "function")
+  self:_call("revoke_credential", {
+    provider_id = provider_id, connection_id = connection_id,
+    profile_id = profile_id,
+  }, callback)
 end
 
 function Client:list_models(session_or_callback, callback)

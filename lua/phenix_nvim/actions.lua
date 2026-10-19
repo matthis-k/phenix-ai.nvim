@@ -389,6 +389,8 @@ local function authentication_identity(method)
     provider_id = provider_id,
     connection_id = connection_id,
     method_id = method_id,
+    kind = method.kind,
+    profile_id = method.profile_id,
   }
 end
 
@@ -414,6 +416,13 @@ local function start_authentication(method, secret, callback)
     local kind = authentication_kind(result)
     if kind == "authenticated" then
       util.notify(identity.provider_id .. " authentication completed", vim.log.levels.INFO)
+      finish_authentication(callback, result, nil)
+      return
+    end
+    if kind == "stored" and result.verified == false then
+      util.notify(identity.provider_id .. " API key stored for profile "
+        .. tostring(result.profile_id) .. "; authentication not yet verified",
+        vim.log.levels.INFO)
       finish_authentication(callback, result, nil)
       return
     end
@@ -466,24 +475,53 @@ local function authenticate_method(method, callback)
   end
   local generation = auth_generation
   local provider = method.provider_name or authentication_provider_id(method) or method.name or "provider"
-  util.input_secret(provider .. " API key: ", function(secret, input_error)
-    if generation ~= auth_generation then
-      return
-    end
-    if input_error ~= nil then
-      finish_authentication(callback, nil, input_error)
-      return
-    end
-    if secret == nil then
-      finish_authentication(callback, nil, { kind = "cancelled", message = "authentication cancelled" })
-      return
-    end
-    if type(secret) ~= "string" or secret:match("%S") == nil then
-      finish_authentication(callback, nil, { message = "API key must not be empty" })
-      return
-    end
-    start_authentication(method, secret, callback)
-  end)
+  local function request_secret(named)
+    util.input_secret(provider .. " API key: ", function(secret, input_error)
+      if generation ~= auth_generation then return end
+      if input_error ~= nil then
+        finish_authentication(callback, nil, input_error)
+        return
+      end
+      if secret == nil then
+        finish_authentication(callback, nil, {
+          kind = "cancelled", message = "authentication cancelled",
+        })
+        return
+      end
+      if type(secret) ~= "string" or secret:match("%S") == nil then
+        finish_authentication(callback, nil, { message = "API key must not be empty" })
+        return
+      end
+      local scoped = vim.deepcopy(method)
+      if named then scoped.profile_id = named end
+      start_authentication(scoped, secret, callback)
+    end)
+  end
+  -- P1's credential store is scoped to one explicit named account. Never
+  -- silently pick a profile, especially when multiple accounts share a method.
+  if runtime.p1_active() then
+    vim.ui.input({
+      prompt = "Credential profile ID (letters, digits, _ or -): ",
+      default = method.profile_id or "personal",
+    }, function(profile_id)
+      if generation ~= auth_generation then return end
+      if profile_id == nil then
+        finish_authentication(callback, nil, {
+          kind = "cancelled", message = "authentication cancelled",
+        })
+      elseif type(profile_id) ~= "string" or profile_id == ""
+        or #profile_id > 64 or profile_id:find("[^%w_-]")
+      then
+        finish_authentication(callback, nil, {
+          kind = "invalid_input", message = "Invalid credential profile ID",
+        })
+      else
+        request_secret(profile_id)
+      end
+    end)
+  else
+    request_secret(method.profile_id)
+  end
 end
 
 local function authentication_label(method)
