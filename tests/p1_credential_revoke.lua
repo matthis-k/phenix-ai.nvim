@@ -30,8 +30,7 @@ end
 command("auth", "revoke", "openai", "api", "personal")
 assert(#calls == 0 and #options_seen.options == 2)
 assert(options_seen.prompt:find("openai / api / personal", 1, true))
-assert(#notices == 1 and notices[1].level == vim.log.levels.INFO
-  or #notices == 0, "cancelled revocation must not report success")
+assert(#notices == 0, "cancelled revocation must be silent")
 
 decision = "Revoke"
 notices = {}
