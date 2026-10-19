@@ -339,6 +339,12 @@ local auth_generation = 0
 local selection_generation = 0
 local connection_state = runtime.status().connection
 runtime.on_event(function(kind, status)
+  if kind == "models" then
+    -- An open picker was built from an older runtime catalog. Retire its
+    -- callbacks; the user can reopen it against current advertised choices.
+    selection_generation = selection_generation + 1
+    return
+  end
   if kind ~= "status" then
     return
   end
