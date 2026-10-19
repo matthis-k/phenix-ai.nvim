@@ -613,8 +613,9 @@ function M.revoke_credential(provider_id, connection_id, profile_id, callback)
     .. " / " .. profile_id .. " credential?"
   vim.ui.select({ "Cancel", "Revoke" }, { prompt = prompt }, function(choice)
     if choice ~= "Revoke" then
-      finish_authentication(callback, nil, { kind = "cancelled",
-        message = "Credential revocation cancelled" })
+      if callback then util.safe_call(callback, nil, {
+        kind = "cancelled", message = "Credential revocation cancelled",
+      }) end
       return
     end
     runtime.revoke_credential(provider_id, connection_id, profile_id,
