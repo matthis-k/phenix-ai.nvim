@@ -118,5 +118,59 @@ transport:_response({ jsonrpc = "2.0", id = outgoing.id,
 assert(models == nil and models_error.kind == "protocol",
   "foreign connection model identities cannot become client choices")
 
+-- Credential import/revoke are separate host grants. Acknowledgement is
+-- storage-only and must never become an authenticated provider status.
+local imported, imported_error
+local secret = "fake-test-key-DO-NOT-LOG"
+client:import_credential("openai", "api", "personal", secret, function(value, err)
+  imported, imported_error = value, err
+end)
+assert(outgoing.method == "_phenix/credentials/import")
+assert(outgoing.params.provider_id == "openai"
+  and outgoing.params.connection_id == "api"
+  and outgoing.params.profile_id == "personal")
+assert(outgoing.params.secret == secret)
+transport:_response({ jsonrpc = "2.0", id = outgoing.id,
+  result = { ok = true } })
+assert(not imported_error and imported.stored and imported.authenticated == false)
+assert(not client:capabilities().management.provider_authentication)
+
+local revoked, revoke_error
+client:revoke_credential("openai", "api", "personal", function(value, err)
+  revoked, revoke_error = value, err
+end)
+assert(outgoing.method == "_phenix/credentials/revoke")
+assert(outgoing.params.secret == nil)
+transport:_response({ jsonrpc = "2.0", id = outgoing.id,
+  result = { ok = true } })
+assert(not revoke_error and revoked.revoked and revoked.authenticated == false)
+
+client:import_credential("openai", "api", "work", secret, function(value, err)
+  imported, imported_error = value, err
+end)
+transport:_response({ jsonrpc = "2.0", id = outgoing.id,
+  error = { code = -32602, message = "Invalid params", data = {
+    format = "phenix.provider.error.v1", code = "Denied",
+    message = "fake-test-key-DO-NOT-LOG",
+  } },
+})
+assert(imported == nil and imported_error.provider_code == "Denied")
+assert(not imported_error.message:find(secret, 1, true))
+
+client:import_credential("openai", "api", "personal", secret, function(value, err)
+  imported, imported_error = value, err
+end)
+transport:_response({ jsonrpc = "2.0", id = outgoing.id,
+  error = { code = -32601, message = "Method not found" },
+})
+assert(imported == nil and imported_error.kind == "unsupported")
+
+client:revoke_credential("openai", "api", "personal", function(value, err)
+  revoked, revoke_error = value, err
+end)
+transport:_response({ jsonrpc = "2.0", id = outgoing.id,
+  result = { ok = false } })
+assert(revoked == nil and revoke_error.kind == "protocol")
+
 client:close()
-print("Read-only provider auth and model queries validated without granting authority")
+print("Provider read queries and scoped credential calls validated without granting authority")
