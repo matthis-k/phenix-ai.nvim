@@ -171,10 +171,12 @@ runtime.list_selections = function(cb)
   cb({ selected = "account-one", available = {
     { id = "account-one", provider = "openai", model = "gpt-example",
       thinking = "medium", connection_id = "api", profile_id = "personal",
-      presentation = { kind = "model" }, authenticated = true },
+      presentation = { kind = "model" }, authenticated = true,
+      authorized = true, selectable = true },
     { id = "account-two", provider = "openai", model = "gpt-example",
       thinking = "medium", connection_id = "api", profile_id = "work",
-      presentation = { kind = "model" }, authenticated = true },
+      presentation = { kind = "model" }, authenticated = true,
+      authorized = true, selectable = true },
   } }, nil)
 end
 runtime.select = function(id, cb)
@@ -210,7 +212,20 @@ runtime.list_selections = function(cb)
     { id = "unavailable", provider = "a-ready", model = "unavailable",
       presentation = { kind = "model" }, selectable = false },
     { id = "needs-auth", provider = "a-ready", model = "needs-auth",
-      presentation = { kind = "model" }, authenticated = false },
+      presentation = { kind = "model" }, authenticated = false,
+      authorized = true, selectable = true },
+    { id = "unknown-authority", provider = "a-ready", model = "unknown-authority",
+      presentation = { kind = "model" }, authenticated = true, selectable = true },
+    { id = "unknown-readiness", provider = "a-ready", model = "unknown-readiness",
+      presentation = { kind = "model" }, authorized = true, selectable = true },
+    { id = "unknown-selectability", provider = "a-ready", model = "unknown-selectability",
+      presentation = { kind = "model" }, authorized = true, authenticated = true },
+    { provider = "a-ready", model = "missing-selection-id",
+      presentation = { kind = "model" }, authorized = true,
+      selectable = true, authenticated = true },
+    { id = "", provider = "a-ready", model = "empty-selection-id",
+      presentation = { kind = "model" }, authorized = true,
+      selectable = true, authenticated = true },
   } }, nil)
 end
 selected_model = nil
