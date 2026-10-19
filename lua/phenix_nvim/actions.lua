@@ -499,7 +499,11 @@ local function authenticate_method(method, callback)
   end
   -- P1's credential store is scoped to one explicit named account. Never
   -- silently pick a profile, especially when multiple accounts share a method.
-  if runtime.p1_active() then
+  if runtime.p1_active() and method.profile_id ~= nil then
+    -- The exact profile was authorized by the native ACP host. Do not
+    -- invite the editor to request a different account.
+    request_secret(method.profile_id)
+  elseif runtime.p1_active() then
     vim.ui.input({
       prompt = "Credential profile ID (letters, digits, _ or -): ",
       default = method.profile_id or "personal",
