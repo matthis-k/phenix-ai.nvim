@@ -523,6 +523,40 @@ local function choose_authentication_method(methods, prompt, callback)
   end)
 end
 
+function M.providers()
+  runtime.list_providers(function(result, problem)
+    if problem then
+      if problem.kind ~= "cancelled" then
+        util.notify(problem.message or vim.inspect(problem), vim.log.levels.WARN)
+      end
+      return
+    end
+    local providers = result and result.providers or {}
+    if #providers == 0 then
+      util.notify("No installed Phenix provider registrations", vim.log.levels.INFO)
+      return
+    end
+    vim.ui.select(providers, {
+      prompt = "Installed Phenix providers (not authenticated)",
+      format_item = function(item) return item.label or item.id end,
+    }, function(provider)
+      if not provider then return end
+      local connections = {}
+      for _, connection in ipairs(provider.connections or {}) do
+        local methods = {}
+        for _, method in ipairs(connection.auth_methods or {}) do
+          methods[#methods + 1] = method.label or method.id
+        end
+        connections[#connections + 1] = (connection.label or connection.id)
+          .. " (" .. (#methods == 0 and "no auth" or table.concat(methods, ", ")) .. ")"
+      end
+      util.notify((provider.label or provider.id)
+        .. " — registered, not authenticated: " .. table.concat(connections, "; "),
+        vim.log.levels.INFO)
+    end)
+  end)
+end
+
 function M.authenticate()
   if type(runtime.list_authentication_methods) ~= "function" or type(runtime.authenticate) ~= "function" then
     util.notify("The installed Phenix runtime does not expose application authentication yet", vim.log.levels.WARN)
