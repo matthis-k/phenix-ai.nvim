@@ -488,9 +488,8 @@ function Backend:call(op, args, callback)
     -- These are independent launcher-granted operations, NOT provider
     -- authentication. No credential bytes are kept in backend state or
     -- passed to user-visible diagnostics.
-    for _, value in ipairs({
-      args.provider_id, args.connection_id, args.profile_id,
-    }) do
+    for _, key in ipairs({ "provider_id", "connection_id", "profile_id" }) do
+      local value = args[key]
       if type(value) ~= "string" or value == ""
         or #value > 64 or value:find("[^%w_-]")
       then
