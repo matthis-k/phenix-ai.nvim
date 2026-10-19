@@ -11,6 +11,10 @@ local function finish(callback, value, err)
   if callback then callback(value, err) end
 end
 
+local function nullish(value)
+  return value == nil or value == vim.NIL
+end
+
 function M.new(options)
   options = options or {}
   local command = options.command or "phenix-basic-acp"
@@ -454,9 +458,10 @@ function Backend:call(op, args, callback)
       end
       if type(value) ~= "table" or type(value.models) ~= "table"
         or type(value.revision) ~= "number"
-        or value.profile_id ~= args.profile_id
+        or (args.profile_id == nil and not nullish(value.profile_id))
+        or (args.profile_id ~= nil and value.profile_id ~= args.profile_id)
         or #value.models > args.limit
-        or (value.next_cursor ~= nil and type(value.next_cursor) ~= "string")
+        or (not nullish(value.next_cursor) and type(value.next_cursor) ~= "string")
       then
         finish(callback, nil, error_value("Invalid provider model page", "protocol"))
         return
