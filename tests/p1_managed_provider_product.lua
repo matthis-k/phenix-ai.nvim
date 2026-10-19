@@ -44,5 +44,10 @@ end, "Basic model options")
 assert(models.selected == "phenix.model.scripted")
 assert(#models.models == 1 and models.models[1].id == models.selected,
   "read-only discovery must not change available Basic models")
+local completion = await_result(function(cb)
+  client:send(session.session_id, "managed-provider-smoke", cb)
+end, "Basic model continuation")
+assert(completion.stop_reason == "end_turn",
+  "native managed host must preserve the scripted Basic graph")
 client:close()
 print("Managed ACP native provider discovery and Basic session coexist")
