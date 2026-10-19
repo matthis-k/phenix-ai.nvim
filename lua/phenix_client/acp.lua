@@ -484,6 +484,36 @@ function Backend:call(op, args, callback)
       -- revision-checked, authorized runtime operation.
       finish(callback, vim.deepcopy(value), nil)
     end)
+  elseif op == "credentials.capabilities" then
+    -- A capability is from the trusted launcher, not a locally inferred
+    -- provider method or an authentication/entitlement assertion.
+    self:_request("_phenix/credentials/capabilities", {}, function(value, err)
+      if err then
+        if err.code == -32601 then
+          finish(callback, nil, error_value(
+            "Phenix does not grant credential management", "unsupported"))
+        else
+          finish(callback, nil, err)
+        end
+        return
+      end
+      if type(value) ~= "table" or value.import ~= true
+        or value.revoke ~= true
+      then
+        finish(callback, nil, error_value("Invalid credential capability", "protocol"))
+        return
+      end
+      for _, field in ipairs({ "provider_id", "connection_id", "profile_id" }) do
+        local id = value[field]
+        if type(id) ~= "string" or id == ""
+          or #id > 64 or id:find("[^%w_-]")
+        then
+          finish(callback, nil, error_value("Invalid granted credential identity", "protocol"))
+          return
+        end
+      end
+      finish(callback, vim.deepcopy(value), nil)
+    end)
   elseif op == "credentials.import" or op == "credentials.revoke" then
     -- These are independent launcher-granted operations, NOT provider
     -- authentication. No credential bytes are kept in backend state or
