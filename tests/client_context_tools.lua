@@ -230,4 +230,32 @@ for index, expected in ipairs({
 end
 
 runtime.disconnect()
+
+-- A client may register its own implementation of a default tool before
+-- enabling defaults. Enabling must not reject, shadow or remove that handler.
+tools.disable_defaults()
+assert(#tools._templates() == 0)
+local custom_definition = vim.deepcopy(by_id["nvim.context.buffer"].definition)
+local custom_handler = function() return "custom context" end
+local stop_custom = tools.register(custom_definition, custom_handler)
+tools.enable_defaults()
+local customized = tools._templates()
+assert(#customized == 7, "default tools should fill only missing IDs")
+local found_custom
+for _, item in ipairs(customized) do
+  if item.id == "nvim.context.buffer" then
+    found_custom = item
+  end
+end
+assert(found_custom and found_custom.handler == custom_handler,
+  "custom tool handler was overwritten by default registration")
+tools.disable_defaults()
+local remaining = tools._templates()
+assert(#remaining == 1 and remaining[1].handler == custom_handler,
+  "disabling defaults removed a third-party tool")
+stop_custom()
+tools.enable_defaults()
+assert(#tools._templates() == 7, "default must become available after custom removal")
+tools.disable_defaults()
+
 print("client context tool regressions passed")
