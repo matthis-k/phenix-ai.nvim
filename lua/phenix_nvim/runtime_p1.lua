@@ -470,18 +470,22 @@ end
 -- The management host can store a key only for a launcher-authorized
 -- credential identity. Storage success is not validated provider login.
 function M.authenticate(identity, secret, callback)
-  if type(identity) ~= "table"
-    or type(identity.provider_id) ~= "string"
-    or type(identity.connection_id) ~= "string"
-    or type(identity.profile_id) ~= "string" or identity.profile_id == ""
-  then
+  if type(identity) ~= "table" then
     if callback then callback(nil, { kind = "invalid_input",
-      message = "An explicit provider, connection and credential profile are required" }) end
+      message = "Authentication identity is required" }) end
     return
   end
   local kind = string.lower(tostring(identity.kind or ""))
   if kind ~= "apikey" and kind ~= "api_key" and kind ~= "api_token" then
     unavailable("this authentication method", callback)
+    return
+  end
+  if type(identity.provider_id) ~= "string" or identity.provider_id == ""
+    or type(identity.connection_id) ~= "string" or identity.connection_id == ""
+    or type(identity.profile_id) ~= "string" or identity.profile_id == ""
+  then
+    if callback then callback(nil, { kind = "invalid_input",
+      message = "An explicit provider, connection and credential profile are required" }) end
     return
   end
   if type(secret) ~= "string" or secret == "" then
@@ -495,6 +499,11 @@ function M.authenticate(identity, secret, callback)
       identity.profile_id, secret, function(stored, problem)
         if retired_reply(client, callback) then return end
         if problem then if callback then callback(nil, problem) end; return end
+        if not stored or stored.stored ~= true then
+          if callback then callback(nil, { kind = "protocol",
+            message = "Phenix did not confirm credential storage" }) end
+          return
+        end
         if callback then callback({
           kind = "stored", verified = false, authenticated = false,
           provider_id = identity.provider_id,
