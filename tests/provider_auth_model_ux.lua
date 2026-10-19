@@ -280,6 +280,43 @@ assert(#notices == 1 and notices[1].level == vim.log.levels.WARN
 assert(#calls == 0 and #prompts == 0,
   "unsupported runtime authentication must not request a credential")
 
+-- With the P1 credential extension, account selection is explicit and
+-- a stored key is never presented as provider-verified login.
+local original_ui_input = vim.ui.input
+local profile_prompt
+vim.ui.input = function(options, callback)
+  profile_prompt = options.prompt
+  callback("personal")
+end
+methods = { { provider_id = "openai", connection_id = "api",
+  method_id = "api-key", kind = "ApiKey", label = "API key" } }
+runtime.list_authentication_methods = function(cb)
+  cb({ methods = vim.deepcopy(methods) }, nil)
+end
+runtime.authenticate = function(identity, secret, cb)
+  calls[#calls + 1] = { identity = vim.deepcopy(identity), secret = secret }
+  cb({ kind = "stored", profile_id = identity.profile_id, verified = false }, nil)
+end
+reset()
+notices = {}
+actions.authenticate()
+assert(profile_prompt and profile_prompt:find("Credential profile", 1, true))
+assert(#calls == 1 and calls[1].identity.profile_id == "personal"
+  and calls[1].identity.provider_id == "openai"
+  and calls[1].identity.connection_id == "api")
+assert(calls[1].identity.kind == "ApiKey")
+assert(#notices == 1 and notices[1].level == vim.log.levels.INFO
+  and notices[1].message:find("not yet verified", 1, true),
+  "credential storage must not be announced as an authenticated provider")
+
+vim.ui.input = function(_, callback) callback("invalid/profile") end
+reset()
+notices = {}
+actions.authenticate()
+assert(#calls == 0, "invalid profile must never reach credential store")
+assert(#notices == 1 and notices[1].level == vim.log.levels.ERROR)
+vim.ui.input = original_ui_input
+
 for key, value in pairs(originals) do
   if key == "ui_select" then vim.ui.select = value
   elseif key == "ui_open" then vim.ui.open = value
