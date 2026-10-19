@@ -127,6 +127,12 @@ transport:_response({ jsonrpc = "2.0", id = outgoing.id, result = {
   import = true, revoke = true,
 } })
 assert(not problem and granted.profile_id == "personal")
+client:credential_capabilities(function(value, err) granted, problem = value, err end)
+transport:_response({ jsonrpc = "2.0", id = outgoing.id, result = {
+  provider_id = "openai", connection_id = "api",
+  profile_id = "invalid/name", import = true, revoke = true,
+} })
+assert(granted == nil and problem.kind == "protocol")
 assert(not client:capabilities().management.provider_authentication)
 
 client:credential_capabilities(function(value, err) granted, problem = value, err end)
