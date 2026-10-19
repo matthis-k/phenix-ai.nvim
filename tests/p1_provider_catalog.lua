@@ -66,6 +66,8 @@ assert(malformed == nil and protocol_error.kind == "protocol",
 -- authentication success or a model selection.
 client:close()
 package.loaded["phenix_nvim.runtime"] = {
+  status = function() return { connection = "ready" } end,
+  on_event = function() return function() end end,
   list_providers = function(callback) callback(catalog, nil) end,
 }
 local util = require("phenix_nvim.util")
