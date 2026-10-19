@@ -401,12 +401,108 @@ function M.list_providers(callback)
   end)
 end
 
+-- This is a projection of provider-owned catalog/auth contracts. A catalog
+-- advertises methods, not verified credentials or runtime authorization.
 function M.list_authentication_methods(callback)
-  unavailable("authentication methods", callback)
+  connected(function(client, err)
+    if err then if callback then callback(nil, err) end; return end
+    client:list_providers(function(page, problem)
+      if retired_reply(client, callback) then return end
+      if problem then if callback then callback(nil, problem) end; return end
+
+      local entries = {}
+      local connections = {}
+      for _, provider in ipairs(page.providers or {}) do
+        for _, connection in ipairs(provider.connections or {}) do
+          local offered = {}
+          for _, method in ipairs(connection.auth_methods or {}) do
+            offered[#offered + 1] = {
+              provider_id = provider.id, provider_name = provider.label,
+              connection_id = connection.id, connection_name = connection.label,
+              method_id = method.id, label = method.label, kind = method.kind,
+              authenticated = false, profiles = {},
+            }
+          end
+          if #offered > 0 then connections[#connections + 1] = {
+            provider_id = provider.id, connection_id = connection.id, methods = offered,
+          } end
+        end
+      end
+
+      local function visit(index)
+        if not current_client(client) then
+          if callback then callback(nil, { kind = "disconnected",
+            message = "Phenix connection changed during auth discovery" }) end
+          return
+        end
+        if index > #connections then
+          if callback then callback({ methods = entries }, nil) end
+          return
+        end
+        local current = connections[index]
+        client:get_provider_auth_status(
+          current.provider_id, current.connection_id, function(status, failure)
+            if not current_client(client) then
+              if callback then callback(nil, { kind = "disconnected",
+                message = "Phenix connection changed during auth discovery" }) end
+              return
+            end
+            for _, method in ipairs(current.methods) do
+              if not failure and status then
+                for _, profile in ipairs(status.profiles or {}) do
+                  if profile.method_id == method.method_id then
+                    method.profiles[#method.profiles + 1] = vim.deepcopy(profile)
+                    if profile.valid then method.authenticated = true end
+                  end
+                end
+              end
+              entries[#entries + 1] = method
+            end
+            visit(index + 1)
+          end
+        )
+      end
+      visit(1)
+    end)
+  end)
 end
 
-function M.authenticate(_, _, callback)
-  unavailable("authentication", callback)
+-- The management host can store a key only for a launcher-authorized
+-- credential identity. Storage success is not validated provider login.
+function M.authenticate(identity, secret, callback)
+  if type(identity) ~= "table"
+    or type(identity.provider_id) ~= "string"
+    or type(identity.connection_id) ~= "string"
+    or type(identity.profile_id) ~= "string" or identity.profile_id == ""
+  then
+    if callback then callback(nil, { kind = "invalid_input",
+      message = "An explicit provider, connection and credential profile are required" }) end
+    return
+  end
+  local kind = string.lower(tostring(identity.kind or ""))
+  if kind ~= "apikey" and kind ~= "api_key" and kind ~= "api_token" then
+    unavailable("this authentication method", callback)
+    return
+  end
+  if type(secret) ~= "string" or secret == "" then
+    if callback then callback(nil, { kind = "invalid_input",
+      message = "An API key is required" }) end
+    return
+  end
+  connected(function(client, err)
+    if err then if callback then callback(nil, err) end; return end
+    client:import_credential(identity.provider_id, identity.connection_id,
+      identity.profile_id, secret, function(stored, problem)
+        if retired_reply(client, callback) then return end
+        if problem then if callback then callback(nil, problem) end; return end
+        if callback then callback({
+          kind = "stored", verified = false, authenticated = false,
+          provider_id = identity.provider_id,
+          connection_id = identity.connection_id,
+          profile_id = identity.profile_id,
+        }, nil) end
+      end)
+  end)
 end
 
 function M.decide_review(_, _, callback)
