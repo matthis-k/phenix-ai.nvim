@@ -20,7 +20,7 @@ function M.new(options)
     cwd = options.cwd or vim.fn.getcwd(),
     job = nil, next_id = 0, requests = {}, waiting = {},
     subscribers = {}, partial = "",
-    state = "idle", features = nil, catalogs = {}, active_session = nil,
+    state = "idle", features = nil, catalogs = {}, catalog_versions = {}, active_session = nil,
     permission_requests = {},
   }, Backend)
 end
@@ -258,6 +258,9 @@ end
 -- frontend configuration. A catalog is scoped to the session which sent it.
 function Backend:_catalog(session_id, options)
   local previous = self.catalogs[session_id]
+  -- This is a local ordering counter, never a replacement for a runtime CAS
+  -- revision. It prevents an older ACP reply from undoing newer notifications.
+  self.catalog_versions[session_id] = (self.catalog_versions[session_id] or 0) + 1
   local catalog = nil
   for _, option in ipairs(options or {}) do
     if option.id == "model" and option.category == "model"
@@ -391,10 +394,16 @@ function Backend:call(op, args, callback)
       finish(callback, nil, error_value("Model was not offered by Phenix", "denied"))
       return
     end
+    local requested_version = self.catalog_versions[id]
     self:_request("session/set_config_option", {
       sessionId = id, configId = "model", value = args.model_id,
     }, function(value, err)
       if err then finish(callback, nil, err); return end
+      if self.catalog_versions[id] ~= requested_version then
+        finish(callback, nil, error_value(
+          "Model catalog changed during selection; refresh and retry", "conflict"))
+        return
+      end
       if type(value) ~= "table" or type(value.configOptions) ~= "table" then
         finish(callback, nil, error_value("ACP model change omitted confirmed state", "protocol"))
         return
