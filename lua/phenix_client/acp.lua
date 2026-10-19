@@ -518,7 +518,12 @@ function Backend:call(op, args, callback)
           finish(callback, nil, error_value(
             "Phenix does not grant credential management", "unsupported"))
         else
-          finish(callback, nil, err)
+          -- Credential responses must never surface arbitrary provider/host
+          -- prose. Even a malformed error.message may echo the submitted key.
+          finish(callback, nil, {
+            kind = err.kind, code = err.code, provider_code = err.provider_code,
+            message = "Phenix credential operation rejected",
+          })
         end
         return
       end
