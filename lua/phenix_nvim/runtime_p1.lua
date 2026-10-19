@@ -115,6 +115,16 @@ function M.connect(callback)
       end)
     end)
   end)
+  client:on("models.changed", function(event)
+    if state.client ~= client then return end
+    -- A catalog update is runtime state, not a locally accepted selection.
+    -- Pass revocations through even when the affected session is not active.
+    emit("models", {
+      session_id = event.session_id,
+      catalog = event.catalog and vim.deepcopy(event.catalog) or nil,
+    })
+    if event.session_id == state.active then emit("status", M.status()) end
+  end)
   client:on("session.updated", function(event)
     if state.client ~= client then return end
     if state.projection:apply(event) then

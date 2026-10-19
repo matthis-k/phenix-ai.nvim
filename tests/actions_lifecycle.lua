@@ -147,6 +147,16 @@ actions.choose_selection()
 superseded_model_pick(superseded_model_items[1])
 assert(selection_calls == 0, "superseded model picker remained live")
 
+-- A published model-catalog revocation invalidates all old picker
+-- callbacks, even when the ACP connection itself remains healthy.
+actions.choose_selection()
+local revoked_model_items, revoked_model_pick = items, picked
+for _, listener in ipairs(listeners) do
+  listener("models", { session_id = "session-send", catalog = nil })
+end
+revoked_model_pick(revoked_model_items[1])
+assert(selection_calls == 0, "revoked model picker remained live")
+
 -- A model picker is application-scoped, but a stale picker may not mutate a replacement connection.
 actions.choose_selection()
 local stale_model_items, stale_model_pick = items, picked
