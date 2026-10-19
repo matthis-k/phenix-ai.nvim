@@ -131,11 +131,10 @@ end
 -- Read only as many lines as the byte budget can expose. The Neovim
 -- API returns entire lines, but we must not materialize every line of a large
 -- loaded buffer before returning a bounded context snapshot.
-local function bounded_buffer_text(buffer, max_bytes)
-  local line_count = vim.api.nvim_buf_line_count(buffer)
+local function bounded_lines_text(buffer, first_line, last_line, max_bytes)
   local pieces = {}
   local used = 0
-  for index = 0, line_count - 1 do
+  for index = first_line, last_line do
     if index > 0 then
       if used == max_bytes then
         return table.concat(pieces), true
@@ -153,6 +152,10 @@ local function bounded_buffer_text(buffer, max_bytes)
     used = used + #line
   end
   return table.concat(pieces), false
+end
+
+local function bounded_buffer_text(buffer, max_bytes)
+  return bounded_lines_text(buffer, 0, vim.api.nvim_buf_line_count(buffer) - 1, max_bytes)
 end
 
 local function severity_name(value)
@@ -321,9 +324,10 @@ local function viewport_tool(input)
   local buffer = vim.api.nvim_win_get_buf(window)
   local top = math.max(0, vim.fn.line("w0", window) - 1)
   local bottom = math.max(top, vim.fn.line("w$", window) - 1)
-  local lines = vim.api.nvim_buf_get_lines(buffer, top, bottom + 1, false)
-  local text, truncated = utf8_prefix(table.concat(lines, "\n"), max_bytes)
-  local last = lines[#lines] or ""
+  -- Read only the visible lines needed by the byte budget. A viewport may
+  -- contain long lines; joining all of them before truncation wastes memory.
+  local text, truncated = bounded_lines_text(buffer, top, bottom, max_bytes)
+  local last = vim.api.nvim_buf_get_lines(buffer, bottom, bottom + 1, false)[1] or ""
   return {
     location = {
       uri = buffer_uri(buffer),
