@@ -191,6 +191,36 @@ assert(#empty_quickfix == 0, "zero quickfix limit must return no entries")
 local viewport = by_id["nvim.context.viewport"].handler({})
 assert(viewport.truncated == false)
 
+-- The viewport tool must not materialize the whole visible range before
+-- applying a tiny byte budget. A scrolled viewport starts after buffer row 1.
+local many = {}
+for index = 1, 160 do many[index] = string.format("line-%03d", index) end
+vim.api.nvim_buf_set_lines(buffer, 0, -1, false, many)
+vim.api.nvim_win_set_cursor(0, { #many, 0 })
+vim.cmd("normal! zz")
+local visible_top = vim.fn.line("w0", vim.api.nvim_get_current_win())
+assert(visible_top > 1, "viewport regression fixture must start below the first row")
+local previous_viewport_get_lines = vim.api.nvim_buf_get_lines
+local fetched_viewport_lines = 0
+vim.api.nvim_buf_get_lines = function(buf, first, last, strict)
+  if buf == buffer then
+    assert(last - first <= 1, "viewport snapshot fetched multiple lines before truncation")
+    fetched_viewport_lines = fetched_viewport_lines + (last - first)
+  end
+  return previous_viewport_get_lines(buf, first, last, strict)
+end
+local viewport_ok, tiny_viewport = pcall(by_id["nvim.context.viewport"].handler, {
+  max_bytes = 5,
+})
+vim.api.nvim_buf_get_lines = previous_viewport_get_lines
+assert(viewport_ok, tiny_viewport)
+assert(tiny_viewport.text == "line-" and tiny_viewport.truncated,
+  "scrolled viewport must not insert a leading newline or exceed byte budget")
+assert(fetched_viewport_lines <= 2,
+  "viewport budget must stop reading after the first needed line")
+vim.api.nvim_buf_set_lines(buffer, 0, -1, false, { "éx", "second" })
+vim.api.nvim_win_set_cursor(0, { 1, 2 })
+
 runtime.connect()
 client:ready()
 runtime.tick()
