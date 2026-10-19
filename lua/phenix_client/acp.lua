@@ -71,6 +71,13 @@ function Backend:_response(frame)
   if frame.method == "session/update" then
     local params = frame.params or {}
     if type(params.sessionId) == "string" and type(params.update) == "table" then
+      -- ACP config_option_update carries the complete authoritative option
+      -- set. An empty set retracts the previous model catalog.
+      if params.update.sessionUpdate == "config_option_update"
+        and type(params.update.configOptions) == "table"
+      then
+        self:_catalog(params.sessionId, params.update.configOptions)
+      end
       local listeners = {}
       for _, callback in ipairs(self.subscribers) do listeners[#listeners + 1] = callback end
       for _, callback in ipairs(listeners) do
