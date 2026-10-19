@@ -148,6 +148,74 @@ backend:_response({ jsonrpc = "2.0", method = "session/update",
   } },
 })
 assert(#updates == 4, "malformed notifications must not mutate the catalog")
+
+-- A late set_config_option reply is not newer than a pushed runtime update.
+-- Never let that reply restore choices revoked while the request was pending.
+backend:_catalog("s1", { model_option("provider/one") })
+local pending, result, selection_error
+backend._request = function(_, method, params, callback)
+  assert(method == "session/set_config_option" and params.sessionId == "s1")
+  pending = callback
+end
+backend:call("models.select", {
+  session_id = "s1", model_id = "provider/two",
+}, function(value, problem)
+  result, selection_error = value, problem
+end)
+assert(pending ~= nil and result == nil)
+backend:_response({ jsonrpc = "2.0", method = "session/update",
+  params = { sessionId = "s1", update = {
+    sessionUpdate = "config_option_update", configOptions = {},
+  } },
+})
+assert(backend.catalogs.s1 == nil)
+pending({ configOptions = { model_option("provider/two") } }, nil)
+assert(result == nil and selection_error and selection_error.kind == "conflict",
+  "late selection reply must reject after runtime revoked a catalog")
+assert(backend.catalogs.s1 == nil and backend.catalogs.s2 == nil,
+  "late selection reply resurrected revoked choices")
+
+-- Notifications for an unrelated session must not invalidate this session's
+-- in-flight operation. Both catalogs are scoped to their own session.
+backend:_catalog("s1", { model_option("provider/one") })
+backend:_catalog("s2", { model_option("provider/one") })
+pending, result, selection_error = nil, nil, nil
+backend:call("models.select", {
+  session_id = "s1", model_id = "provider/two",
+}, function(value, problem)
+  result, selection_error = value, problem
+end)
+assert(pending ~= nil)
+backend:_catalog("s2", { model_option("provider/two") })
+pending({ configOptions = { model_option("provider/two") } }, nil)
+assert(result and result.selected == "provider/two" and selection_error == nil,
+  "an unrelated session update incorrectly blocked a verified response")
+
+-- Two outstanding replies can complete in reverse order. A later accepted
+-- response must not be rolled back by the first request's old snapshot.
+backend:_catalog("s1", { model_option("provider/one") })
+local callbacks, results = {}, {}
+backend._request = function(_, _, params, callback)
+  assert(params.sessionId == "s1")
+  callbacks[#callbacks + 1] = callback
+end
+backend:call("models.select", {
+  session_id = "s1", model_id = "provider/two",
+}, function(value, problem)
+  results[1] = { value = value, problem = problem }
+end)
+backend:call("models.select", {
+  session_id = "s1", model_id = "provider/one",
+}, function(value, problem)
+  results[2] = { value = value, problem = problem }
+end)
+assert(#callbacks == 2)
+callbacks[2]({ configOptions = { model_option("provider/one") } }, nil)
+callbacks[1]({ configOptions = { model_option("provider/two") } }, nil)
+assert(results[2].value and results[2].problem == nil)
+assert(results[1].value == nil and results[1].problem.kind == "conflict",
+  "out-of-order selection reply must not overwrite a later response")
+assert(backend.catalogs.s1.selected == "provider/one")
 stop_updates()
 
 print("ACP model selection and catalog revocation reject stale choices")
