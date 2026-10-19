@@ -470,7 +470,9 @@ end
 function M.enable_defaults()
   for _, tool in ipairs(default_tools) do
     local id = tool.definition.id
-    if default_stops[id] == nil then
+    -- A third-party client tool may deliberately supply this same ID.
+    -- Preserve the user's handler; only track and remove defaults we own.
+    if default_stops[id] == nil and templates[id] == nil then
       default_stops[id] = M.register(tool.definition, tool.handler)
     end
   end
