@@ -484,6 +484,52 @@ function Backend:call(op, args, callback)
       -- revision-checked, authorized runtime operation.
       finish(callback, vim.deepcopy(value), nil)
     end)
+  elseif op == "credentials.import" or op == "credentials.revoke" then
+    -- These are independent launcher-granted operations, NOT provider
+    -- authentication. No credential bytes are kept in backend state or
+    -- passed to user-visible diagnostics.
+    for _, value in ipairs({
+      args.provider_id, args.connection_id, args.profile_id,
+    }) do
+      if type(value) ~= "string" or value == ""
+        or #value > 64 or value:find("[^%w_-]")
+      then
+        finish(callback, nil, error_value("Invalid credential identity", "invalid_input"))
+        return
+      end
+    end
+    if op == "credentials.import"
+      and (type(args.secret) ~= "string" or args.secret == ""
+        or #args.secret > 65536 or args.secret:find("%z"))
+    then
+      finish(callback, nil, error_value("Invalid credential secret", "invalid_input"))
+      return
+    end
+    local path = op == "credentials.import" and "_phenix/credentials/import"
+      or "_phenix/credentials/revoke"
+    local params = {
+      provider_id = args.provider_id,
+      connection_id = args.connection_id,
+      profile_id = args.profile_id,
+    }
+    if op == "credentials.import" then params.secret = args.secret end
+    self:_request(path, params, function(value, err)
+      if err then
+        if err.code == -32601 then
+          finish(callback, nil, error_value(
+            "Phenix does not grant credential management", "unsupported"))
+        else
+          finish(callback, nil, err)
+        end
+        return
+      end
+      if type(value) ~= "table" or value.ok ~= true then
+        finish(callback, nil, error_value("Invalid credential operation result", "protocol"))
+        return
+      end
+      finish(callback, { stored = op == "credentials.import",
+        revoked = op == "credentials.revoke", authenticated = false }, nil)
+    end)
   elseif op == "models.list" then
     local id = args.session_id
     if id == nil then
