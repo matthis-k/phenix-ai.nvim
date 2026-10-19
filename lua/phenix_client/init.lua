@@ -5,6 +5,9 @@ local Client = {}
 Client.__index = Client
 
 local operations = {
+  -- Read-only ACP extension feature probe. A host without this extension
+  -- returns Method not found; no frontend capability or grant is invented.
+  list_providers = { name = "providers.list" },
   list_models = { permission = { "management", "models" }, name = "models.list" },
   set_model = { permission = { "management", "model_selection" }, name = "models.select" },
   new_session = { permission = { "session_operations", "new" }, name = "sessions.new" },
@@ -146,10 +149,12 @@ function Client:_call(key, args, callback)
   end
   local op = operations[key]
   local permission = op.permission
-  local group = self.available[permission[1]] or {}
-  if group[permission[2]] ~= true then
-    finish(callback, nil, unsupported(op.name))
-    return
+  if permission then
+    local group = self.available[permission[1]] or {}
+    if group[permission[2]] ~= true then
+      finish(callback, nil, unsupported(op.name))
+      return
+    end
   end
   -- The backend forwards requests under its established Phenix client scope.
   -- Phenix must recheck authorization on every call. Discovery is not a grant.
@@ -158,6 +163,11 @@ function Client:_call(key, args, callback)
     if self.closed then return end
     complete(value, err)
   end)
+end
+
+function Client:list_providers(callback)
+  assert(callback == nil or type(callback) == "function")
+  self:_call("list_providers", {}, callback)
 end
 
 function Client:list_models(session_or_callback, callback)
