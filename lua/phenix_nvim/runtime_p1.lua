@@ -13,6 +13,10 @@ local state = {
   error = nil,
   active = nil,
   known = {},
+  -- Monotone local intent sequence: late session/new or session/load results
+  -- may be observed but cannot replace a newer user-selected active session.
+  active_revision = 0,
+  replay_revision = {},
   listeners = {},
   projection = Transcript.new(),
   pending = {},
@@ -169,7 +173,9 @@ function M.disconnect()
   state.connection = "disconnected"
   state.error = nil
   state.active = nil
+  state.active_revision = state.active_revision + 1
   state.known = {}
+  state.replay_revision = {}
   state.projection = Transcript.new()
   if client then client:close() end
   flush_waiters(nil, { kind = "disconnected", message = "Phenix connection closed" })
@@ -178,12 +184,14 @@ function M.disconnect()
 end
 
 function M.new_session(callback)
+  state.active_revision = state.active_revision + 1
+  local revision = state.active_revision
   connected(function(client, err)
     if err then if callback then callback(nil, err) end; return end
     client:new_session(function(result, problem)
       if retired_reply(client, callback) then return end
       if not problem and result then
-        state.active = result.session_id
+        if revision == state.active_revision then state.active = result.session_id end
         state.known[result.session_id] = true
         emit("status", M.status())
       end
@@ -193,19 +201,29 @@ function M.new_session(callback)
 end
 
 function M.resume_session(session_id, callback)
+  state.active_revision = state.active_revision + 1
+  local revision = state.active_revision
   connected(function(client, err)
     if err then if callback then callback(nil, err) end; return end
     -- Replay is sourced from Phenix's journal. Discard any previous
     -- presentation projection before accepting the replayed events.
     local previous = state.projection:session(session_id)
+    state.replay_revision[session_id] = (state.replay_revision[session_id] or 0) + 1
+    local replay_revision = state.replay_revision[session_id]
     state.projection:clear(session_id)
     client:load_session(session_id, function(result, problem)
       if retired_reply(client, callback) then return end
+      if state.replay_revision[session_id] ~= replay_revision then
+        if callback then callback(nil, {
+          kind = "superseded", message = "A newer replay replaced this session load",
+        }) end
+        return
+      end
       if problem then
-        -- A refused load cannot replace the prior visible projection.
+        -- Only the latest load may restore a failed replay's projection.
         state.projection:restore(session_id, previous)
       else
-        state.active = session_id
+        if revision == state.active_revision then state.active = session_id end
         state.known[session_id] = true
       end
       emit("sessions", state.projection:session_state())
@@ -217,10 +235,12 @@ end
 
 function M.activate_session(session_id, callback)
   if session_id == nil then
+    state.active_revision = state.active_revision + 1
     state.active = nil
     emit("status", M.status())
     if callback then callback(nil, nil) end
   elseif state.known[session_id] then
+    state.active_revision = state.active_revision + 1
     state.active = session_id
     emit("status", M.status())
     if callback then callback(state.projection:session(session_id), nil) end
