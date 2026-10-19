@@ -11,6 +11,7 @@ local roots = {
   "logs",
   "model",
   "new",
+  "providers",
   "reference",
   "select",
   "send",
@@ -77,6 +78,14 @@ function M.execute(options)
       actions.authenticate()
     else
       usage("Usage: Phenix auth")
+    end
+    return
+  end
+  if command == "providers" then
+    if #args == 0 then
+      actions.providers()
+    else
+      usage("Usage: Phenix providers")
     end
     return
   end
