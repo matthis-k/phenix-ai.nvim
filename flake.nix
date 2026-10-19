@@ -101,7 +101,7 @@
               export HOME="$TMPDIR/home"
               export XDG_STATE_HOME="$TMPDIR/state"
               mkdir -p "$HOME" "$XDG_STATE_HOME"
-              for test in p1_transcript_tail p1_transcript_updates p1_model_picker provider_auth_model_ux queue_lifecycle p1_runtime_generation; do
+              for test in p1_transcript_tail p1_transcript_updates p1_model_picker provider_auth_model_ux queue_lifecycle p1_runtime_generation p1_provider_catalog; do
                 nvim --headless -u NONE \
                   --cmd ${pkgs.lib.escapeShellArg "set rtp^=${source}"} \
                   -l "${source}/tests/$test.lua"
@@ -158,6 +158,9 @@
               nvim --headless -u NONE \
                 --cmd ${pkgs.lib.escapeShellArg "set rtp^=${self.packages.${system}.default}"} \
                 -l ${source}/tests/queue_lifecycle.lua
+              nvim --headless -u NONE \
+                --cmd ${pkgs.lib.escapeShellArg "set rtp^=${self.packages.${system}.default}"} \
+                -l ${source}/tests/p1_provider_catalog.lua
               # Exercise delayed callbacks after disconnect without launching
               # an ACP process. This must pass for the installed P1 package.
               nvim --headless -u NONE \
