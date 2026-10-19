@@ -118,6 +118,21 @@ transport:_response({ jsonrpc = "2.0", id = outgoing.id,
 assert(models == nil and models_error.kind == "protocol",
   "foreign connection model identities cannot become client choices")
 
+-- A trusted host may disclose its exact granted account, not a token.
+local granted, problem
+client:credential_capabilities(function(value, err) granted, problem = value, err end)
+assert(outgoing.method == "_phenix/credentials/capabilities")
+transport:_response({ jsonrpc = "2.0", id = outgoing.id, result = {
+  provider_id = "openai", connection_id = "api", profile_id = "personal",
+  import = true, revoke = true,
+} })
+assert(not problem and granted.profile_id == "personal")
+assert(not client:capabilities().management.provider_authentication)
+
+client:credential_capabilities(function(value, err) granted, problem = value, err end)
+transport:_response({ jsonrpc = "2.0", id = outgoing.id,
+  error = { code = -32601, message = "Method not found" } })
+assert(granted == nil and problem.kind == "unsupported")
 -- Credential import/revoke are separate host grants. Acknowledgement is
 -- storage-only and must never become an authenticated provider status.
 local imported, imported_error
