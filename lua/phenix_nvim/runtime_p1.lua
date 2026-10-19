@@ -39,6 +39,21 @@ local function flush_waiters(value, err)
   for _, fn in ipairs(waiting) do fn(value, err) end
 end
 
+-- Each asynchronous operation belongs to the client generation that
+-- admitted it. A late reply from a retired connection must not mutate the
+-- projection, active session or the new connection's visible state.
+local function current_client(client)
+  return state.client == client and state.connection == "ready"
+end
+
+local function retired_reply(client, callback)
+  if current_client(client) then return false end
+  if callback then
+    callback(nil, { kind = "disconnected", message = "Phenix connection changed before the operation completed" })
+  end
+  return true
+end
+
 local function connected(callback)
   if state.connection == "ready" and state.client then
     callback(state.client)
@@ -166,6 +181,7 @@ function M.new_session(callback)
   connected(function(client, err)
     if err then if callback then callback(nil, err) end; return end
     client:new_session(function(result, problem)
+      if retired_reply(client, callback) then return end
       if not problem and result then
         state.active = result.session_id
         state.known[result.session_id] = true
@@ -184,6 +200,7 @@ function M.resume_session(session_id, callback)
     local previous = state.projection:session(session_id)
     state.projection:clear(session_id)
     client:load_session(session_id, function(result, problem)
+      if retired_reply(client, callback) then return end
       if problem then
         -- A refused load cannot replace the prior visible projection.
         state.projection:restore(session_id, previous)
@@ -273,6 +290,7 @@ function M.prompt(session_id, segments, callback)
   connected(function(client, problem)
     if problem then if callback then callback(nil, problem) end; return end
     client:send_content(session_id, content, function(result, send_error)
+      if retired_reply(client, callback) then return end
       if callback then callback(result, send_error) end
     end)
   end)
@@ -292,7 +310,10 @@ function M.choose_model(callback)
       unavailable("model catalog without a session", callback)
       return
     end
-    require("phenix_client.nvim").choose_model(client, state.active, callback)
+    require("phenix_client.nvim").choose_model(client, state.active, function(value, problem)
+      if retired_reply(client, callback) then return end
+      if callback then callback(value, problem) end
+    end)
   end)
 end
 
@@ -314,6 +335,7 @@ function M.capabilities(callback)
       return
     end
     client:list_models(state.active, function(catalog, failure)
+      if retired_reply(client, callback) then return end
       if not failure and catalog then
         view.selected_model = catalog.selected
         view.models = vim.deepcopy(catalog.models)
@@ -329,6 +351,7 @@ function M.list_selections(callback)
   connected(function(client, err)
     if err then if callback then callback(nil, err) end; return end
     client:list_models(state.active, function(catalog, problem)
+      if retired_reply(client, callback) then return end
       if problem then if callback then callback(nil, problem) end; return end
       local available = {}
       for _, item in ipairs(catalog.models) do
