@@ -135,7 +135,7 @@ local function bounded_lines_text(buffer, first_line, last_line, max_bytes)
   local pieces = {}
   local used = 0
   for index = first_line, last_line do
-    if index > 0 then
+    if index > first_line then
       if used == max_bytes then
         return table.concat(pieces), true
       end
