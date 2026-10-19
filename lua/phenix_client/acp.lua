@@ -349,6 +349,34 @@ function Backend:call(op, args, callback)
   args = args or {}
   if op == "permissions.respond" then
     self:_permission_response(args.request_id, args.option_id, callback)
+  elseif op == "providers.list" then
+    -- ACP SDK extension, never an editor-side catalog or authority bypass.
+    self:_request("_phenix/providers/list", { scope = "user" }, function(value, err)
+      if err then
+        if err.code == -32601 then
+          finish(callback, nil, error_value(
+            "Phenix does not expose provider discovery", "unsupported"))
+        else
+          finish(callback, nil, err)
+        end
+        return
+      end
+      if type(value) ~= "table" or type(value.revision) ~= "number"
+        or type(value.providers) ~= "table"
+      then
+        finish(callback, nil, error_value("Invalid runtime provider catalog", "protocol"))
+        return
+      end
+      for _, provider in ipairs(value.providers) do
+        if type(provider) ~= "table" or type(provider.id) ~= "string"
+          or type(provider.connections) ~= "table"
+        then
+          finish(callback, nil, error_value("Invalid runtime provider identity", "protocol"))
+          return
+        end
+      end
+      finish(callback, vim.deepcopy(value), nil)
+    end)
   elseif op == "models.list" then
     local id = args.session_id
     if id == nil then

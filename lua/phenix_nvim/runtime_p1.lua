@@ -389,6 +389,18 @@ function M.select(_, callback)
   unavailable("model selection", callback)
 end
 
+-- Read-only provider registrations are runtime-authorized per request. They
+-- cannot be used as proof of a credential, selectable model, or account grant.
+function M.list_providers(callback)
+  connected(function(client, err)
+    if err then if callback then callback(nil, err) end; return end
+    client:list_providers(function(page, problem)
+      if retired_reply(client, callback) then return end
+      if callback then callback(page, problem) end
+    end)
+  end)
+end
+
 function M.list_authentication_methods(callback)
   unavailable("authentication methods", callback)
 end
