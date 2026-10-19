@@ -606,17 +606,18 @@ local function model_selections(result)
       and item.provider ~= ""
       and type(item.model) == "string"
       and item.model ~= ""
-      and item.authorized ~= false
-      and item.selectable ~= false
-      and item.authenticated ~= false
+      and type(item.id) == "string"
+      and item.id ~= ""
+      -- Runtime management must explicitly affirm each entitlement.
+      -- Missing fields are not proof of authorization or credential readiness.
+      and item.authorized == true
+      and item.selectable == true
+      and item.authenticated == true
     then
-      local thinking = item.thinking or ""
-      -- Provider identities can share a model name while using different
-      -- endpoints, accounts or billing. Selection IDs are runtime-owned.
-      local key = type(item.id) == "string" and item.id ~= ""
-        and item.id or (item.provider .. "\0" .. item.model .. "\0" .. thinking)
-      if not seen[key] then
-        seen[key] = true
+      -- Same display names from distinct connections/accounts remain separate.
+      -- No fallback-derived identity may ever be submitted as a model choice.
+      if not seen[item.id] then
+        seen[item.id] = true
         table.insert(models, item)
       end
     end
