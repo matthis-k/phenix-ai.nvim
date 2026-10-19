@@ -76,8 +76,10 @@ function M.execute(options)
   if command == "auth" then
     if #args == 0 then
       actions.authenticate()
+    elseif args[1] == "revoke" and #args == 4 then
+      actions.revoke_credential(args[2], args[3], args[4])
     else
-      usage("Usage: Phenix auth")
+      usage("Usage: Phenix auth [revoke <provider> <connection> <profile>]")
     end
     return
   end
@@ -211,6 +213,9 @@ function M.complete(arglead, cmdline, cursorpos)
   local args = completed_args(cmdline, cursorpos)
   if #args == 0 then
     return matches(roots, arglead)
+  end
+  if args[1] == "auth" and #args == 1 then
+    return matches({ "revoke" }, arglead)
   end
   if args[1] == "reference" then
     if #args == 1 then
