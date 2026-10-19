@@ -122,6 +122,32 @@ assert(not backend.features.management.models
   "the last revoked catalog must remove the model capabilities")
 backend:_catalog("s2", {})
 assert(#updates == 2, "an already absent catalog must not emit duplicate revocation")
+
+-- ACP v1 pushes the complete config option set through session/update,
+-- including concurrent selection changes and entitlement revocation.
+local function config_update(options)
+  backend:_response({ jsonrpc = "2.0", method = "session/update",
+    params = { sessionId = "s2", update = {
+      sessionUpdate = "config_option_update", configOptions = options,
+    } },
+  })
+end
+config_update({ model_option("provider/one") })
+assert(backend.catalogs.s2.selected == "provider/one")
+assert(#updates == 3 and updates[3].catalog.selected == "provider/one",
+  "a pushed model configuration must refresh the session catalog")
+config_update({})
+assert(backend.catalogs.s2 == nil)
+assert(#updates == 4 and updates[4].catalog == nil,
+  "a pushed empty option set must retract the model selection")
+assert(not backend.features.management.models,
+  "an ACP revocation must clear aggregate model capability")
+backend:_response({ jsonrpc = "2.0", method = "session/update",
+  params = { sessionId = "s2", update = {
+    sessionUpdate = "config_option_update", configOptions = "invalid",
+  } },
+})
+assert(#updates == 4, "malformed notifications must not mutate the catalog")
 stop_updates()
 
 print("ACP model selection and catalog revocation reject stale choices")
