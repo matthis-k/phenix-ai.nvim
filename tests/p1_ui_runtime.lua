@@ -108,6 +108,13 @@ assert(advertised.transport == "acp-v1")
 assert(advertised.session_operations.send == true)
 assert(advertised.management.model_selection == false)
 assert(advertised.selected_model == "scripted")
+-- A runtime catalog update must reach the Neovim projection even when it
+-- removes a previously shown choice. No client-local selection is committed.
+for _, listener in ipairs(listeners) do
+  listener({ type = "models.changed", session_id = resumed, catalog = nil })
+end
+assert(vim.tbl_contains(observed, "models"),
+  "runtime model revocation must notify Neovim observers")
 local unsupported
 runtime.select("scripted", function(_, e) unsupported = e end)
 assert(unsupported and unsupported.kind == "unsupported")
