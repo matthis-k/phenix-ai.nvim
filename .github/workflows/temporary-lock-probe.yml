@@ -1,0 +1,31 @@
+# Disposable credential-free lock-refresh probe. Delete before merging.
+name: Temporary Phenix dependency lock probe
+on:
+  push:
+    branches: [deps/runtime-pin-20261019]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c # v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+      - name: Recalculate the actual Nix input closure without publishing
+        run: |
+          set -euo pipefail
+          nix flake update phenix-ai
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          lock = json.loads(Path('flake.lock').read_text())
+          assert lock['nodes']['phenix-ai']['locked']['rev'] == '84d1d268b1b4594481e9e60653df0e7ebeef1f2f', 'upstream SHA moved'
+          print('PHENIX_LOCK_PAYLOAD=' + json.dumps(lock, separators=(',', ':'), sort_keys=True))
+          PY
