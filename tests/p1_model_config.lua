@@ -81,4 +81,47 @@ backend:call("models.select", {
 end)
 assert(attempts == 1, "explicit session was not used")
 
-print("ACP model selection rejects forged, denied and unconfirmed changes")
+-- Removal of a runtime model option is a revocation, not silence. Only
+-- the affected session loses its catalog; other sessions remain selectable.
+local updates = {}
+local stop_updates = backend:subscribe(function(event)
+  if event.type == "models.changed" then
+    updates[#updates + 1] = event
+  end
+end)
+backend:_catalog("s1", {})
+assert(backend.catalogs.s1 == nil, "removed runtime catalog must not remain cached")
+assert(#updates == 1 and updates[1].session_id == "s1"
+  and updates[1].catalog == nil,
+  "removing the model option must notify subscribers of revocation")
+assert(backend.features.management.models and backend.features.management.model_selection,
+  "revoking one session must not revoke another session's model capability")
+backend:call("models.list", { session_id = "s1" }, function(value, problem)
+  assert(value == nil and problem.kind == "unsupported",
+    "revoked models must not remain discoverable")
+end)
+backend:call("models.list", { session_id = "s2" }, function(value, problem)
+  assert(not problem and value.selected == "provider/two",
+    "another session's catalog must remain available")
+end)
+backend:call("models.select", {
+  session_id = "s1", model_id = "provider/one",
+}, function(value, problem)
+  assert(value == nil and problem.kind == "unsupported",
+    "revoked model must not be submitted to ACP")
+end)
+assert(attempts == 1, "revoked selection escaped into ACP")
+
+-- A malformed replacement (selected value no longer offered) also revokes.
+backend:_catalog("s2", { model_option("retired") })
+assert(backend.catalogs.s2 == nil)
+assert(#updates == 2 and updates[2].session_id == "s2"
+  and updates[2].catalog == nil, "invalidated catalog must publish revocation")
+assert(not backend.features.management.models
+  and not backend.features.management.model_selection,
+  "the last revoked catalog must remove the model capabilities")
+backend:_catalog("s2", {})
+assert(#updates == 2, "an already absent catalog must not emit duplicate revocation")
+stop_updates()
+
+print("ACP model selection and catalog revocation reject stale choices")
