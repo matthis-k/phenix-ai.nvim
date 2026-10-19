@@ -595,6 +595,47 @@ function M.providers()
   end)
 end
 
+-- Never infer the account from an authentication method or model name.
+-- Revocation requires the exact connection/profile and an explicit confirmation.
+function M.revoke_credential(provider_id, connection_id, profile_id, callback)
+  local ids = { provider_id, connection_id, profile_id }
+  for _, value in ipairs(ids) do
+    if type(value) ~= "string" or value == ""
+      or #value > 64 or value:find("[^%w_-]")
+    then
+      finish_authentication(callback, nil, {
+        kind = "invalid_input", message = "Invalid provider/connection/profile identity",
+      })
+      return
+    end
+  end
+  local prompt = "Revoke " .. provider_id .. " / " .. connection_id
+    .. " / " .. profile_id .. " credential?"
+  vim.ui.select({ "Cancel", "Revoke" }, { prompt = prompt }, function(choice)
+    if choice ~= "Revoke" then
+      if callback then util.safe_call(callback, nil, {
+        kind = "cancelled", message = "Credential revocation cancelled",
+      }) end
+      return
+    end
+    runtime.revoke_credential(provider_id, connection_id, profile_id,
+      function(value, problem)
+        if problem then
+          finish_authentication(callback, nil, problem)
+          return
+        end
+        if not value or value.revoked ~= true then
+          finish_authentication(callback, nil, { kind = "protocol",
+            message = "Phenix did not confirm credential revocation" })
+          return
+        end
+        util.notify("Credential revoked: " .. provider_id .. " / "
+          .. connection_id .. " / " .. profile_id, vim.log.levels.INFO)
+        finish_authentication(callback, value, nil)
+      end)
+  end)
+end
+
 function M.authenticate()
   if type(runtime.list_authentication_methods) ~= "function" or type(runtime.authenticate) ~= "function" then
     util.notify("The installed Phenix runtime does not expose application authentication yet", vim.log.levels.WARN)

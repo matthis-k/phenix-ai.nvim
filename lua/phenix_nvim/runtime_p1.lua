@@ -514,6 +514,19 @@ function M.authenticate(identity, secret, callback)
   end)
 end
 
+-- Revocation is a separately authorized host operation. Identifiers are
+-- selectors, never authority tokens; the installed credential plugin decides.
+function M.revoke_credential(provider_id, connection_id, profile_id, callback)
+  connected(function(client, err)
+    if err then if callback then callback(nil, err) end; return end
+    client:revoke_credential(provider_id, connection_id, profile_id,
+      function(value, problem)
+        if retired_reply(client, callback) then return end
+        if callback then callback(value, problem) end
+      end)
+  end)
+end
+
 function M.decide_review(_, _, callback)
   unavailable("permission decisions", callback)
 end
