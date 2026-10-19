@@ -117,6 +117,27 @@ local full_buffer = by_id["nvim.context.buffer"].handler({
 assert(full_buffer.text == "éx\nsecond")
 assert(full_buffer.truncated == false)
 
+-- Bounded reads must not request the entire buffer before truncating. Even a
+-- tiny snapshot must inspect only the first needed line(s).
+local previous_get_lines = vim.api.nvim_buf_get_lines
+local inspected_lines = 0
+vim.api.nvim_buf_get_lines = function(buf, first, last, strict)
+  if buf == buffer then
+    assert(last ~= -1, "bounded buffer tool fetched the complete buffer")
+    inspected_lines = inspected_lines + (last - first)
+  end
+  return previous_get_lines(buf, first, last, strict)
+end
+local bounded_ok, bounded_result = pcall(by_id["nvim.context.buffer"].handler, {
+  uri = nil,
+  max_bytes = 2,
+})
+vim.api.nvim_buf_get_lines = previous_get_lines
+assert(bounded_ok, bounded_result)
+assert(bounded_result.text == "é" and bounded_result.truncated,
+  "UTF-8 boundary should return only the permitted whole code point")
+assert(inspected_lines <= 2, "bounded buffer tool read beyond the byte budget")
+
 -- Cursor columns are zero-based UTF-8 byte offsets. The first character is
 -- two bytes wide, so column 2 points at the following ASCII character.
 vim.api.nvim_win_set_cursor(0, { 1, 2 })

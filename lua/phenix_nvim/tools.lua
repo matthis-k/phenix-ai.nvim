@@ -128,8 +128,31 @@ local function buffer_for_uri(uri)
   error("unknown loaded buffer URI " .. tostring(uri))
 end
 
-local function buffer_text(buffer)
-  return table.concat(vim.api.nvim_buf_get_lines(buffer, 0, -1, false), "\n")
+-- Read only as many lines as the byte budget can expose. The Neovim
+-- API returns entire lines, but we must not materialize every line of a large
+-- loaded buffer before returning a bounded context snapshot.
+local function bounded_buffer_text(buffer, max_bytes)
+  local line_count = vim.api.nvim_buf_line_count(buffer)
+  local pieces = {}
+  local used = 0
+  for index = 0, line_count - 1 do
+    if index > 0 then
+      if used == max_bytes then
+        return table.concat(pieces), true
+      end
+      pieces[#pieces + 1] = "\n"
+      used = used + 1
+    end
+    local line = vim.api.nvim_buf_get_lines(buffer, index, index + 1, false)[1] or ""
+    if #line > max_bytes - used then
+      local prefix = utf8_prefix(line, max_bytes - used)
+      pieces[#pieces + 1] = prefix
+      return table.concat(pieces), true
+    end
+    pieces[#pieces + 1] = line
+    used = used + #line
+  end
+  return table.concat(pieces), false
 end
 
 local function severity_name(value)
@@ -202,7 +225,7 @@ local function buffer_tool(input)
   input = input or {}
   local max_bytes = bounded_integer(input.max_bytes, 65536, 262144, "max_bytes")
   local buffer = buffer_for_uri(input.uri)
-  local text, truncated = utf8_prefix(buffer_text(buffer), max_bytes)
+  local text, truncated = bounded_buffer_text(buffer, max_bytes)
   return {
     info = buffer_info_for(buffer),
     changedtick = vim.api.nvim_buf_get_changedtick(buffer),
