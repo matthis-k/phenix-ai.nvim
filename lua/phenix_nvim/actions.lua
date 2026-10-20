@@ -12,6 +12,18 @@ local util = require("phenix_nvim.util")
 
 local M = {}
 local submissions = setmetatable({}, { __mode = "k" })
+local connection_generation = 0
+
+-- A prompt completion belongs to one editor surface, session and transport
+-- generation. It is never permission to clear a reused compose buffer.
+local function submission_current(pending)
+  return submissions[pending.document] == pending
+    and pending.generation == connection_generation
+    and not pending.surface.closing
+    and sidebar.surface_for_document(pending.document) == pending.surface
+    and pending.surface.session_id == pending.session_id
+    and (pending.surface.session_binding_generation or 0) == pending.binding_generation
+end
 
 local function target_surface(options)
   options = options or {}
@@ -121,19 +133,26 @@ local function compose_snapshot(document)
   return tostring(document.revision) .. ":" .. tostring(vim.api.nvim_buf_get_changedtick(buffer))
 end
 
-local function submit(surface, content, revision)
-  local document = surface.compose
-  local session_id = surface.session_id
-  runtime.prompt(session_id, content, function(_, error)
-    if submissions[document] == revision then
-      submissions[document] = nil
+local function submit(pending)
+  if not submission_current(pending) then
+    return
+  end
+  runtime.prompt(pending.session_id, pending.content, function(_, error)
+    local current = submission_current(pending)
+    if submissions[pending.document] == pending then
+      submissions[pending.document] = nil
+    end
+    if not current then
+      -- The runtime owns whether the old request was admitted or cancelled.
+      -- A late callback must not mutate a replacement editor projection.
+      return
     end
     if error ~= nil then
       util.notify(vim.inspect(error), vim.log.levels.ERROR)
       return
     end
-    if compose_snapshot(document) == revision then
-      compose.clear(document)
+    if compose_snapshot(pending.document) == pending.revision then
+      compose.clear(pending.document)
     end
   end)
 end
@@ -161,35 +180,51 @@ function M.send(options)
     util.notify("compose buffer is empty", vim.log.levels.WARN)
     return
   end
-  local revision = compose_snapshot(document)
-  if submissions[document] ~= nil then
-    -- ACP v1 has one active prompt per session; a second edited draft must
-    -- not race the current turn. Runtime-backed queued admission is separate.
-    util.notify("a compose submission is still in flight", vim.log.levels.WARN)
-    return
+  local active = submissions[document]
+  if active ~= nil then
+    if submission_current(active) then
+      -- ACP v1 has one active prompt per session. Runtime-backed durable
+      -- admission is separate; the editor cannot enqueue another prompt.
+      util.notify("a compose submission is still in flight", vim.log.levels.WARN)
+      return
+    end
+    -- An old session or disconnected client cannot hold this draft hostage.
+    submissions[document] = nil
   end
-  submissions[document] = revision
+  local pending = {
+    document = document,
+    surface = surface,
+    session_id = surface.session_id,
+    content = content,
+    revision = compose_snapshot(document),
+    generation = connection_generation,
+    binding_generation = surface.session_binding_generation or 0,
+  }
+  submissions[document] = pending
 
-  if surface.session_id ~= nil then
-    submit(surface, content, revision)
+  if pending.session_id ~= nil then
+    submit(pending)
     return
   end
   runtime.new_session(function(created, create_error)
+    if not submission_current(pending) then
+      return
+    end
     if create_error ~= nil then
-      if submissions[document] == revision then
-        submissions[document] = nil
-      end
+      submissions[document] = nil
       util.notify(vim.inspect(create_error), vim.log.levels.ERROR)
       return
     end
     local session_id = created and (created.session_id or created.id)
-    if session_id == nil then
+    if type(session_id) ~= "string" or session_id == "" then
       submissions[document] = nil
       util.notify("Phenix created a session without an id", vim.log.levels.ERROR)
       return
     end
+    pending.session_id = session_id
     sidebar.bind_session(session_id, surface)
-    submit(surface, content, revision)
+    pending.binding_generation = surface.session_binding_generation or 0
+    submit(pending)
   end)
 end
 
@@ -352,6 +387,12 @@ runtime.on_event(function(kind, status)
   if connection_state == "ready" and next_state ~= "ready" then
     auth_generation = auth_generation + 1
     selection_generation = selection_generation + 1
+    connection_generation = connection_generation + 1
+    -- Pending editor callbacks from the old connection are no longer
+    -- authorized to clear drafts. Phenix decides request admission itself.
+    for document in pairs(submissions) do
+      submissions[document] = nil
+    end
   end
   connection_state = next_state
 end)

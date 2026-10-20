@@ -646,8 +646,13 @@ end
 
 function M.bind_session(session_id, surface)
   surface = surface or current_surface()
-  if surface == nil then
+  if surface == nil or surface.closing then
     return nil
+  end
+  if surface.session_id ~= session_id then
+    -- Distinguish A -> B -> A from a session that never switched. An old
+    -- editor callback may not become current again by matching an ID.
+    surface.session_binding_generation = (surface.session_binding_generation or 0) + 1
   end
   surface.state.session_id = session_id
   surface.session_id = session_id
