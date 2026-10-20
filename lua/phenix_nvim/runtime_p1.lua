@@ -551,8 +551,11 @@ function M.log_reference(_, callback)
 end
 
 function M.refresh_client_tools(callback)
-  -- P1 tools are installed and authorized by the runtime composition.
-  if callback then callback(true, nil) end
+  -- The Basic ACP host may already have its own authorized tools, but it has
+  -- not admitted any templates registered in this Neovim process. Reporting a
+  -- successful refresh would falsely claim model-visible client capabilities.
+  -- A future negotiated native binding must replace this explicit boundary.
+  unavailable("client-tool registration", callback)
 end
 
 function M.refresh_session_state(callback)
