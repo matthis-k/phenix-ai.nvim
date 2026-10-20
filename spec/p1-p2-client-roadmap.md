@@ -1,8 +1,21 @@
 # Neovim client roadmap: P1 Basic to P2 Advanced
 
-Status: P1 Basic Neovim default ACCEPTED (N0–N3); broader runtime management, integrations and P2 Advanced remain open.
-Updated: 2026-10-19
+Status: P1 Basic Neovim N0–N3 ACCEPTED; N4 provider/catalog and scoped API-key UX PARTIALLY IMPLEMENTED, N5 bounded editor tools and editable queue UI PARTIALLY IMPLEMENTED; N4 authoritative model mutation/verification, N5 runtime admission, N6 full acceptance and P2 Advanced UI remain open.
+Updated: 2026-10-20
 Owner: `phenix-ai.nvim`. Distribution work lives in [phenix-nvim's roadmap](https://github.com/matthis-k/phenix-nvim/blob/main/spec/p1-p2-distribution-roadmap.md).
+
+## 20 October 2026 implementation reconciliation
+
+Current client `main` checked at `532d7340` (#90 merged). These updates mark **individual integrated behaviors**, not N4/N5 product acceptance or a new contract:
+
+- **#46 closed unmerged**: its supported presentation-only editable follow-up buffers were extracted and merged in #69. Do not repair/reopen the discarded old transport façade; runtime-authorized durable queue admission, interrupt-and-submit and controller integration are still missing under runtime #891 and client N4/N5.
+- **Editor tool and lifecycle progress:** #72/#74/#76/#77/#80 corrected bounded quickfix/cursor/buffer/viewport reads and default-tool overrides; #83/#85 reject obsolete asynchronous session replies. These fixes are merged. The negotiated client-tool authority and comprehensive N5 negative/product matrix remain future work.
+- **Catalog/model selection presentation:** #75/#78/#79/#81/#82 hardened usable choices, catalog revocation, stale selection replies and missing entitlements; #86/#88 implemented native read-only provider and auth/model queries. None of this grants a new executable model binding by itself.
+- **API-key UI:** #89 added scoped revocation confirmation, and #90 gates prompts on the launcher's exact authorized credential profile (#1011 runtime). Stored keys remain unverified until a real provider authenticates; approved OAuth and genuine runtime-authorized persisted model switching remain open.
+- **Post-reconciliation N5:** #92 (composer/queue generation isolation), #93 (exclude internal unsent UI buffers from context tools) and #94 (report unsupported client-tool admission instead of false success) have also merged. N5 integration still needs runtime-granted client-tool registration and admitted follow-up queues; installed distribution pins have not caught up to these client commits.
+- **Distribution:** #147/#148 merged installed provider-management pinning. Distribution D4 is partly integrated, not an end-to-end authenticated-model acceptance.
+
+As of this revision, **N0–N3 accepted; N4–N6 not accepted; C1–C7 planned**. Treat the historical SHA/evidence paragraphs below as dated snapshots, not current next-action tickets. Do not repeat already merged SDK, tool or picker implementations.
 
 ## Authority and references
 
@@ -111,7 +124,7 @@ ACP remains ACP, MCP remains MCP, and A2UI remains A2UI. When a standard transpo
 
 ## Current acceptance and outstanding stages
 
-P1 runtime is accepted. **N0–N3: 4 accepted; N4–N6: 3 deferred/open; C1–C7: 7 planned.** The accepted client is the installed ACP Basic package, not full parity with the legacy frontend. In particular, authorized model/routing mutations, authentication, global session listing/close and client tool registration remain unavailable pending runtime [#891](https://github.com/matthis-k/phenix-ai/issues/891). N5 and N6 stay open until the declared integration matrix is independently verified.
+P1 Basic runtime is accepted. **N0–N3: 4 accepted; N4–N6: 3 open/partial; C1–C7: 7 planned.** Scoped ACP API-key import/revoke, non-secret authorized profile discovery, native read-only provider/auth/model queries, editor picker race/denial guards and bounded local context tooling now exist (#86–#90 and preceding fixes). Provider-*verified* authentication, actual selected-provider executable dispatch, runtime-owned revision-CAS model mutations, durable admitted follow-ups and full negotiated client tools are **not** accepted. Keep N5/N6 open until independent installed runtime and authority tests pass.
 
 Release evidence: [#48](https://github.com/matthis-k/phenix-ai.nvim/pull/48) merged at `aefc618f`; [#50](https://github.com/matthis-k/phenix-ai.nvim/pull/50) merged at `2bc128a7` after exact-head Source, Client integration and `lua-client` checks passed. The N3 default closure is the P1 Basic ACP plugin with no native `phenix.so`; `checks.<system>.p1-default-cutover` and `p1-product` exercise the installed product. The optional live HTTP Model remains a distinct composition.
 
@@ -198,6 +211,4 @@ operational authentication, live-provider onboarding, N4/N5/N6 acceptance or
 distribution promotion. The distribution must pin this promoted client together
 with the same runtime; no runtime or distribution files are changed here.
 
-N4c projection continuation (2026-10-19): [client #78](https://github.com/matthis-k/phenix-ai.nvim/pull/78) merged at `1e8ad7d7` after exact-head Source, Client integration and SDK gates. It consumes ACP `config_option_update` and retracts stale session model catalogs, with independent-session and denied-selection tests. A follow-up client PR propagates these events into the existing Neovim observer and invalidates outstanding picker callbacks. Distribution [#139](https://github.com/matthis-k/phenix-nvim/pull/139) stages the matching Nix pin and must pass its own final-SHA installed Basic matrix. This does not complete N4: runtime [#891](https://github.com/matthis-k/phenix-ai/issues/891) still owns authenticated provider/credential operations, real model discovery, revision-CAS selection and durable runtime-backed queues. N5 editor work without new authority may continue in parallel; N6 closes only after the packaged N4/N5 acceptance matrix passes.
-
-Outstanding design questions: 0. Resolved architectural responsibilities remain fixed; **implementation: 4 accepted, 10 outstanding (3 later P1, 7 P2 client stages)**.
+N4c projection continuation (historical 19 October, reconciled 20 October): client [#78](https://github.com/matthis-k/phenix-ai.nvim/pull/78) implemented ACP `config_option_update` catalog replacement/revocation, and [#79](https://github.com/matthis-k/phenix-ai.nvim/pull/79) already invalidated open picker callbacks. Distribution [#139](https://github.com/matthis-k/phenix-nvim/pull/139) and later [#147](https://github.com/matthis-k/phenix-nvim/pull/147)/[#148](https://github.com/matthis-k/phenix-nvim/pull/148) merged their respective tested pin/management slices. Do not queue picker invalidation or #139 promotion again. Runtime [#891](https://github.com/matthis-k/phenix-ai/issues/891) still owns executable provider/account selection, verified readiness, persistent revision CAS and durable admitted queues. N5 editor work not requiring new authority may continue in parallel; N6 closes only on the full installed parity matrix.
