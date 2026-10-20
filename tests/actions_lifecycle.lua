@@ -303,6 +303,57 @@ actions.send()
 assert(#prompt_callbacks == 5, "newer draft should submit after prior turn settles")
 prompt_callbacks[5]({}, nil)
 assert(clear_calls == 3, "unchanged second draft should clear after successful submission")
+-- N5b: delayed completions must not mutate a composer rebound to another
+-- session. The new session must be free to submit without waiting for the old.
+local sidebar = require("phenix_nvim.sidebar")
+local surface = assert(sidebar.current_surface())
+state.compose.revision = 102
+actions.send()
+assert(#prompt_callbacks == 6)
+sidebar.bind_session("session-rebound", surface)
+actions.send()
+assert(#prompt_callbacks == 7, "old-session prompt blocked the rebound composer")
+prompt_callbacks[6]({}, nil)
+assert(clear_calls == 3, "old-session completion cleared a rebound composer")
+prompt_callbacks[7]({}, nil)
+assert(clear_calls == 4, "current-session completion did not clear its composer")
+
+-- A replacement connection cannot finish a previous generation's prompt.
+state.compose.revision = 103
+actions.send()
+assert(#prompt_callbacks == 8)
+status("failed")
+status("connecting")
+status("ready")
+actions.send()
+assert(#prompt_callbacks == 9, "old transport generation blocked a fresh send")
+prompt_callbacks[8]({}, nil)
+assert(clear_calls == 4, "old connection completion cleared a new draft")
+prompt_callbacks[9]({}, nil)
+assert(clear_calls == 5)
+
+-- Closing a surface retires even a successful callback from an old prompt.
+state.compose.revision = 104
+actions.send()
+assert(#prompt_callbacks == 10)
+sidebar.close()
+prompt_callbacks[10]({}, nil)
+assert(clear_calls == 5, "closed-surface prompt mutated a detached document")
+
+-- A pending new-session reply must never rebind an editor surface that the
+-- user has independently switched before the reply arrives.
+local fresh = assert(sidebar.new("sidebar"))
+assert(fresh.session_id == nil)
+local create_callback, former_new_session = nil, runtime.new_session
+runtime.new_session = function(callback) create_callback = callback end
+actions.send()
+assert(create_callback ~= nil, "new-session request was not made")
+sidebar.bind_session("session-manual", fresh)
+create_callback({ session_id = "obsolete-created-session" }, nil)
+assert(fresh.session_id == "session-manual", "stale creation rebound the surface")
+assert(#prompt_callbacks == 10, "stale creation submitted a prompt to the wrong session")
+runtime.new_session = former_new_session
+
 compose.serialize = original_serialize
 compose.clear = original_clear
 
