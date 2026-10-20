@@ -10,6 +10,7 @@ local operations = {
   list_providers = { name = "providers.list" },
   get_provider_auth_status = { name = "providers.auth.status" },
   get_provider_models = { name = "providers.models" },
+  credential_capabilities = { name = "credentials.capabilities" },
   import_credential = { name = "credentials.import" },
   revoke_credential = { name = "credentials.revoke" },
   list_models = { permission = { "management", "models" }, name = "models.list" },
@@ -209,6 +210,11 @@ end
 -- Credentials are never saved in Lua state or a client-side provider catalog.
 -- A successful import means stored, not authenticated; the provider plugin
 -- must independently establish valid authentication before model selection.
+function Client:credential_capabilities(callback)
+  assert(callback == nil or type(callback) == "function")
+  self:_call("credential_capabilities", {}, callback)
+end
+
 function Client:import_credential(provider_id, connection_id, profile_id, secret, callback)
   for _, id in ipairs({ provider_id, connection_id, profile_id }) do
     assert(type(id) == "string" and id ~= "")

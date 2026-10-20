@@ -110,7 +110,7 @@
               export HOME="$TMPDIR/home"
               export XDG_STATE_HOME="$TMPDIR/state"
               mkdir -p "$HOME" "$XDG_STATE_HOME"
-              for test in p1_transcript_tail p1_transcript_updates p1_model_picker provider_auth_model_ux queue_lifecycle p1_runtime_generation p1_provider_catalog p1_provider_read_queries p1_credential_revoke; do
+              for test in p1_transcript_tail p1_transcript_updates p1_model_picker provider_auth_model_ux queue_lifecycle p1_runtime_generation p1_provider_catalog p1_provider_read_queries p1_credential_revoke p1_scoped_credential_ui; do
                 nvim --headless -u NONE \
                   --cmd ${pkgs.lib.escapeShellArg "set rtp^=${source}"} \
                   -l "${source}/tests/$test.lua"
@@ -133,6 +133,9 @@
               nvim --headless -u NONE \
                 --cmd ${pkgs.lib.escapeShellArg "set rtp^=${p1Plugin}"} \
                 -l ${source}/tests/p1_credential_revoke.lua
+              nvim --headless -u NONE \
+                --cmd ${pkgs.lib.escapeShellArg "set rtp^=${p1Plugin}"} \
+                -l ${source}/tests/p1_scoped_credential_ui.lua
               nvim --headless -u NONE \
                 --cmd ${pkgs.lib.escapeShellArg "set rtp^=${p1Plugin}"} \
                 -l ${source}/tests/p1_model_config.lua

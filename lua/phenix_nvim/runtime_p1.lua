@@ -406,63 +406,59 @@ end
 function M.list_authentication_methods(callback)
   connected(function(client, err)
     if err then if callback then callback(nil, err) end; return end
-    client:list_providers(function(page, problem)
+    client:credential_capabilities(function(granted, denial)
       if retired_reply(client, callback) then return end
-      if problem then if callback then callback(nil, problem) end; return end
+      if denial then if callback then callback(nil, denial) end; return end
 
-      local entries = {}
-      local connections = {}
-      for _, provider in ipairs(page.providers or {}) do
-        for _, connection in ipairs(provider.connections or {}) do
-          local offered = {}
-          for _, method in ipairs(connection.auth_methods or {}) do
-            offered[#offered + 1] = {
-              provider_id = provider.id, provider_name = provider.label,
-              connection_id = connection.id, connection_name = connection.label,
-              method_id = method.id, label = method.label, kind = method.kind,
-              authenticated = false, profiles = {},
-            }
-          end
-          if #offered > 0 then connections[#connections + 1] = {
-            provider_id = provider.id, connection_id = connection.id, methods = offered,
-          } end
-        end
-      end
-
-      local function visit(index)
-        if not current_client(client) then
-          if callback then callback(nil, { kind = "disconnected",
-            message = "Phenix connection changed during auth discovery" }) end
-          return
-        end
-        if index > #connections then
-          if callback then callback({ methods = entries }, nil) end
-          return
-        end
-        local current = connections[index]
-        client:get_provider_auth_status(
-          current.provider_id, current.connection_id, function(status, failure)
-            if not current_client(client) then
-              if callback then callback(nil, { kind = "disconnected",
-                message = "Phenix connection changed during auth discovery" }) end
-              return
-            end
-            for _, method in ipairs(current.methods) do
-              if not failure and status then
-                for _, profile in ipairs(status.profiles or {}) do
-                  if profile.method_id == method.method_id then
-                    method.profiles[#method.profiles + 1] = vim.deepcopy(profile)
-                    if profile.valid then method.authenticated = true end
+      client:list_providers(function(page, problem)
+        if retired_reply(client, callback) then return end
+        if problem then if callback then callback(nil, problem) end; return end
+        local methods = {}
+        for _, provider in ipairs(page.providers or {}) do
+          if provider.id == granted.provider_id then
+            for _, connection in ipairs(provider.connections or {}) do
+              if connection.id == granted.connection_id then
+                for _, method in ipairs(connection.auth_methods or {}) do
+                  -- This management grant is for API-key import/revoke only.
+                  -- OAuth requires its own separately admitted provider flow.
+                  if string.lower(tostring(method.kind)) == "apikey" then
+                    methods[#methods + 1] = {
+                      provider_id = provider.id, provider_name = provider.label,
+                      connection_id = connection.id, connection_name = connection.label,
+                      method_id = method.id, label = method.label, kind = method.kind,
+                      profile_id = granted.profile_id,
+                      authenticated = false, profiles = {},
+                    }
                   end
                 end
               end
-              entries[#entries + 1] = method
             end
-            visit(index + 1)
           end
-        )
-      end
-      visit(1)
+        end
+        if #methods == 0 then
+          if callback then callback(nil, { kind = "unsupported",
+            message = "The authorized credential profile has no installed API-key method" }) end
+          return
+        end
+
+        client:get_provider_auth_status(granted.provider_id, granted.connection_id,
+          function(status, status_error)
+            if retired_reply(client, callback) then return end
+            for _, method in ipairs(methods) do
+              if not status_error and status then
+                for _, profile in ipairs(status.profiles or {}) do
+                  if profile.id == granted.profile_id
+                    and profile.method_id == method.method_id
+                  then
+                    method.profiles[#method.profiles + 1] = vim.deepcopy(profile)
+                    method.authenticated = profile.valid
+                  end
+                end
+              end
+            end
+            if callback then callback({ methods = methods }, nil) end
+          end)
+      end)
     end)
   end)
 end
@@ -495,22 +491,37 @@ function M.authenticate(identity, secret, callback)
   end
   connected(function(client, err)
     if err then if callback then callback(nil, err) end; return end
-    client:import_credential(identity.provider_id, identity.connection_id,
-      identity.profile_id, secret, function(stored, problem)
-        if retired_reply(client, callback) then return end
-        if problem then if callback then callback(nil, problem) end; return end
-        if not stored or stored.stored ~= true then
-          if callback then callback(nil, { kind = "protocol",
-            message = "Phenix did not confirm credential storage" }) end
-          return
-        end
-        if callback then callback({
-          kind = "stored", verified = false, authenticated = false,
-          provider_id = identity.provider_id,
-          connection_id = identity.connection_id,
-          profile_id = identity.profile_id,
-        }, nil) end
-      end)
+    client:credential_capabilities(function(granted, problem)
+      if retired_reply(client, callback) then return end
+      if problem then if callback then callback(nil, problem) end; return end
+      if granted.provider_id ~= identity.provider_id
+        or granted.connection_id ~= identity.connection_id
+        or granted.profile_id ~= identity.profile_id
+      then
+        if callback then callback(nil, { kind = "denied",
+          message = "Credential profile is not authorized by the Phenix launcher" }) end
+        return
+      end
+      client:import_credential(identity.provider_id, identity.connection_id,
+        identity.profile_id, secret, function(stored, import_problem)
+          if retired_reply(client, callback) then return end
+          if import_problem then
+            if callback then callback(nil, import_problem) end
+            return
+          end
+          if not stored or stored.stored ~= true then
+            if callback then callback(nil, { kind = "protocol",
+              message = "Phenix did not confirm credential storage" }) end
+            return
+          end
+          if callback then callback({
+            kind = "stored", verified = false, authenticated = false,
+            provider_id = identity.provider_id,
+            connection_id = identity.connection_id,
+            profile_id = identity.profile_id,
+          }, nil) end
+        end)
+    end)
   end)
 end
 
