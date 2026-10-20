@@ -83,6 +83,19 @@ local function is_focused(entry)
   return valid(entry.win) and vim.api.nvim_get_current_win() == entry.win
 end
 
+-- UI wakes are presentation callbacks, not runtime queue admission. A wake
+-- scheduled by a removed draft or retired surface must never run.
+local function schedule_ready(surface, view, item, entry)
+  vim.schedule(function()
+    if views[surface] ~= view or view.by_item[item] ~= entry then
+      return
+    end
+    if view.on_ready then
+      view.on_ready()
+    end
+  end)
+end
+
 function M.set_claimed(surface, item, claimed)
   local view = views[surface]
   local entry = view and view.by_item[item] or nil
@@ -188,7 +201,7 @@ local function ensure_entry(surface, view, item)
       entry.released = true
       vim.bo[entry.buf].modified = false
       M.relayout(surface)
-      if view.on_ready then vim.schedule(view.on_ready) end
+      schedule_ready(surface, view, item, entry)
     end,
   })
   vim.keymap.set("n", "<C-x>", function()
@@ -286,7 +299,7 @@ function M.on_leave(win)
     for _, item in ipairs(view.entries) do
       local entry = view.by_item[item]
       if entry and entry.win == win then
-        if view.on_ready then vim.schedule(view.on_ready) end
+        schedule_ready(surface, view, item, entry)
         return
       end
     end
