@@ -332,13 +332,27 @@ assert(clear_calls == 4, "old connection completion cleared a new draft")
 prompt_callbacks[9]({}, nil)
 assert(clear_calls == 5)
 
--- Closing a surface retires even a successful callback from an old prompt.
+-- The same session ID can reappear after visiting another session. It must
+-- not revive an old pending callback from the previous binding generation.
 state.compose.revision = 104
 actions.send()
 assert(#prompt_callbacks == 10)
-sidebar.close()
+sidebar.bind_session("session-intermediate", surface)
+sidebar.bind_session("session-rebound", surface)
+actions.send()
+assert(#prompt_callbacks == 11, "ABA session switch blocked the new submission")
 prompt_callbacks[10]({}, nil)
-assert(clear_calls == 5, "closed-surface prompt mutated a detached document")
+assert(clear_calls == 5, "ABA session switch resurrected an old callback")
+prompt_callbacks[11]({}, nil)
+assert(clear_calls == 6)
+
+-- Closing a surface retires even a successful callback from an old prompt.
+state.compose.revision = 105
+actions.send()
+assert(#prompt_callbacks == 12)
+sidebar.close()
+prompt_callbacks[12]({}, nil)
+assert(clear_calls == 6, "closed-surface prompt mutated a detached document")
 
 -- A pending new-session reply must never rebind an editor surface that the
 -- user has independently switched before the reply arrives.
@@ -351,7 +365,7 @@ assert(create_callback ~= nil, "new-session request was not made")
 sidebar.bind_session("session-manual", fresh)
 create_callback({ session_id = "obsolete-created-session" }, nil)
 assert(fresh.session_id == "session-manual", "stale creation rebound the surface")
-assert(#prompt_callbacks == 10, "stale creation submitted a prompt to the wrong session")
+assert(#prompt_callbacks == 12, "stale creation submitted a prompt to the wrong session")
 runtime.new_session = former_new_session
 
 compose.serialize = original_serialize
