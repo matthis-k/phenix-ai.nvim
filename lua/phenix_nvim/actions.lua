@@ -22,6 +22,7 @@ local function submission_current(pending)
     and not pending.surface.closing
     and sidebar.surface_for_document(pending.document) == pending.surface
     and pending.surface.session_id == pending.session_id
+    and (pending.surface.session_binding_generation or 0) == pending.binding_generation
 end
 
 local function target_surface(options)
@@ -197,6 +198,7 @@ function M.send(options)
     content = content,
     revision = compose_snapshot(document),
     generation = connection_generation,
+    binding_generation = surface.session_binding_generation or 0,
   }
   submissions[document] = pending
 
@@ -221,6 +223,7 @@ function M.send(options)
     end
     pending.session_id = session_id
     sidebar.bind_session(session_id, surface)
+    pending.binding_generation = surface.session_binding_generation or 0
     submit(pending)
   end)
 end
