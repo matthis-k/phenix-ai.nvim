@@ -89,6 +89,20 @@ queue.render(surface, items, function(index) removed[#removed + 1] = index end,
 assert(#queue.buffers(surface) == 1 and queue.buffers(surface)[1] == buffers[2])
 assert(not vim.api.nvim_buf_is_valid(buffers[1]))
 assert(vim.api.nvim_buf_is_valid(buffers[2]))
+-- N5b: a deferred window-leave wake is owned by the entry and view that
+-- scheduled it. Removing the entry or closing the view must retire it.
+local pending_schedules = {}
+local original_schedule = vim.schedule
+vim.schedule = function(callback) pending_schedules[#pending_schedules + 1] = callback end
+local before_stale = wakes
+queue.on_leave(w2)
+assert(#pending_schedules > 0, "test must capture a deferred queue callback")
+table.remove(items, 1)
+queue.render(surface, items, function() end, function() end, function() wakes = wakes + 1 end)
+for _, callback in ipairs(pending_schedules) do callback() end
+assert(wakes == before_stale, "removed draft woke a different queue entry")
+vim.schedule = original_schedule
+
 queue.close(surface)
 assert(not vim.api.nvim_buf_is_valid(buffers[2]))
 assert(next(mapped) == nil)
