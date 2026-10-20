@@ -101,6 +101,25 @@ local function utf8_prefix(text, max_bytes)
   return string.sub(text, 1, cut), true
 end
 
+-- Context tools intentionally access only ordinary editor buffers. In
+-- particular, internal compose/follow-up/transcript buffers are uncommitted
+-- UI state and may contain text that was never submitted to Phenix.
+-- This check is separate from runtime admission: it limits the local read.
+local function readable_editor_buffer(buffer)
+  return type(buffer) == "number"
+    and vim.api.nvim_buf_is_valid(buffer)
+    and vim.api.nvim_buf_is_loaded(buffer)
+    and vim.bo[buffer].buftype == ""
+    and not vim.b[buffer].phenix_internal
+end
+
+local function require_editor_buffer(buffer)
+  if not readable_editor_buffer(buffer) then
+    error("Neovim context tool requires an ordinary editor buffer")
+  end
+  return buffer
+end
+
 local function buffer_uri(buffer)
   return context.buffer_uri(buffer)
 end
@@ -115,17 +134,14 @@ end
 
 local function buffer_for_uri(uri)
   if uri == nil then
-    return vim.api.nvim_get_current_buf()
+    return require_editor_buffer(vim.api.nvim_get_current_buf())
   end
   for _, buffer in ipairs(vim.api.nvim_list_bufs()) do
-    if vim.api.nvim_buf_is_valid(buffer)
-      and vim.api.nvim_buf_is_loaded(buffer)
-      and buffer_uri(buffer) == uri
-    then
+    if readable_editor_buffer(buffer) and buffer_uri(buffer) == uri then
       return buffer
     end
   end
-  error("unknown loaded buffer URI " .. tostring(uri))
+  error("unknown ordinary editor buffer URI")
 end
 
 -- Read only as many lines as the byte budget can expose. The Neovim
@@ -190,6 +206,9 @@ local function quickfix_location(item)
   local buffer = tonumber(item.bufnr) or 0
   local uri
   if buffer > 0 and vim.api.nvim_buf_is_valid(buffer) then
+    if not readable_editor_buffer(buffer) then
+      return nil
+    end
     uri = buffer_uri(buffer)
   elseif type(item.filename) == "string" and item.filename ~= "" then
     uri = vim.uri_from_fname(vim.fn.fnamemodify(item.filename, ":p"))
@@ -210,6 +229,7 @@ local function quickfix_location(item)
 end
 
 local function current_location_tool()
+  require_editor_buffer(vim.api.nvim_get_current_buf())
   local snapshot = context.snapshot()
   return {
     uri = snapshot.uri,
@@ -221,6 +241,7 @@ local function current_location_tool()
 end
 
 local function selection_tool()
+  require_editor_buffer(vim.api.nvim_get_current_buf())
   return context.snapshot().selection
 end
 
@@ -240,7 +261,7 @@ end
 local function buffers_tool()
   local result = {}
   for _, buffer in ipairs(vim.api.nvim_list_bufs()) do
-    if vim.api.nvim_buf_is_valid(buffer) and vim.api.nvim_buf_is_loaded(buffer) then
+    if readable_editor_buffer(buffer) then
       table.insert(result, buffer_info_for(buffer))
     end
   end
@@ -321,7 +342,7 @@ local function viewport_tool(input)
   input = input or {}
   local max_bytes = bounded_integer(input.max_bytes, 65536, 262144, "max_bytes")
   local window = vim.api.nvim_get_current_win()
-  local buffer = vim.api.nvim_win_get_buf(window)
+  local buffer = require_editor_buffer(vim.api.nvim_win_get_buf(window))
   local top = math.max(0, vim.fn.line("w0", window) - 1)
   local bottom = math.max(top, vim.fn.line("w$", window) - 1)
   -- Read only the visible lines needed by the byte budget. A viewport may
