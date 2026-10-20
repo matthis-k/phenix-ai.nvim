@@ -27,17 +27,21 @@ end
 
 local function target_surface(options)
   options = options or {}
-  local surface = options.document and sidebar.surface_for_document(options.document) or sidebar.current_surface()
-  if surface == nil then
-    surface = sidebar.open()
+  -- Explicit document ownership must never fall back to another sidebar.
+  -- Old attachment callbacks may still carry a detached compose document.
+  if options.document ~= nil then
+    return sidebar.surface_for_document(options.document)
   end
-  return surface
+  return sidebar.current_surface() or sidebar.open()
 end
 
 local function insert(item, options)
   local surface = target_surface(options)
   if surface == nil then
-    util.notify("could not open Phenix chat window", vim.log.levels.ERROR)
+    local message = options and options.document ~= nil
+      and "compose document is not attached to a Phenix chat window"
+      or "could not open Phenix chat window"
+    util.notify(message, vim.log.levels.ERROR)
     return nil
   end
   local document = options and options.document or surface.compose

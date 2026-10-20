@@ -114,4 +114,25 @@ created_callback({ session_id = "stale-created-session" }, nil)
 assert(fresh.session_id == "session-manual", "stale creation changed surface binding")
 assert(#sent == 8, "stale session creation dispatched a prompt")
 
-print("N5 compose and surface lifecycle regressions passed")
+-- A stale explicit compose document must not be silently redirected to the
+-- currently open sidebar. This guard is independent of ACP admission.
+local image_module = require("phenix_nvim.image")
+local compose_model = require("phenix_nvim.compose.model")
+local original_from_file, original_add = image_module.from_file, compose_model.add
+local inserted = 0
+image_module.from_file = function()
+  return { kind = "image", mime_type = "image/png", bytes = "fixture" }
+end
+compose_model.add = function(...)
+  inserted = inserted + 1
+  return original_add(...)
+end
+local detached = {}
+assert(sidebar.surface_for_document(detached) == nil)
+local ok, inserted_item = pcall(actions.attach_image, "fake.png", { document = detached, quiet = true })
+assert(ok and inserted_item == nil and inserted == 0,
+  "detached compose target must not route attachments into the active sidebar")
+assert(#sent == 8, "detached editor action must not dispatch a prompt")
+image_module.from_file, compose_model.add = original_from_file, original_add
+
+print("N5 compose, surface and detached-document lifecycle regressions passed")
