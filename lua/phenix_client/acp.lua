@@ -277,33 +277,43 @@ function Backend:_catalog(session_id, options)
   -- revision. It prevents an older ACP reply from undoing newer notifications.
   self.catalog_versions[session_id] = (self.catalog_versions[session_id] or 0) + 1
   local catalog = nil
+  local model_options = 0
   for _, option in ipairs(options or {}) do
-    if option.id == "model" and option.category == "model"
-      and option.type == "select" and type(option.options) == "table"
-      and type(option.currentValue) == "string"
-    then
-      local models = {}
-      local current_offered = false
-      for _, entry in ipairs(option.options) do
-        if type(entry.value) == "string" and entry.value ~= ""
-          and type(entry.name) == "string"
-        then
+    if type(option) == "table" and option.id == "model" then
+      model_options = model_options + 1
+      if model_options == 1 and option.category == "model"
+        and option.type == "select" and type(option.options) == "table"
+        and type(option.currentValue) == "string"
+      then
+        local models, seen, current_offered = {}, {}, false
+        local invalid = false
+        for _, entry in ipairs(option.options) do
+          if type(entry) ~= "table" or type(entry.value) ~= "string"
+            or entry.value == "" or type(entry.name) ~= "string"
+            or seen[entry.value]
+          then
+            invalid = true
+            break
+          end
+          seen[entry.value] = true
           models[#models + 1] = {
             id = entry.value, name = entry.name, authorized = true,
           }
           if entry.value == option.currentValue then current_offered = true end
         end
+        if not invalid and #models > 0 and current_offered then
+          catalog = {
+            session_id = session_id,
+            selected = option.currentValue,
+            models = models,
+          }
+        end
       end
-      if #models > 0 and current_offered then
-        catalog = {
-          session_id = session_id,
-          selected = option.currentValue,
-          models = models,
-        }
-      end
-      break
     end
   end
+  -- A runtime-advertised choice must map to exactly one entry/option.
+  -- Ambiguous duplicate IDs cannot be used as an authority shortcut.
+  if model_options ~= 1 then catalog = nil end
   if catalog then
     self.catalogs[session_id] = catalog
   else
