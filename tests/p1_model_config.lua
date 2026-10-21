@@ -303,6 +303,60 @@ backend:call("models.select", {
 end)
 assert(opaque_requests == 1)
 
+-- The runtime CAS advances the session revision after selecting a model.
+-- It returns a new opaque ID, preserving the exact selected model identity.
+local function native_id(model, revision)
+  return "phenix.native-model@1:" .. vim.json.encode({
+    provider_id = "fixture", connection_id = "local", profile_id = vim.NIL,
+    model_id = model, protocol_id = "openai-chat", endpoint_id = "chat",
+    catalog_revision = 7, session_revision = revision,
+  })
+end
+local function revision_option(model, revision)
+  return {
+    id = "model", category = "model", type = "select",
+    currentValue = native_id(model, revision),
+    options = {
+      { value = native_id("a", revision), name = "Model A" },
+      { value = native_id("b", revision), name = "Model B" },
+    },
+  }
+end
+backend:_catalog("rev-session", { revision_option("a", 0) })
+backend._request = function(_, method, params, callback)
+  assert(method == "session/set_config_option")
+  assert(params.value == native_id("b", 0))
+  callback({ configOptions = { revision_option("b", 1) } }, nil)
+end
+backend:call("models.select", {
+  session_id = "rev-session", model_id = native_id("b", 0),
+}, function(value, problem)
+  assert(not problem and value.selected == native_id("b", 1),
+    "confirmed selected ID must rotate to the next session revision")
+end)
+assert(backend.catalogs["rev-session"].selected == native_id("b", 1))
+backend._request = function(_, _, params, callback)
+  assert(params.value == native_id("a", 1))
+  callback({ configOptions = { revision_option("a", 3) } }, nil)
+end
+backend:call("models.select", {
+  session_id = "rev-session", model_id = native_id("a", 1),
+}, function(value, problem)
+  assert(value == nil and problem.kind == "protocol",
+    "a skipped session revision is not a confirmed ACP CAS response")
+end)
+backend:_catalog("rev-session", { revision_option("b", 1) })
+backend._request = function(_, _, params, callback)
+  assert(params.value == native_id("a", 1))
+  callback({ configOptions = { revision_option("b", 2) } }, nil)
+end
+backend:call("models.select", {
+  session_id = "rev-session", model_id = native_id("a", 1),
+}, function(value, problem)
+  assert(value == nil and problem.kind == "protocol",
+    "different returned model identity is not a confirmed selection")
+end)
+
 stop_updates()
 
-print("ACP model selection rejects ambiguous, stale, revoked, and opaque-identity choices")
+print("ACP model selection rejects ambiguous, stale and invalid revision choices")

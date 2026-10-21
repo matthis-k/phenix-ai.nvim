@@ -29,6 +29,47 @@ function M.new(options)
   }, Backend)
 end
 
+-- A successful runtime CAS rotates its model option IDs from revision N
+-- to N+1. A response is confirmed only when every non-secret identity field
+-- is identical AND the revision increments exactly once. The frontend does
+-- not issue model authority, decode secrets or forge option IDs.
+local function acknowledged_native_model_choice(requested, confirmed)
+  local prefix = "phenix.native-model@1:"
+  if type(requested) ~= "string" or type(confirmed) ~= "string"
+    or requested:sub(1, #prefix) ~= prefix
+    or confirmed:sub(1, #prefix) ~= prefix
+  then
+    return false
+  end
+  local ok1, from = pcall(vim.json.decode, requested:sub(#prefix + 1))
+  local ok2, into = pcall(vim.json.decode, confirmed:sub(#prefix + 1))
+  if not ok1 or not ok2 or type(from) ~= "table" or type(into) ~= "table" then
+    return false
+  end
+  local revision = from.session_revision
+  if type(revision) ~= "number" or revision < 0 or revision % 1 ~= 0
+    or revision >= 9007199254740991
+    or into.session_revision ~= revision + 1
+  then
+    return false
+  end
+  local keys = {
+    "provider_id", "connection_id", "profile_id", "model_id",
+    "protocol_id", "endpoint_id", "catalog_revision",
+  }
+  for _, key in ipairs(keys) do
+    if from[key] ~= into[key] then return false end
+  end
+  -- No additional unrecognized identity attributes may be silently ignored.
+  for key in pairs(from) do
+    if key ~= "session_revision" and not vim.tbl_contains(keys, key) then return false end
+  end
+  for key in pairs(into) do
+    if key ~= "session_revision" and not vim.tbl_contains(keys, key) then return false end
+  end
+  return true
+end
+
 function Backend:_fail(reason)
   if self.state == "closed" or self.state == "failed" then return end
   self.state = "failed"
@@ -635,7 +676,10 @@ function Backend:call(op, args, callback)
       end
       self:_catalog(id, value.configOptions)
       local updated = self.catalogs[id]
-      if not updated or updated.selected ~= args.model_id then
+      if not updated or (
+        updated.selected ~= args.model_id
+        and not acknowledged_native_model_choice(args.model_id, updated.selected)
+      ) then
         finish(callback, nil, error_value("Runtime did not confirm selected model", "protocol"))
         return
       end
