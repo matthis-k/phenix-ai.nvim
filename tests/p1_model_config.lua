@@ -259,6 +259,50 @@ backend:_catalog("s1", { model_option("provider/one") })
 assert(backend.catalogs.s1.selected == "provider/one",
   "a subsequent unique authoritative catalog must restore only that selection")
 
+-- The runtime may supply opaque, complete native HTTP selection IDs.
+-- A model name alone cannot alias different provider account identities;
+-- Neovim must preserve the exact runtime ID rather than decoding it or
+-- authorizing a locally synthesized provider/model pairing.
+local account_a = 'phenix.native-model@1:{"provider_id":"fixture","profile_id":"personal","model_id":"same-model"}'
+local account_b = 'phenix.native-model@1:{"provider_id":"fixture","profile_id":"work","model_id":"same-model"}'
+local opaque_option = {
+  id = "model", category = "model", type = "select",
+  currentValue = account_a,
+  options = {
+    { value = account_a, name = "Fixture / Personal / Same Model" },
+    { value = account_b, name = "Fixture / Work / Same Model" },
+  },
+}
+backend:_catalog("opaque-session", { opaque_option })
+backend:call("models.list", { session_id = "opaque-session" }, function(value, problem)
+  assert(not problem and #value.models == 2)
+  assert(value.models[1].id ~= value.models[2].id,
+    "model labels must not collapse distinct native selection identities")
+end)
+local opaque_requests = 0
+backend._request = function(_, method, params, callback)
+  opaque_requests = opaque_requests + 1
+  assert(method == "session/set_config_option")
+  assert(params.sessionId == "opaque-session" and params.value == account_b)
+  local selected_option = vim.deepcopy(opaque_option)
+  selected_option.currentValue = account_b
+  callback({ configOptions = { selected_option } }, nil)
+end
+backend:call("models.select", {
+  session_id = "opaque-session", model_id = account_b,
+}, function(value, problem)
+  assert(not problem and value.selected == account_b)
+end)
+assert(opaque_requests == 1)
+backend:call("models.select", {
+  session_id = "opaque-session",
+  model_id = 'phenix.native-model@1:{"provider_id":"fixture","profile_id":"forged","model_id":"same-model"}',
+}, function(value, problem)
+  assert(not value and problem.kind == "denied",
+    "client must not submit an unadvertised native selection identity")
+end)
+assert(opaque_requests == 1)
+
 stop_updates()
 
-print("ACP model selection rejects ambiguous, stale, and revoked choices")
+print("ACP model selection rejects ambiguous, stale, revoked, and opaque-identity choices")
