@@ -105,12 +105,17 @@ end
 -- particular, internal compose/follow-up/transcript buffers are uncommitted
 -- UI state and may contain text that was never submitted to Phenix.
 -- This check is separate from runtime admission: it limits the local read.
+local function internal_uri(name)
+  return type(name) == "string" and name:match("^phenix://") ~= nil
+end
+
 local function readable_editor_buffer(buffer)
   return type(buffer) == "number"
     and vim.api.nvim_buf_is_valid(buffer)
     and vim.api.nvim_buf_is_loaded(buffer)
     and vim.bo[buffer].buftype == ""
     and not vim.b[buffer].phenix_internal
+    and not internal_uri(vim.api.nvim_buf_get_name(buffer))
 end
 
 local function require_editor_buffer(buffer)
@@ -211,6 +216,9 @@ local function quickfix_location(item)
     end
     uri = buffer_uri(buffer)
   elseif type(item.filename) == "string" and item.filename ~= "" then
+    if internal_uri(item.filename) then
+      return nil
+    end
     uri = vim.uri_from_fname(vim.fn.fnamemodify(item.filename, ":p"))
   else
     return nil
