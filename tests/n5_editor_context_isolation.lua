@@ -17,6 +17,15 @@ vim.api.nvim_buf_set_lines(draft, 0, -1, false, { "UNSENT_PRIVATE_FOLLOWUP" })
 vim.b[draft].phenix_internal = true
 local draft_uri = context.buffer_uri(draft)
 
+-- Internal URI namespaces must remain private even if the flag was
+-- not set by an older or third-party component.
+local unmarked = vim.api.nvim_create_buf(false, true)
+vim.api.nvim_buf_set_name(unmarked, "phenix://transcript/legacy-private")
+vim.api.nvim_buf_set_lines(unmarked, 0, -1, false, { "UNSENT_UNMARKED_INTERNAL" })
+vim.bo[unmarked].buftype = ""
+local unmarked_uri = context.buffer_uri(unmarked)
+assert(vim.b[unmarked].phenix_internal ~= true)
+
 -- A non-Phenix prompt/terminal/special buffer is also not an editor file.
 local prompt = vim.api.nvim_create_buf(false, true)
 vim.bo[prompt].buftype = "nofile"
@@ -32,18 +41,24 @@ end
 local list = by_id["nvim.context.buffers"]()
 local found_normal = false
 for _, item in ipairs(list) do
-  assert(item.uri ~= draft_uri and item.uri ~= prompt_uri,
+  assert(item.uri ~= draft_uri and item.uri ~= prompt_uri and item.uri ~= unmarked_uri,
     "private UI buffer appeared in the public context catalog")
   if item.uri == normal_uri then found_normal = true end
 end
 assert(found_normal, "ordinary editor file disappeared from context")
 
+denied("nvim.context.buffer", { uri = unmarked_uri })
+denied("nvim.context.diagnostics", { uri = unmarked_uri })
 denied("nvim.context.buffer", { uri = draft_uri })
 denied("nvim.context.buffer", { uri = prompt_uri })
 denied("nvim.context.diagnostics", { uri = draft_uri })
 denied("nvim.context.diagnostics", { uri = prompt_uri })
 
 -- Implicit current-buffer access must also refuse the same private buffers.
+vim.api.nvim_set_current_buf(unmarked)
+denied("nvim.context.buffer", {})
+denied("nvim.context.current_location")
+denied("nvim.context.viewport", {})
 vim.api.nvim_set_current_buf(draft)
 denied("nvim.context.buffer", {})
 denied("nvim.context.diagnostics", {})
@@ -61,6 +76,8 @@ vim.api.nvim_set_current_buf(normal)
 vim.fn.setqflist({}, "r", { items = {
   { bufnr = draft, lnum = 1, col = 1, text = "UNSENT_PRIVATE_FOLLOWUP" },
   { bufnr = prompt, lnum = 1, col = 1, text = "UNSENT_PRIVATE_PROMPT" },
+  { bufnr = unmarked, lnum = 1, col = 1, text = "UNSENT_UNMARKED_INTERNAL" },
+  { filename = "phenix://transcript/legacy-private", lnum = 1, col = 1, text = "UNSENT_NAMESPACE" },
   { bufnr = normal, lnum = 1, col = 1, text = "ordinary quickfix" },
 } })
 local quickfix = by_id["nvim.context.quickfix"]({ limit = 20 })
