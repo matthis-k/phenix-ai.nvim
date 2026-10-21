@@ -216,6 +216,49 @@ assert(results[2].value and results[2].problem == nil)
 assert(results[1].value == nil and results[1].problem.kind == "conflict",
   "out-of-order selection reply must not overwrite a later response")
 assert(backend.catalogs.s1.selected == "provider/one")
+-- Ambiguous runtime model config must revoke the whole selection, not
+-- retain a first-match option or let two entries share the same model ID.
+backend:_catalog("s1", { model_option("provider/one") })
+local duplicate_choices = model_option("provider/one")
+duplicate_choices.options[#duplicate_choices.options + 1] = {
+  name = "Spoofed duplicate", value = "provider/one",
+}
+backend:_catalog("s1", { duplicate_choices })
+assert(backend.catalogs.s1 == nil,
+  "duplicate model IDs must revoke the authoritative catalog")
+
+backend:_catalog("s1", {
+  model_option("provider/one"), model_option("provider/two"),
+})
+assert(backend.catalogs.s1 == nil,
+  "two model options must not let the first response win")
+backend:_catalog("s1", {
+  { id = "model", category = "model", type = "text" },
+  model_option("provider/one"),
+})
+assert(backend.catalogs.s1 == nil,
+  "invalid model option followed by valid one must fail closed")
+local malformed = model_option("provider/one")
+malformed.options[2] = { name = "Missing model ID" }
+backend:_catalog("s1", { malformed })
+assert(backend.catalogs.s1 == nil,
+  "invalid model entry must not be silently skipped")
+
+local unauthorized_requests = 0
+backend._request = function()
+  unauthorized_requests = unauthorized_requests + 1
+end
+backend:call("models.select", {
+  session_id = "s1", model_id = "provider/one",
+}, function(value, problem)
+  assert(value == nil and problem.kind == "unsupported",
+    "ambiguous/revoked model must not become a mutating ACP request")
+end)
+assert(unauthorized_requests == 0)
+backend:_catalog("s1", { model_option("provider/one") })
+assert(backend.catalogs.s1.selected == "provider/one",
+  "a subsequent unique authoritative catalog must restore only that selection")
+
 stop_updates()
 
-print("ACP model selection and catalog revocation reject stale choices")
+print("ACP model selection rejects ambiguous, stale, and revoked choices")
