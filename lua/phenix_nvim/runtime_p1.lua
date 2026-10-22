@@ -769,6 +769,40 @@ function M.poll_authentication(identity, attempt_id, callback)
   end)
 end
 
+-- Cancel the exact provider-owned OAuth attempt, never the active Model
+-- prompt. Returning to Normal mode or closing an auth float must not leave
+-- an interactive authorization attempt running in the runtime.
+function M.cancel_authentication(identity, attempt_id, callback)
+  if type(identity) ~= "table"
+    or type(identity.provider_id) ~= "string" or identity.provider_id == ""
+    or type(identity.connection_id) ~= "string" or identity.connection_id == ""
+    or type(attempt_id) ~= "string" or attempt_id == ""
+  then
+    if callback then callback(nil, {
+      kind = "invalid_input", message = "An exact provider OAuth attempt is required",
+    }) end
+    return
+  end
+  connected(function(client, err)
+    if err then if callback then callback(nil, err) end; return end
+    client:cancel_provider_auth(identity.provider_id, identity.connection_id,
+      attempt_id, function(state, problem)
+        if retired_reply(client, callback) then return end
+        if problem then
+          if callback then callback(nil, problem) end
+          return
+        end
+        if state ~= "Cancelled" and state ~= "Expired" then
+          if callback then callback(nil, {
+            kind = "protocol", message = "Provider did not confirm auth cancellation",
+          }) end
+          return
+        end
+        if callback then callback({ kind = string.lower(state) }, nil) end
+      end)
+  end)
+end
+
 -- Revocation is a separately authorized host operation. Identifiers are
 -- selectors, never authority tokens; the installed credential plugin decides.
 function M.revoke_credential(provider_id, connection_id, profile_id, callback)
