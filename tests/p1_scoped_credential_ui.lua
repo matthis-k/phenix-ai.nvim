@@ -197,6 +197,10 @@ function client:poll_provider_auth(provider_id, connection_id, attempt_id, callb
   assert(attempt_id == "authorized-attempt-1")
   oauth_polls = oauth_polls + 1
   if oauth_polls == 1 then
+    callback({ AwaitingInput = { challenge = { OpenBrowser = {
+      attempt_id = "authorized-attempt-1", url = "https://auth.example.test/login",
+    } } } }, nil)
+  elseif oauth_polls == 2 then
     callback("Pending", nil)
   else
     callback({ Completed = { profile = {
@@ -213,14 +217,33 @@ assert(not oauth_error and oauth_result.kind == "openbrowser")
 assert(oauth_result.attempt_id == "authorized-attempt-1")
 runtime.poll_authentication(oauth_result, oauth_result.attempt_id,
   function(v, e) oauth_result, oauth_error = v, e end)
+assert(not oauth_error and oauth_result.kind == "awaiting_input"
+  and oauth_result.url == "https://auth.example.test/login",
+  "a provider-issued awaiting-input challenge is not a failure or login")
+runtime.poll_authentication(oauth_result, oauth_result.attempt_id,
+  function(v, e) oauth_result, oauth_error = v, e end)
 assert(not oauth_error and oauth_result.kind == "pending")
 runtime.poll_authentication({
-  provider_id = "openai", connection_id = "chatgpt",
+  provider_id = "openai", connection_id = "chatgpt", method_id = "oauth",
 }, "authorized-attempt-1", function(v, e)
   oauth_result, oauth_error = v, e
 end)
 assert(not oauth_error and oauth_result.kind == "authenticated"
   and oauth_result.profile_id == "sso-user",
   "only the completed provider attempt verifies OAuth authentication")
+
+-- A forged or mismatched method in a completed attempt is not success.
+function client:poll_provider_auth(_, _, _, callback)
+  callback({ Completed = { profile = {
+    id = "sso-user", label = "SSO user", method_id = "another-method",
+  } } }, nil)
+end
+runtime.poll_authentication({
+  provider_id = "openai", connection_id = "chatgpt", method_id = "oauth",
+}, "authorized-attempt-1", function(v, e)
+  oauth_result, oauth_error = v, e
+end)
+assert(oauth_result == nil and oauth_error and oauth_error.kind == "protocol",
+  "a completed login for the wrong method cannot authenticate this selection")
 runtime.disconnect()
 print("P1 scoped credentials and OAuth provider-owned attempt lifecycle verified")
