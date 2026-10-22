@@ -498,6 +498,8 @@ local function start_authentication(method, secret, callback)
     -- Poll precisely this provider-owned attempt. Do not call begin() again,
     -- and never mark a browser-open action as successful authentication.
     local checks = 0
+    local last_challenge = tostring(result.url) .. "\0"
+      .. tostring(result.user_code or "")
     local function poll()
       if generation ~= auth_generation then return end
       checks = checks + 1
@@ -520,6 +522,20 @@ local function start_authentication(method, secret, callback)
               vim.log.levels.INFO)
             finish_authentication(callback, status, nil)
           elseif state == "pending" then
+            vim.defer_fn(poll, 1000)
+          elseif state == "awaiting_input" then
+            local challenge = tostring(status.url) .. "\0"
+              .. tostring(status.user_code or "")
+            if challenge ~= last_challenge then
+              if not open_external_auth(status) then
+                finish_authentication(callback, nil, {
+                  kind = "protocol",
+                  message = "Provider returned an unsafe authorization URL",
+                })
+                return
+              end
+              last_challenge = challenge
+            end
             vim.defer_fn(poll, 1000)
           else
             finish_authentication(callback, nil, {
