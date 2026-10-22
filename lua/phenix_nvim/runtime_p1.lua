@@ -411,34 +411,54 @@ function M.list_providers(callback)
   end)
 end
 
--- This is a projection of provider-owned catalog/auth contracts. A catalog
--- advertises methods, not verified credentials or runtime authorization.
+-- A launcher may authorize multiple independent credential roots. These are
+-- already-selected exact-resource grants, not capabilities created by ACP
+-- account selectors. Keep the legacy one-account shape for older runtimes.
+local function granted_accounts(capabilities)
+  if type(capabilities) ~= "table" then return {} end
+  if type(capabilities.profiles) == "table" then return capabilities.profiles end
+  return { capabilities }
+end
+
+-- Provider registration is not authentication; combine the installed
+-- catalog with the exact admitted credential identities. No provider is
+-- inferred to be usable simply because its name is in the catalog.
 function M.list_authentication_methods(callback)
   connected(function(client, err)
     if err then if callback then callback(nil, err) end; return end
     client:credential_capabilities(function(granted, denial)
       if retired_reply(client, callback) then return end
       if denial then if callback then callback(nil, denial) end; return end
-
+      local accounts = granted_accounts(granted)
+      if #accounts == 0 then
+        if callback then callback(nil, { kind = "unsupported",
+          message = "No authorized credential profiles" }) end
+        return
+      end
       client:list_providers(function(page, problem)
         if retired_reply(client, callback) then return end
         if problem then if callback then callback(nil, problem) end; return end
-        local methods = {}
-        for _, provider in ipairs(page.providers or {}) do
-          if provider.id == granted.provider_id then
-            for _, connection in ipairs(provider.connections or {}) do
-              if connection.id == granted.connection_id then
-                for _, method in ipairs(connection.auth_methods or {}) do
-                  -- This management grant is for API-key import/revoke only.
-                  -- OAuth requires its own separately admitted provider flow.
-                  if string.lower(tostring(method.kind)) == "apikey" then
-                    methods[#methods + 1] = {
-                      provider_id = provider.id, provider_name = provider.label,
-                      connection_id = connection.id, connection_name = connection.label,
-                      method_id = method.id, label = method.label, kind = method.kind,
-                      profile_id = granted.profile_id,
-                      authenticated = false, profiles = {},
-                    }
+        local methods, seen = {}, {}
+        for _, account in ipairs(accounts) do
+          for _, provider in ipairs(page.providers or {}) do
+            if provider.id == account.provider_id then
+              for _, connection in ipairs(provider.connections or {}) do
+                if connection.id == account.connection_id then
+                  for _, method in ipairs(connection.auth_methods or {}) do
+                    if string.lower(tostring(method.kind)) == "apikey" then
+                      local key = provider.id .. "/" .. connection.id .. "/"
+                        .. tostring(account.profile_id) .. "/" .. tostring(method.id)
+                      if not seen[key] then
+                        seen[key] = true
+                        methods[#methods + 1] = {
+                          provider_id = provider.id, provider_name = provider.label,
+                          connection_id = connection.id, connection_name = connection.label,
+                          method_id = method.id, label = method.label, kind = method.kind,
+                          profile_id = account.profile_id,
+                          authenticated = false, profiles = {},
+                        }
+                      end
+                    end
                   end
                 end
               end
@@ -447,29 +467,56 @@ function M.list_authentication_methods(callback)
         end
         if #methods == 0 then
           if callback then callback(nil, { kind = "unsupported",
-            message = "The authorized credential profile has no installed API-key method" }) end
+            message = "The authorized profiles have no installed API-key methods" }) end
           return
         end
 
-        client:get_provider_auth_status(granted.provider_id, granted.connection_id,
-          function(status, status_error)
-            if retired_reply(client, callback) then return end
-            for _, method in ipairs(methods) do
-              if not status_error and status then
-                for _, profile in ipairs(status.profiles or {}) do
-                  if profile.id == granted.profile_id
-                    and profile.method_id == method.method_id
-                  then
-                    method.profiles[#method.profiles + 1] = vim.deepcopy(profile)
-                    -- Auth state is a provider-owned M1 discriminated
-                    -- status, not a flag inferred from a stored credential.
-                    method.authenticated = profile.status == "Authenticated"
+        -- Check current provider-owned status independently for every
+        -- connection. A stored credential is not authentication, and an
+        -- authenticated sibling account must never validate this profile.
+        local groups, ordered = {}, {}
+        for _, method in ipairs(methods) do
+          local key = method.provider_id .. "/" .. method.connection_id
+          if not groups[key] then
+            groups[key] = {}
+            ordered[#ordered + 1] = { key = key,
+              provider_id = method.provider_id, connection_id = method.connection_id }
+          end
+          groups[key][#groups[key] + 1] = method
+        end
+        local function read_status(index)
+          if retired_reply(client, callback) then return end
+          local group = ordered[index]
+          if not group then
+            if callback then callback({ methods = methods }, nil) end
+            return
+          end
+          client:get_provider_auth_status(group.provider_id, group.connection_id,
+            function(status, status_error)
+              if retired_reply(client, callback) then return end
+              if not status_error and status
+                and status.provider_id == group.provider_id
+                and status.connection_id == group.connection_id
+              then
+                for _, method in ipairs(groups[group.key]) do
+                  local matches = 0
+                  for _, profile in ipairs(status.profiles or {}) do
+                    if profile.id == method.profile_id
+                      and profile.method_id == method.method_id
+                    then
+                      matches = matches + 1
+                      method.profiles[#method.profiles + 1] = vim.deepcopy(profile)
+                      method.authenticated = matches == 1
+                        and profile.status == "Authenticated"
+                    end
                   end
+                  if matches ~= 1 then method.authenticated = false end
                 end
               end
-            end
-            if callback then callback({ methods = methods }, nil) end
-          end)
+              read_status(index + 1)
+            end)
+        end
+        read_status(1)
       end)
     end)
   end)
@@ -506,10 +553,17 @@ function M.authenticate(identity, secret, callback)
     client:credential_capabilities(function(granted, problem)
       if retired_reply(client, callback) then return end
       if problem then if callback then callback(nil, problem) end; return end
-      if granted.provider_id ~= identity.provider_id
-        or granted.connection_id ~= identity.connection_id
-        or granted.profile_id ~= identity.profile_id
-      then
+      local admitted = false
+      for _, account in ipairs(granted_accounts(granted)) do
+        if account.provider_id == identity.provider_id
+          and account.connection_id == identity.connection_id
+          and account.profile_id == identity.profile_id
+        then
+          admitted = true
+          break
+        end
+      end
+      if not admitted then
         if callback then callback(nil, { kind = "denied",
           message = "Credential profile is not authorized by the Phenix launcher" }) end
         return

@@ -583,6 +583,9 @@ local function authentication_label(method)
     label = label .. " / " .. connection
   end
   label = label .. " / " .. name
+  if type(method.profile_id) == "string" and method.profile_id ~= "" then
+    label = label .. " [" .. method.profile_id .. "]"
+  end
   if method.description ~= nil and method.description ~= "" then
     label = label .. "  ·  " .. method.description
   end
