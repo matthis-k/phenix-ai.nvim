@@ -516,12 +516,36 @@ function M.authenticate(identity, secret, callback)
               message = "Phenix did not confirm credential storage" }) end
             return
           end
-          if callback then callback({
-            kind = "stored", verified = false, authenticated = false,
-            provider_id = identity.provider_id,
-            connection_id = identity.connection_id,
-            profile_id = identity.profile_id,
-          }, nil) end
+          -- Storage alone is not authentication. Ask the current provider
+          -- to verify this exact credential profile before enabling its UI.
+          client:get_provider_auth_status(identity.provider_id, identity.connection_id,
+            function(status, status_error)
+              if retired_reply(client, callback) then return end
+              local verified = false
+              if not status_error and status
+                and status.provider_id == identity.provider_id
+                and status.connection_id == identity.connection_id
+              then
+                local matches = 0
+                for _, profile in ipairs(status.profiles or {}) do
+                  if profile.id == identity.profile_id
+                    and (identity.method_id == nil
+                      or profile.method_id == identity.method_id)
+                    and profile.status == "Authenticated"
+                  then
+                    matches = matches + 1
+                  end
+                end
+                verified = matches == 1
+              end
+              if callback then callback({
+                kind = verified and "authenticated" or "stored",
+                verified = verified, authenticated = verified,
+                provider_id = identity.provider_id,
+                connection_id = identity.connection_id,
+                profile_id = identity.profile_id,
+              }, nil) end
+            end)
         end)
     end)
   end)
