@@ -6,6 +6,7 @@ Neovim frontend for the [Phenix AI](https://github.com/matthis-k/phenix-ai) M1/P
 
 - `phenix-ai-nvim` (also `default` and `phenix-ai-nvim-basic`): installed Basic ACP client, with the runtime's scripted Model for deterministic use.
 - `phenix-ai-nvim-live`: the same Neovim UI connected to the runtime's HTTP Model.
+- `phenix-ai-nvim-openai-api` (opt-in): verified OpenAI API-key login through the runtime-owned credential store, provider catalog, and account-scoped HTTP model selection.
 - `phenix-ai-nvim-live-prompt`: headless real-model prompt runner (answer on stdout; diagnostics on stderr).
 
 All outputs use the same `phenix_client` Lua SDK, Neovim UI and ACP v1 transport. The flake lock pins the matching Phenix M1 runtime; the distribution must follow this client/runtime pair.
@@ -22,7 +23,34 @@ The Basic package supplies its exact ACP executable without needing a PATH looku
 
 Use `:Phenix new` to open a chat, write into the compose window, and press Enter in normal mode or write the buffer to submit. The transcript, tool activity, multiple Neovim chat surfaces and status projection are rendered by the existing client UI. `:Phenix session load <id>` restores a durable session from the runtime's journal. `:Phenix cancel` requests cancellation, and `:Phenix capabilities` displays capabilities advertised by the connected runtime.
 
-Model identity is read from ACP session configuration. `:Phenix select` can display that catalog, but the runtime does not yet expose authorized model mutation. Session listing is partial (sessions known to this connection). Full session discovery/close, routing changes, authentication menus, client-side tool admission, logs and image prompts remain unavailable in P1 and must report unsupported rather than falling back to a legacy client. Text and resource-link prompts are supported.
+Model identity is read from ACP session configuration; `:Phenix model` selects from currently authorized runtime choices. The opt-in OpenAI API preset supports `:Phenix auth` for the specifically admitted profile. The default Basic preset remains scripted and its provider management can be metadata-only. Session listing is partial (sessions known to this connection). Full cross-provider routing, arbitrary account switching, ChatGPT subscription OAuth, client-side tool admission, logs, and image prompts remain unsupported and must not fall back to a legacy client. Text and resource-link prompts are supported.
+
+## Opt-in verified OpenAI API authentication
+
+Use the `phenix-ai-nvim-openai-api` package (or distribution
+`nvim-nix-openai-api`). Create a private credential directory outside the Nix
+store and explicitly enable the file backend in the runtime environment:
+
+```sh
+mkdir -p "$HOME/.local/state/phenix/openai-api-credentials"
+chmod 700 "$HOME/.local/state/phenix/openai-api-credentials"
+export PHENIX_CREDENTIAL_FILE_DIRECTORY="$HOME/.local/state/phenix/openai-api-credentials"
+export PHENIX_CREDENTIAL_FILE_CONSENT=1
+```
+
+Inside Neovim use `:Phenix auth`, enter the OpenAI API key through masked
+input for the authorized `openai/api/personal` profile, then create a session
+with `:Phenix new`, select an authorized model with `:Phenix model`, and
+send a prompt. Credential import never means authenticated: the provider must
+check its models endpoint and report the current `Authenticated` status.
+`:Phenix auth revoke openai api personal` revokes this profile; session
+restart and revoked selected models must not reuse it. Secrets are not
+embedded in Nix source, history, ACP model selections, or frontend catalogs.
+
+The opt-in file backend is protected by filesystem permissions but is not
+encrypted at rest. Model discovery is not a guarantee of inference quota.
+There is no ChatGPT subscription OAuth in this API-key provider. Switching to
+another provider/account requires an explicitly authorized runtime composition.
 
 ## Live HTTP Model
 
