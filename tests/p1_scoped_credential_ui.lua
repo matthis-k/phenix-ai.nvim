@@ -36,14 +36,27 @@ function client:list_providers(callback)
   } }, nil)
 end
 local reported_status
+local work_status
+local anthropic_status
 function client:get_provider_auth_status(provider, connection, callback)
-  assert(provider == "openai" and connection == "api")
-  callback({ provider_id = provider, connection_id = connection, profiles =
-    reported_status and {{
+  assert((provider == "openai" or provider == "anthropic") and connection == "api")
+  local profiles = {}
+  if provider == "openai" then
+    if reported_status then profiles[#profiles + 1] = {
       id = "personal", label = "Personal", method_id = "api-key",
       status = reported_status,
-    }} or {},
-  }, nil)
+    } end
+    if work_status then profiles[#profiles + 1] = {
+      id = "work", label = "Work", method_id = "api-key",
+      status = work_status,
+    } end
+  elseif anthropic_status then
+    profiles[#profiles + 1] = {
+      id = "team", label = "Team", method_id = "api-key",
+      status = anthropic_status,
+    }
+  end
+  callback({ provider_id = provider, connection_id = connection, profiles = profiles }, nil)
 end
 function client:import_credential(provider, connection, profile, secret, callback)
   imported[#imported + 1] = { provider, connection, profile }
@@ -128,5 +141,39 @@ assert(choices == nil and choice_problem and choice_problem.kind == "not_found",
   "pre-session model selection must give an actionable error")
 assert(choice_problem.message:find(":Phenix new", 1, true),
   "tell the user how to create the required session")
+-- New runtimes return all separately admitted accounts; the old single
+-- capability shape remains supported. Provider status from personal must
+-- never authenticate work, and an unrelated provider must be queried.
+grant = { profiles = {
+  { provider_id = "openai", connection_id = "api", profile_id = "personal",
+    import = true, revoke = true },
+  { provider_id = "openai", connection_id = "api", profile_id = "work",
+    import = true, revoke = true },
+  { provider_id = "anthropic", connection_id = "api", profile_id = "team",
+    import = true, revoke = true },
+} }
+reported_status = "Authenticated"
+work_status = { Unavailable = { reason = "not verified" } }
+anthropic_status = "Authenticated"
+read()
+assert(not failure and #methods.methods == 3)
+local by_id = {}
+for _, method in ipairs(methods.methods) do
+  by_id[method.provider_id .. "/" .. method.profile_id] = method
+end
+assert(by_id["openai/personal"].authenticated)
+assert(not by_id["openai/work"].authenticated,
+  "verified sibling account must not authenticate work")
+assert(by_id["anthropic/team"].authenticated,
+  "unrelated authorized provider should be selectable")
+runtime.authenticate({ provider_id = "openai", connection_id = "api",
+  profile_id = "work", kind = "ApiKey" },
+  "different-work-secret", function(v, e) result, problem = v, e end)
+assert(not problem and result.profile_id == "work")
+assert(vim.deep_equal(imported[#imported], { "openai", "api", "work" }))
+runtime.authenticate({ provider_id = "openai", connection_id = "api",
+  profile_id = "unauthorized", kind = "ApiKey" },
+  "unauthorized-secret", function(v, e) result, problem = v, e end)
+assert(result == nil and problem and problem.kind == "denied")
 runtime.disconnect()
-print("P1 credential admission controls auth picker before secret submission")
+print("P1 scoped credential admission covers three named profiles")
