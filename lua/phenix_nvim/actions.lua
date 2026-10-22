@@ -9,6 +9,7 @@ local sessions = require("phenix_nvim.sessions")
 local sidebar = require("phenix_nvim.sidebar")
 local state = require("phenix_nvim.state")
 local util = require("phenix_nvim.util")
+local auth_ui = require("phenix_nvim.ui.auth")
 
 local M = {}
 local submissions = setmetatable({}, { __mode = "k" })
@@ -380,6 +381,28 @@ end
 
 local auth_generation = 0
 local selection_generation = 0
+local auth_progress
+local oauth_attempt
+
+local function close_auth_progress()
+  local view = auth_progress
+  auth_progress = nil
+  if view then view.close() end
+end
+
+local function cancel_active_oauth()
+  local pending = oauth_attempt
+  oauth_attempt = nil
+  close_auth_progress()
+  if pending and type(runtime.cancel_authentication) == "function" then
+    runtime.cancel_authentication(pending.identity, pending.attempt_id, function(_, problem)
+      if problem and problem.kind ~= "unsupported" then
+        util.notify(problem.message or "Could not cancel provider authorization",
+          vim.log.levels.WARN)
+      end
+    end)
+  end
+end
 local connection_state = runtime.status().connection
 runtime.on_event(function(kind, status)
   if kind == "models" then
@@ -394,6 +417,7 @@ runtime.on_event(function(kind, status)
   local next_state = status.connection
   if connection_state == "ready" and next_state ~= "ready" then
     auth_generation = auth_generation + 1
+    cancel_active_oauth()
     selection_generation = selection_generation + 1
     connection_generation = connection_generation + 1
     -- Pending editor callbacks from the old connection are no longer
@@ -454,47 +478,64 @@ local function start_authentication(method, secret, callback)
   end
   auth_generation = auth_generation + 1
   local generation = auth_generation
+  local function complete(value, problem)
+    if generation ~= auth_generation then return end
+    if oauth_attempt and oauth_attempt.generation == generation then
+      oauth_attempt = nil
+    end
+    close_auth_progress()
+    complete(value, problem)
+  end
   runtime.authenticate(identity, secret, function(result, problem)
     if generation ~= auth_generation then
       return
     end
     if problem ~= nil then
-      finish_authentication(callback, nil, problem)
+      complete(nil, problem)
       return
     end
     local kind = authentication_kind(result)
     if kind == "authenticated" then
       util.notify(identity.provider_id .. " authentication completed", vim.log.levels.INFO)
-      finish_authentication(callback, result, nil)
+      complete(result, nil)
       return
     end
     if kind == "stored" and result.verified == false then
       util.notify(identity.provider_id .. " API key stored for profile "
         .. tostring(result.profile_id) .. "; authentication not yet verified",
         vim.log.levels.INFO)
-      finish_authentication(callback, result, nil)
+      complete(result, nil)
       return
     end
     if kind ~= "external" and kind ~= "openbrowser" and kind ~= "deviceauthorization" then
-      finish_authentication(callback, nil, {
+      complete(nil, {
         kind = "protocol", message = "Phenix returned an unknown authentication state",
       })
       return
     end
     if not open_external_auth(result) then
-      finish_authentication(callback, nil, {
+      complete(nil, {
         kind = "protocol", message = "Phenix authentication did not provide an authorization URL",
       })
       return
     end
     if type(result.attempt_id) ~= "string"
       or type(runtime.poll_authentication) ~= "function" then
-      finish_authentication(callback, nil, {
+      complete(nil, {
         kind = "protocol",
         message = "The runtime cannot poll this authorization challenge",
       })
       return
     end
+    oauth_attempt = { identity = result, attempt_id = result.attempt_id,
+      generation = generation }
+    auth_progress = auth_ui.pending("Phenix / " .. identity.provider_id, function()
+      if generation ~= auth_generation then return end
+      -- Disarm the local callback generation first: an in-flight poll may
+      -- return Completed while cancellation is racing with the runtime.
+      auth_generation = auth_generation + 1
+      cancel_active_oauth()
+    end)
     -- Poll precisely this provider-owned attempt. Do not call begin() again,
     -- and never mark a browser-open action as successful authentication.
     local checks = 0
@@ -504,7 +545,7 @@ local function start_authentication(method, secret, callback)
       if generation ~= auth_generation then return end
       checks = checks + 1
       if checks > 600 then
-        finish_authentication(callback, nil, {
+        complete(nil, {
           kind = "expired", message = "Authorization did not complete",
         })
         return
@@ -513,14 +554,14 @@ local function start_authentication(method, secret, callback)
         function(status, problem)
           if generation ~= auth_generation then return end
           if problem then
-            finish_authentication(callback, nil, problem)
+            complete(nil, problem)
             return
           end
           local state = authentication_kind(status)
           if state == "authenticated" then
             util.notify(identity.provider_id .. " authentication completed",
               vim.log.levels.INFO)
-            finish_authentication(callback, status, nil)
+            complete(status, nil)
           elseif state == "pending" then
             vim.defer_fn(poll, 1000)
           elseif state == "awaiting_input" then
@@ -528,7 +569,7 @@ local function start_authentication(method, secret, callback)
               .. tostring(status.user_code or "")
             if challenge ~= last_challenge then
               if not open_external_auth(status) then
-                finish_authentication(callback, nil, {
+                complete(nil, {
                   kind = "protocol",
                   message = "Provider returned an unsafe authorization URL",
                 })
@@ -538,7 +579,7 @@ local function start_authentication(method, secret, callback)
             end
             vim.defer_fn(poll, 1000)
           else
-            finish_authentication(callback, nil, {
+            complete(nil, {
               kind = state,
               message = "Provider authorization " .. state,
             })
@@ -582,7 +623,7 @@ local function authenticate_method(method, callback)
         finish_authentication(callback, nil, input_error)
         return
       end
-      if secret == nil then
+      if secret == nil or secret == "" then
         finish_authentication(callback, nil, {
           kind = "cancelled", message = "authentication cancelled",
         })
@@ -657,7 +698,7 @@ local function choose_authentication_method(methods, prompt, callback)
     return
   end
   local picker_generation = auth_generation
-  vim.ui.select(methods, {
+  auth_ui.select(methods, {
     prompt = prompt,
     format_item = authentication_label,
   }, function(method)
@@ -681,7 +722,7 @@ function M.providers()
       util.notify("No installed Phenix provider registrations", vim.log.levels.INFO)
       return
     end
-    vim.ui.select(providers, {
+    auth_ui.select(providers, {
       prompt = "Installed Phenix providers (not authenticated)",
       format_item = function(item) return item.label or item.id end,
     }, function(provider)
@@ -718,7 +759,7 @@ function M.revoke_credential(provider_id, connection_id, profile_id, callback)
   end
   local prompt = "Revoke " .. provider_id .. " / " .. connection_id
     .. " / " .. profile_id .. " credential?"
-  vim.ui.select({ "Cancel", "Revoke" }, { prompt = prompt }, function(choice)
+  auth_ui.select({ "Cancel", "Revoke" }, { prompt = prompt }, function(choice)
     if choice ~= "Revoke" then
       if callback then util.safe_call(callback, nil, {
         kind = "cancelled", message = "Credential revocation cancelled",
@@ -749,6 +790,7 @@ function M.authenticate()
     return
   end
   auth_generation = auth_generation + 1
+  cancel_active_oauth()
   local generation = auth_generation
   runtime.list_authentication_methods(function(result, problem)
     if generation ~= auth_generation then
@@ -803,7 +845,7 @@ function M.authenticate()
       choose_provider(providers[1])
       return
     end
-    vim.ui.select(providers, {
+    auth_ui.select(providers, {
       prompt = "Phenix provider",
       format_item = function(provider)
         for _, method in ipairs(methods) do
