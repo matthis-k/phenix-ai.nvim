@@ -698,6 +698,79 @@ function M.authenticate(identity, secret, callback)
   end)
 end
 
+-- The user supplies only a variable NAME; neither the environment value
+-- nor key bytes cross ACP. Runtime verifies the exact account after binding.
+function M.bind_auth_environment(identity, name, callback)
+  if type(identity) ~= "table"
+    or type(identity.provider_id) ~= "string" or identity.provider_id == ""
+    or type(identity.connection_id) ~= "string" or identity.connection_id == ""
+    or type(identity.profile_id) ~= "string" or identity.profile_id == ""
+    or type(name) ~= "string" or #name > 128
+    or not name:match("^[A-Z_][A-Z0-9_]*$")
+  then
+    if callback then callback(nil, { kind = "invalid_input",
+      message = "Invalid exact account or variable name" }) end
+    return
+  end
+  connected(function(client, err)
+    if err then if callback then callback(nil, err) end; return end
+    client:credential_capabilities(function(granted, problem)
+      if retired_reply(client, callback) then return end
+      if problem then if callback then callback(nil, problem) end; return end
+      local admitted = false
+      for _, account in ipairs(granted_accounts(granted)) do
+        if account.provider_id == identity.provider_id
+          and account.connection_id == identity.connection_id
+          and account.profile_id == identity.profile_id then
+          admitted = true
+          break
+        end
+      end
+      if not admitted then
+        if callback then callback(nil, { kind = "denied",
+          message = "Credential profile is not launcher-authorized" }) end
+        return
+      end
+      client:bind_credential_environment(identity.provider_id, identity.connection_id,
+        identity.profile_id, name, function(stored, issue)
+          if retired_reply(client, callback) then return end
+          if issue then if callback then callback(nil, issue) end; return end
+          if not stored or stored.stored ~= true then
+            if callback then callback(nil, { kind = "protocol",
+              message = "Environment variable name was not saved" }) end
+            return
+          end
+          client:get_provider_auth_status(identity.provider_id, identity.connection_id,
+            function(status, status_error)
+              if retired_reply(client, callback) then return end
+              local matches = 0
+              if not status_error and status
+                and status.provider_id == identity.provider_id
+                and status.connection_id == identity.connection_id
+              then
+                for _, profile in ipairs(status.profiles or {}) do
+                  if profile.id == identity.profile_id
+                    and (identity.method_id == nil
+                      or profile.method_id == identity.method_id)
+                    and profile.status == "Authenticated" then
+                    matches = matches + 1
+                  end
+                end
+              end
+              local verified = matches == 1
+              if callback then callback({
+                kind = verified and "authenticated" or "stored",
+                verified = verified, authenticated = verified,
+                provider_id = identity.provider_id,
+                connection_id = identity.connection_id,
+                profile_id = identity.profile_id,
+              }, nil) end
+            end)
+        end)
+    end)
+  end)
+end
+
 -- Poll exactly the challenge returned by the authorized provider.
 -- Never restart begin(), infer completion from a browser opening, or retain
 -- OAuth bearer tokens in the Neovim frontend.

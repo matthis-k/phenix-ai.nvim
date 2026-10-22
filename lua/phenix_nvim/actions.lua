@@ -644,12 +644,70 @@ local function authenticate_method(method, callback)
       start_authentication(scoped, secret, callback)
     end)
   end
+  local function request_source(named)
+    local options = { "Enter API key", "Read from environment variable" }
+    auth_ui.select(options, { prompt = provider .. " API key source" }, function(choice)
+      if generation ~= auth_generation then return end
+      if choice == nil then
+        finish_authentication(callback, nil, {
+          kind = "cancelled", message = "authentication cancelled",
+        })
+        return
+      end
+      if choice == options[1] then
+        request_secret(named)
+        return
+      end
+      if type(runtime.bind_auth_environment) ~= "function" then
+        finish_authentication(callback, nil, {
+          kind = "unsupported", message = "Environment source binding is unavailable",
+        })
+        return
+      end
+      vim.ui.input({
+        prompt = "Environment variable name: ",
+        default = "OPENAI_API_KEY",
+      }, function(name)
+        if generation ~= auth_generation then return end
+        if name == nil then
+          finish_authentication(callback, nil, {
+            kind = "cancelled", message = "authentication cancelled",
+          })
+          return
+        end
+        if type(name) ~= "string" or #name > 128
+          or not name:match("^[A-Z_][A-Z0-9_]*$") then
+          finish_authentication(callback, nil, {
+            kind = "invalid_input", message = "Invalid environment variable name",
+          })
+          return
+        end
+        local scoped = vim.deepcopy(method)
+        if named then scoped.profile_id = named end
+        runtime.bind_auth_environment(authentication_identity(scoped), name,
+          function(value, problem)
+            if generation ~= auth_generation then return end
+            if problem then
+              finish_authentication(callback, nil, problem)
+              return
+            end
+            if value and value.kind == "authenticated" and value.verified == true then
+              util.notify(provider .. " authentication completed", vim.log.levels.INFO)
+            elseif value and value.kind == "stored" then
+              util.notify("Environment source stored; account not yet verified",
+                vim.log.levels.WARN)
+            end
+            finish_authentication(callback, value, nil)
+          end)
+      end)
+    end)
+  end
   -- P1's credential store is scoped to one explicit named account. Never
   -- silently pick a profile, especially when multiple accounts share a method.
   if runtime.p1_active() and method.profile_id ~= nil then
     -- The exact profile was authorized by the native ACP host. Do not
     -- invite the editor to request a different account.
-    request_secret(method.profile_id)
+    request_source(method.profile_id)
   elseif runtime.p1_active() then
     vim.ui.input({
       prompt = "Credential profile ID (letters, digits, _ or -): ",
@@ -667,11 +725,11 @@ local function authenticate_method(method, callback)
           kind = "invalid_input", message = "Invalid credential profile ID",
         })
       else
-        request_secret(profile_id)
+        request_source(profile_id)
       end
     end)
   else
-    request_secret(method.profile_id)
+    request_source(method.profile_id)
   end
 end
 

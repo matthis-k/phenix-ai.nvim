@@ -52,10 +52,11 @@ methods = {
   { provider_id = "anthropic", connection_id = "api", provider_name = "Anthropic", method_id = "anthropic-key", kind = "ApiKey", label = "API key" },
 }
 actions.authenticate()
-assert(#prompts == 1, "single-method provider skips method picker")
+assert(#prompts == 2, "provider selection and API-key source only")
 assert(prompts[1] == "Phenix provider")
 assert(#chosen_items[1] == 2 and chosen_items[1][1] == "anthropic")
-assert(chosen_items[2] == nil, "one-method provider should not show a method selector")
+assert(chosen_items[2][1] == "Enter API key",
+  "API-key source picker must not be confused with auth method selection")
 assert(#calls == 1 and calls[1].identity.provider_id == "anthropic"
   and calls[1].identity.connection_id == "api"
   and calls[1].identity.method_id == "anthropic-key")
@@ -69,7 +70,7 @@ methods = {
   { provider = "openai", connection_id = "subscription", provider_name = "OpenAI", id = "oauth", kind = "oauth", name = "ChatGPT" },
 }
 actions.authenticate()
-assert(#prompts == 1 and prompts[1] == "Authenticate OpenAI",
+assert(#prompts == 2 and prompts[1] == "Authenticate OpenAI",
   "single-provider multiple methods must skip redundant provider picker")
 assert(#chosen_items[1] == 2)
 assert(vim.tbl_contains(vim.tbl_map(function(item)
@@ -88,7 +89,7 @@ methods = {
     kind = "api_token", name = "Work key" },
 }
 actions.authenticate()
-assert(#chosen_items == 1 and #chosen_items[1] == 2,
+assert(#chosen_items == 2 and #chosen_items[1] == 2,
   "same-method different-connection entries must both remain selectable")
 assert(chosen_items[1][1].connection_id ~= chosen_items[1][2].connection_id)
 assert(rendered_labels[1][1]:find("personal", 1, true)
@@ -153,8 +154,9 @@ reset()
 methods = { { provider_id = "openrouter", connection_id = "api",
   method_id = "api-key", kind = "ApiKey", label = "API key" } }
 actions.authenticate()
-assert(#prompts == 0 and #chosen_items == 0,
-  "one available method must not show an unnecessary chooser")
+assert(#prompts == 1 and #chosen_items == 1
+  and prompts[1]:find("API key source", 1, true),
+  "one method skips provider/method pickers but still chooses API-key source")
 assert(#calls == 1 and calls[1].identity.provider_id == "openrouter"
   and calls[1].identity.method_id == "api-key")
 assert(calls[1].secret == "fake-key-from-ui")

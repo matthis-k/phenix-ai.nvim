@@ -15,6 +15,7 @@ local operations = {
   get_provider_models = { name = "providers.models" },
   credential_capabilities = { name = "credentials.capabilities" },
   import_credential = { name = "credentials.import" },
+  bind_credential_environment = { name = "credentials.bind_environment" },
   revoke_credential = { name = "credentials.revoke" },
   list_models = { permission = { "management", "models" }, name = "models.list" },
   set_model = { permission = { "management", "model_selection" }, name = "models.select" },
@@ -256,6 +257,18 @@ function Client:import_credential(provider_id, connection_id, profile_id, secret
   self:_call("import_credential", {
     provider_id = provider_id, connection_id = connection_id,
     profile_id = profile_id, secret = secret,
+  }, callback)
+end
+
+function Client:bind_credential_environment(provider_id, connection_id, profile_id, name, callback)
+  for _, id in ipairs({ provider_id, connection_id, profile_id }) do
+    assert(type(id) == "string" and id ~= "")
+  end
+  assert(type(name) == "string" and name ~= "")
+  assert(callback == nil or type(callback) == "function")
+  self:_call("bind_credential_environment", {
+    provider_id = provider_id, connection_id = connection_id,
+    profile_id = profile_id, environment_variable = name,
   }, callback)
 end
 
