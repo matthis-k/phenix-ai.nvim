@@ -578,7 +578,8 @@ function M.authenticate(identity, secret, callback)
           if problem then if callback then callback(nil, problem) end; return end
           local variant = type(challenge) == "table"
             and (challenge.OpenBrowser or challenge.DeviceAuthorization) or nil
-          if not variant or type(variant.attempt_id) ~= "string" then
+          if not variant or type(variant.attempt_id) ~= "string"
+            or variant.attempt_id == "" then
             if callback then callback(nil, { kind = "protocol",
               message = "OAuth adapter did not return a browser or device challenge" }) end
             return
@@ -591,6 +592,7 @@ function M.authenticate(identity, secret, callback)
             attempt_id = variant.attempt_id,
             provider_id = identity.provider_id,
             connection_id = identity.connection_id,
+            method_id = identity.method_id,
           }, nil) end
         end)
     end)
@@ -693,12 +695,43 @@ function M.poll_authentication(identity, attempt_id, callback)
         if retired_reply(client, callback) then return end
         if problem then if callback then callback(nil, problem) end; return end
         local completed = type(state) == "table" and state.Completed or nil
-        if completed and type(completed.profile) == "table" then
+        local awaiting = type(state) == "table" and state.AwaitingInput or nil
+        if completed then
+          local profile = completed.profile
+          if type(profile) ~= "table" or type(profile.id) ~= "string"
+            or profile.id == "" or type(profile.method_id) ~= "string"
+            or profile.method_id == ""
+            or (identity.method_id ~= nil and identity.method_id ~= profile.method_id)
+          then
+            if callback then callback(nil, { kind = "protocol",
+              message = "Provider returned a mismatched OAuth account or method" }) end
+            return
+          end
           if callback then callback({
             kind = "authenticated", verified = true,
-            profile_id = completed.profile.id,
+            profile_id = profile.id,
             provider_id = identity.provider_id,
             connection_id = identity.connection_id,
+          }, nil) end
+        elseif awaiting then
+          -- The M1 auth state can reissue a browser/device challenge while
+          -- the attempt remains active. The runtime owns its identity.
+          local challenge = awaiting.challenge
+          local variant = type(challenge) == "table"
+            and (challenge.OpenBrowser or challenge.DeviceAuthorization) or nil
+          if type(variant) ~= "table" or variant.attempt_id ~= attempt_id then
+            if callback then callback(nil, { kind = "protocol",
+              message = "Provider returned an invalid OAuth input challenge" }) end
+            return
+          end
+          local device = challenge.DeviceAuthorization ~= nil
+          if callback then callback({
+            kind = "awaiting_input", attempt_id = attempt_id,
+            url = device and variant.verification_url or variant.url,
+            user_code = device and variant.user_code or nil,
+            provider_id = identity.provider_id,
+            connection_id = identity.connection_id,
+            method_id = identity.method_id,
           }, nil) end
         elseif state == "Pending" then
           if callback then callback({ kind = "pending" }, nil) end
