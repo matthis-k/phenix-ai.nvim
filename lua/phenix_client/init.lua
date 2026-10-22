@@ -9,6 +9,9 @@ local operations = {
   -- returns Method not found; no frontend capability or grant is invented.
   list_providers = { name = "providers.list" },
   get_provider_auth_status = { name = "providers.auth.status" },
+  begin_provider_auth = { name = "providers.auth.begin" },
+  poll_provider_auth = { name = "providers.auth.poll" },
+  cancel_provider_auth = { name = "providers.auth.cancel" },
   get_provider_models = { name = "providers.models" },
   credential_capabilities = { name = "credentials.capabilities" },
   import_credential = { name = "credentials.import" },
@@ -184,6 +187,35 @@ function Client:get_provider_auth_status(provider_id, connection_id, callback)
   assert(callback == nil or type(callback) == "function")
   self:_call("get_provider_auth_status", {
     provider_id = provider_id, connection_id = connection_id,
+  }, callback)
+end
+
+-- The provider plugin owns these attempts. This client cannot create
+-- authenticated profiles or accept an API key by treating presence as proof.
+function Client:begin_provider_auth(provider_id, connection_id, method_id, callback)
+  assert(type(provider_id) == "string" and provider_id ~= "")
+  assert(type(connection_id) == "string" and connection_id ~= "")
+  assert(type(method_id) == "string" and method_id ~= "")
+  self:_call("begin_provider_auth", {
+    provider_id = provider_id, connection_id = connection_id, method_id = method_id,
+  }, callback)
+end
+
+function Client:poll_provider_auth(provider_id, connection_id, attempt_id, callback)
+  assert(type(provider_id) == "string" and provider_id ~= "")
+  assert(type(connection_id) == "string" and connection_id ~= "")
+  assert(type(attempt_id) == "string" and attempt_id ~= "")
+  self:_call("poll_provider_auth", {
+    provider_id = provider_id, connection_id = connection_id, attempt_id = attempt_id,
+  }, callback)
+end
+
+function Client:cancel_provider_auth(provider_id, connection_id, attempt_id, callback)
+  assert(type(provider_id) == "string" and provider_id ~= "")
+  assert(type(connection_id) == "string" and connection_id ~= "")
+  assert(type(attempt_id) == "string" and attempt_id ~= "")
+  self:_call("cancel_provider_auth", {
+    provider_id = provider_id, connection_id = connection_id, attempt_id = attempt_id,
   }, callback)
 end
 
