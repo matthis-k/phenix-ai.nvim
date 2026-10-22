@@ -36,13 +36,18 @@ function client:list_providers(callback)
   } }, nil)
 end
 local reported_status
+local oauth_status
 local work_status
 local anthropic_status
 function client:get_provider_auth_status(provider, connection, callback)
   assert((provider == "openai" and (connection == "api" or connection == "chatgpt"))
     or (provider == "anthropic" and connection == "api"))
   local profiles = {}
-  if provider == "openai" then
+  if provider == "openai" and connection == "chatgpt" then
+    for _, status in ipairs(oauth_status or {}) do
+      profiles[#profiles + 1] = vim.deepcopy(status)
+    end
+  elseif provider == "openai" then
     if reported_status then profiles[#profiles + 1] = {
       id = "personal", label = "Personal", method_id = "api-key",
       status = reported_status,
@@ -84,6 +89,44 @@ assert(listed == 1)
 for _, method in ipairs(methods.methods) do
   assert(method.kind == "OAuthAuthorizationCode")
 end
+
+-- OAuth has no pre-login profile ID. Verified accounts returned by the
+-- provider must be displayed by method and exact resulting account, not
+-- silently dropped by comparison with nil.
+local function find_oauth_method()
+  read()
+  assert(not failure)
+  for _, value in ipairs(methods.methods) do
+    if value.provider_id == "openai" and value.connection_id == "chatgpt" then
+      return value
+    end
+  end
+  error("ChatGPT OAuth registration not displayed")
+end
+oauth_status = {
+  { id = "sso-user", label = "SSO user", method_id = "oauth",
+    status = "Authenticated" },
+}
+local oauth_method = find_oauth_method()
+assert(oauth_method.authenticated and #oauth_method.profiles == 1
+  and oauth_method.profiles[1].id == "sso-user",
+  "verified OAuth method must surface its resulting named account")
+oauth_status[1].status = { Unavailable = { reason = "revoked" } }
+assert(not find_oauth_method().authenticated,
+  "revoked OAuth account cannot remain authenticated")
+oauth_status = {
+  { id = "sso-user", label = "SSO user", method_id = "oauth",
+    status = "Authenticated" },
+  { id = "sso-work", label = "SSO work", method_id = "oauth",
+    status = "Authenticated" },
+}
+oauth_method = find_oauth_method()
+assert(oauth_method.authenticated and #oauth_method.profiles == 2,
+  "multiple verified OAuth accounts must keep separate identities")
+oauth_status[2].id = "sso-user"
+assert(not find_oauth_method().authenticated,
+  "duplicate OAuth account identities cannot prove authentication")
+oauth_status = nil
 
 grant = { provider_id = "openai", connection_id = "api",
   profile_id = "personal", import = true, revoke = true }
