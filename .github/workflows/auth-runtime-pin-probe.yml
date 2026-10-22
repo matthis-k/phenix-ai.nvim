@@ -1,0 +1,24 @@
+name: Temporary auth runtime pin measurement
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+      - uses: cachix/install-nix-action@a49548c11d9846ad46ecc0115273879b045f001c
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+      - name: Measure exact merged provider runtime source
+        run: |
+          set -euo pipefail
+          nix flake metadata --json 'github:matthis-k/phenix-ai/f8ffe4f17f0238b4cee36c0290738a397127ca4a' |
+            jq -c '{locked: .locked | {rev, narHash, lastModified}, source: .original}'
