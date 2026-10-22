@@ -480,11 +480,17 @@ local function start_authentication(method, secret, callback)
   local generation = auth_generation
   local function complete(value, problem)
     if generation ~= auth_generation then return end
-    if oauth_attempt and oauth_attempt.generation == generation then
-      oauth_attempt = nil
+    if oauth_attempt and oauth_attempt.generation == generation
+      and problem and problem.kind ~= "expired" and problem.kind ~= "cancelled"
+    then
+      cancel_active_oauth()
+    else
+      if oauth_attempt and oauth_attempt.generation == generation then
+        oauth_attempt = nil
+      end
+      close_auth_progress()
     end
-    close_auth_progress()
-    complete(value, problem)
+    finish_authentication(callback, value, problem)
   end
   runtime.authenticate(identity, secret, function(result, problem)
     if generation ~= auth_generation then
