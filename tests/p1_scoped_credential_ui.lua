@@ -35,9 +35,15 @@ function client:list_providers(callback)
     } },
   } }, nil)
 end
+local reported_status
 function client:get_provider_auth_status(provider, connection, callback)
   assert(provider == "openai" and connection == "api")
-  callback({ provider_id = provider, connection_id = connection, profiles = {} }, nil)
+  callback({ provider_id = provider, connection_id = connection, profiles =
+    reported_status and {{
+      id = "personal", label = "Personal", method_id = "api-key",
+      status = reported_status,
+    }} or {},
+  }, nil)
 end
 function client:import_credential(provider, connection, profile, secret, callback)
   imported[#imported + 1] = { provider, connection, profile }
@@ -69,6 +75,18 @@ local entry = methods.methods[1]
 assert(entry.provider_id == "openai" and entry.connection_id == "api")
 assert(entry.profile_id == "personal" and entry.kind == "ApiKey")
 assert(entry.authenticated == false)
+reported_status = { Unavailable = { reason = "not yet verified" } }
+read()
+assert(not failure and methods.methods[1].authenticated == false,
+  "Stored-but-unverified account must remain unavailable")
+reported_status = "Authenticated"
+read()
+assert(not failure and methods.methods[1].authenticated == true,
+  "Only provider-owned Authenticated variant grants UI readiness")
+reported_status = nil
+read()
+assert(not failure and methods.methods[1].authenticated == false,
+  "Absent current auth status removes the readiness projection")
 
 local result, problem
 runtime.authenticate({ provider_id = "openai", connection_id = "api",
