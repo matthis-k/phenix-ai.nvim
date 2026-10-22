@@ -103,5 +103,20 @@ runtime.authenticate({ provider_id = "openai", connection_id = "api",
 assert(not problem and result.kind == "stored")
 assert(result.verified == false and result.authenticated == false)
 assert(vim.deep_equal(imported[1], { "openai", "api", "personal" }))
+
+-- The fresh provider status, not storage, decides authentication.
+reported_status = "Authenticated"
+runtime.authenticate({ provider_id = "openai", connection_id = "api",
+  profile_id = "personal", method_id = "api-key", kind = "ApiKey" },
+  "second-test-key", function(v, e) result, problem = v, e end)
+assert(not problem and result.kind == "authenticated" and result.verified
+  and result.authenticated)
+
+reported_status = { Unavailable = { reason = "revoked" } }
+runtime.authenticate({ provider_id = "openai", connection_id = "api",
+  profile_id = "personal", method_id = "api-key", kind = "ApiKey" },
+  "third-test-key", function(v, e) result, problem = v, e end)
+assert(not problem and result.kind == "stored" and not result.verified,
+  "unverified key cannot authenticate merely because it was stored")
 runtime.disconnect()
 print("P1 credential admission controls auth picker before secret submission")
