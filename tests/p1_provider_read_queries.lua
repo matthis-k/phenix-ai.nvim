@@ -215,5 +215,67 @@ transport:_response({ jsonrpc = "2.0", id = outgoing.id,
   result = { ok = false } })
 assert(revoked == nil and revoke_error.kind == "protocol")
 
+-- Existing M1 ProviderAuth begin/poll/cancel operations keep all account
+-- lifecycle authority inside a selected provider plugin. ACP forwards only
+-- bounded selectors; client does not infer authenticated status from a prompt.
+local challenge, auth_error
+client:begin_provider_auth("openai", "api", "api-key", function(value, err)
+  challenge, auth_error = value, err
+end)
+assert(outgoing.method == "_phenix/providers/auth/begin")
+assert(outgoing.params.scope == "user" and outgoing.params.method_id == "api-key")
+assert(outgoing.params.secret == nil)
+transport:_response({ jsonrpc = "2.0", id = outgoing.id,
+  result = { ApiKeyInput = { attempt_id = "attempt-one", prompt = "Enter key" } },
+})
+assert(not auth_error and challenge.ApiKeyInput.attempt_id == "attempt-one")
+
+local state, state_error
+client:poll_provider_auth("openai", "api", "attempt-one", function(value, err)
+  state, state_error = value, err
+end)
+assert(outgoing.method == "_phenix/providers/auth/poll"
+  and outgoing.params.attempt_id == "attempt-one")
+transport:_response({ jsonrpc = "2.0", id = outgoing.id, result = "Pending" })
+assert(not state_error and state == "Pending")
+
+client:poll_provider_auth("openai", "api", "attempt-one", function(value, err)
+  state, state_error = value, err
+end)
+transport:_response({ jsonrpc = "2.0", id = outgoing.id, result = {
+  Completed = { profile = {
+    id = "personal", label = "Personal", method_id = "api-key",
+  } },
+} })
+assert(not state_error and state.Completed.profile.id == "personal")
+
+client:cancel_provider_auth("openai", "api", "attempt-one", function(value, err)
+  state, state_error = value, err
+end)
+assert(outgoing.method == "_phenix/providers/auth/cancel")
+transport:_response({ jsonrpc = "2.0", id = outgoing.id, result = "Cancelled" })
+assert(not state_error and state == "Cancelled")
+
+-- The client must not accept fake authenticated profiles or extra fields.
+client:poll_provider_auth("openai", "api", "attempt-one", function(value, err)
+  state, state_error = value, err
+end)
+transport:_response({ jsonrpc = "2.0", id = outgoing.id, result = {
+  Completed = { profile = {
+    id = "personal", label = "Personal", method_id = "api-key",
+    valid = true,
+  } },
+} })
+assert(state == nil and state_error.kind == "protocol")
+
+client:begin_provider_auth("openai", "api", "api-key", function(value, err)
+  challenge, auth_error = value, err
+end)
+transport:_response({ jsonrpc = "2.0", id = outgoing.id,
+  error = { code = -32601, message = "Method not found" },
+})
+assert(challenge == nil and auth_error.kind == "unsupported")
+
 client:close()
-print("Provider read queries and scoped credential calls validated without granting authority")
+print("Provider read queries, native auth attempts and scoped credentials validated")
+
