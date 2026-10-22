@@ -390,13 +390,13 @@ local function close_auth_progress()
   if view then view.close() end
 end
 
-local function cancel_active_oauth()
+local function cancel_active_oauth(report_error)
   local pending = oauth_attempt
   oauth_attempt = nil
   close_auth_progress()
   if pending and type(runtime.cancel_authentication) == "function" then
     runtime.cancel_authentication(pending.identity, pending.attempt_id, function(_, problem)
-      if problem and problem.kind ~= "unsupported" then
+      if report_error and problem and problem.kind ~= "unsupported" then
         util.notify(problem.message or "Could not cancel provider authorization",
           vim.log.levels.WARN)
       end
@@ -540,7 +540,7 @@ local function start_authentication(method, secret, callback)
       -- Disarm the local callback generation first: an in-flight poll may
       -- return Completed while cancellation is racing with the runtime.
       auth_generation = auth_generation + 1
-      cancel_active_oauth()
+      cancel_active_oauth(true)
     end)
     -- Poll precisely this provider-owned attempt. Do not call begin() again,
     -- and never mark a browser-open action as successful authentication.
