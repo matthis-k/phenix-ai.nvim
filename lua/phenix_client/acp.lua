@@ -676,7 +676,8 @@ function Backend:call(op, args, callback)
       end
       finish(callback, vim.deepcopy(value), nil)
     end)
-  elseif op == "credentials.import" or op == "credentials.revoke" then
+  elseif op == "credentials.import" or op == "credentials.revoke"
+    or op == "credentials.bind_environment" then
     -- These are independent launcher-granted operations, NOT provider
     -- authentication. No credential bytes are kept in backend state or
     -- passed to user-visible diagnostics.
@@ -697,12 +698,23 @@ function Backend:call(op, args, callback)
       return
     end
     local path = op == "credentials.import" and "_phenix/credentials/import"
-      or "_phenix/credentials/revoke"
+      or (op == "credentials.bind_environment" and "_phenix/credentials/env-bind"
+        or "_phenix/credentials/revoke")
     local params = {
       provider_id = args.provider_id,
       connection_id = args.connection_id,
       profile_id = args.profile_id,
     }
+    if op == "credentials.bind_environment" then
+      local name = args.environment_variable
+      if type(name) ~= "string" or #name > 128
+        or not name:match("^[A-Z_][A-Z0-9_]*$")
+      then
+        finish(callback, nil, error_value("Invalid API key variable name", "invalid_input"))
+        return
+      end
+      params.environment_variable = name
+    end
     if op == "credentials.import" then params.secret = args.secret end
     self:_request(path, params, function(value, err)
       if err then
@@ -723,7 +735,7 @@ function Backend:call(op, args, callback)
         finish(callback, nil, error_value("Invalid credential operation result", "protocol"))
         return
       end
-      finish(callback, { stored = op == "credentials.import",
+      finish(callback, { stored = op ~= "credentials.revoke",
         revoked = op == "credentials.revoke", authenticated = false }, nil)
     end)
   elseif op == "models.list" then
