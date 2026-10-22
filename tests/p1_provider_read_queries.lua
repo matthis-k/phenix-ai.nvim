@@ -27,10 +27,10 @@ assert(outgoing.params.secret == nil)
 transport:_response({ jsonrpc = "2.0", id = outgoing.id,
   result = { provider_id = "openai", connection_id = "api", profiles = {
     { id = "personal", label = "Personal", method_id = "api-key",
-      valid = false, reason = "not verified" },
+      status = { Unavailable = { reason = "not verified" } } },
   } },
 })
-assert(not failure and status.profiles[1].valid == false)
+assert(not failure and status.profiles[1].status.Unavailable.reason == "not verified")
 assert(not client:capabilities().management.provider_authentication)
 
 local invalid, protocol_problem
@@ -47,12 +47,34 @@ client:get_provider_auth_status("openai", "api", function(value, err)
 end)
 transport:_response({ jsonrpc = "2.0", id = outgoing.id,
   result = { provider_id = "openai", connection_id = "api", profiles = {
-    { id = "one", method_id = "key", valid = true },
-    { id = "one", method_id = "key", valid = true },
+    { id = "one", label = "One", method_id = "key", status = "Authenticated" },
+    { id = "one", label = "One", method_id = "key", status = "Authenticated" },
   } },
 })
 assert(invalid == nil and protocol_problem.kind == "protocol",
   "duplicate credential profile IDs cannot become selectable")
+
+-- A verified profile must arrive with the exact M1 enum variant.
+client:get_provider_auth_status("openai", "api", function(value, err)
+  status, failure = value, err
+end)
+transport:_response({ jsonrpc = "2.0", id = outgoing.id,
+  result = { provider_id = "openai", connection_id = "api", profiles = {
+    { id = "personal", label = "Personal", method_id = "api-key",
+      status = "Authenticated" },
+  } },
+})
+assert(not failure and status.profiles[1].status == "Authenticated")
+-- Credential presence / legacy booleans alone never imply verified auth.
+client:get_provider_auth_status("openai", "api", function(value, err)
+  invalid, protocol_problem = value, err
+end)
+transport:_response({ jsonrpc = "2.0", id = outgoing.id,
+  result = { provider_id = "openai", connection_id = "api", profiles = {
+    { id = "forged", label = "Forged", method_id = "api-key", valid = true },
+  } },
+})
+assert(invalid == nil and protocol_problem.kind == "protocol")
 
 client:get_provider_auth_status("openai", "api", function(value, err)
   invalid, protocol_problem = value, err

@@ -472,10 +472,24 @@ function Backend:call(op, args, callback)
       end
       local seen = {}
       for _, profile in ipairs(value.profiles) do
+        -- M1 ProviderAuth::status uses a discriminated enum, never a
+        -- credential-presence `valid` boolean. An unavailable account has a
+        -- reason and cannot be mistaken for an authenticated account.
+        local status = type(profile) == "table" and profile.status or nil
+        local valid_status = status == "Authenticated"
+          or (type(status) == "table"
+            and type(status.Unavailable) == "table"
+            and type(status.Unavailable.reason) == "string"
+            and #status.Unavailable.reason > 0
+            and #status.Unavailable.reason <= 512
+            and not status.Unavailable.reason:find("[%c]")
+            and vim.tbl_count(status) == 1
+            and vim.tbl_count(status.Unavailable) == 1)
         if type(profile) ~= "table" or type(profile.id) ~= "string"
           or profile.id == "" or seen[profile.id]
+          or type(profile.label) ~= "string" or profile.label == ""
           or type(profile.method_id) ~= "string" or profile.method_id == ""
-          or type(profile.valid) ~= "boolean"
+          or not valid_status or profile.valid ~= nil
         then
           finish(callback, nil, error_value("Invalid provider profile identity", "protocol"))
           return
