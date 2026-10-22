@@ -16,7 +16,7 @@ local function create_surface(title, lines, width)
   vim.bo[buffer].filetype = "phenix-auth"
   vim.api.nvim_buf_set_lines(buffer, 0, -1, false, lines)
   vim.bo[buffer].modifiable = false
-  local height = #lines
+  local height = math.min(#lines, math.max(3, vim.o.lines - 4))
   local columns = math.max(20, vim.o.columns - 4)
   width = math.min(columns, math.max(24, width))
   local win = vim.api.nvim_open_win(buffer, true, {
