@@ -164,7 +164,12 @@ read()
 assert(not failure and #methods.methods == 5)
 local by_id = {}
 for _, method in ipairs(methods.methods) do
-  by_id[method.provider_id .. "/" .. method.profile_id] = method
+  if method.profile_id ~= nil then
+    by_id[method.provider_id .. "/" .. method.profile_id] = method
+  else
+    assert(method.kind == "OAuthAuthorizationCode",
+      "only OAuth methods may appear without a named profile")
+  end
 end
 assert(by_id["openai/personal"].authenticated)
 assert(not by_id["openai/work"].authenticated,
