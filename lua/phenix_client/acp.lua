@@ -498,6 +498,103 @@ function Backend:call(op, args, callback)
       end
       finish(callback, vim.deepcopy(value), nil)
     end)
+  elseif op == "providers.auth.begin" or op == "providers.auth.poll"
+    or op == "providers.auth.cancel"
+  then
+    local action = op:match("([^.]+)$")
+    local selector = action == "begin" and args.method_id or args.attempt_id
+    local selector_key = action == "begin" and "method_id" or "attempt_id"
+    if type(args.provider_id) ~= "string" or args.provider_id == ""
+      or #args.provider_id > 128
+      or type(args.connection_id) ~= "string" or args.connection_id == ""
+      or #args.connection_id > 128
+      or type(selector) ~= "string" or selector == ""
+      or #selector > (action == "begin" and 128 or 256)
+      or selector:find("[%c]")
+    then
+      finish(callback, nil, error_value("Invalid provider authentication attempt", "invalid_input"))
+      return
+    end
+    local params = {
+      scope = "user", provider_id = args.provider_id,
+      connection_id = args.connection_id,
+    }
+    params[selector_key] = selector
+    self:_request("_phenix/providers/auth/" .. action, params, function(answer, err)
+      if err then
+        if err.code == -32601 then
+          finish(callback, nil, error_value(
+            "Phenix does not expose provider authentication " .. action, "unsupported"))
+        else
+          finish(callback, nil, err)
+        end
+        return
+      end
+      local function exact_variant(item, variants)
+        if type(item) ~= "table" or vim.tbl_count(item) ~= 1 then return nil, nil end
+        local kind, payload = next(item)
+        if not variants[kind] or type(payload) ~= "table" then return nil, nil end
+        return kind, payload
+      end
+      local function challenge(item)
+        local kind, payload = exact_variant(item, {
+          ApiKeyInput = true, OpenBrowser = true, DeviceAuthorization = true,
+        })
+        if not kind then return false end
+        local attempt = payload.attempt_id
+        if type(attempt) ~= "string" or attempt == ""
+          or #attempt > 256 or attempt:find("[%c]")
+        then return false end
+        if kind == "ApiKeyInput" then
+          return type(payload.prompt) == "string"
+            and payload.prompt ~= "" and #payload.prompt <= 512
+            and vim.tbl_count(payload) == 2
+        elseif kind == "OpenBrowser" then
+          return type(payload.url) == "string"
+            and payload.url ~= "" and #payload.url <= 2048
+            and vim.tbl_count(payload) == 2
+        end
+        return type(payload.verification_url) == "string"
+          and payload.verification_url ~= "" and #payload.verification_url <= 2048
+          and type(payload.user_code) == "string"
+          and payload.user_code ~= "" and #payload.user_code <= 128
+          and vim.tbl_count(payload) == 3
+      end
+      local accepted = false
+      if action == "begin" then
+        accepted = challenge(answer)
+      elseif answer == "Pending" or answer == "Expired"
+        or answer == "Cancelled"
+      then
+        accepted = true
+      else
+        local kind, payload = exact_variant(answer, {
+          AwaitingInput = true, Completed = true, Failed = true,
+        })
+        if kind == "AwaitingInput" then
+          accepted = vim.tbl_count(payload) == 1 and challenge(payload.challenge)
+        elseif kind == "Completed" then
+          local profile = payload.profile
+          accepted = vim.tbl_count(payload) == 1 and type(profile) == "table"
+            and type(profile.id) == "string" and profile.id ~= ""
+            and type(profile.label) == "string" and profile.label ~= ""
+            and type(profile.method_id) == "string" and profile.method_id ~= ""
+            and vim.tbl_count(profile) == 3
+        elseif kind == "Failed" then
+          local problem = payload.reason
+          accepted = vim.tbl_count(payload) == 1 and type(problem) == "table"
+            and type(problem.code) == "string"
+            and type(problem.message) == "string"
+            and #problem.message <= 1024
+        end
+      end
+      if not accepted then
+        finish(callback, nil, error_value(
+          "Invalid provider authentication lifecycle response", "protocol"))
+        return
+      end
+      finish(callback, vim.deepcopy(answer), nil)
+    end)
   elseif op == "providers.models" then
     if type(args.provider_id) ~= "string" or args.provider_id == ""
       or type(args.connection_id) ~= "string" or args.connection_id == ""

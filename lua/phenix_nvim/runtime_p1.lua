@@ -451,7 +451,9 @@ function M.list_authentication_methods(callback)
                     and profile.method_id == method.method_id
                   then
                     method.profiles[#method.profiles + 1] = vim.deepcopy(profile)
-                    method.authenticated = profile.valid
+                    -- Auth state is a provider-owned M1 discriminated
+                    -- status, not a flag inferred from a stored credential.
+                    method.authenticated = profile.status == "Authenticated"
                   end
                 end
               end
