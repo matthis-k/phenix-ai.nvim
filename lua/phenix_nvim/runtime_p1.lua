@@ -368,6 +368,16 @@ function M.capabilities(callback)
 end
 
 function M.list_selections(callback)
+  -- ACP model menus belong to one existing session. In particular the
+  -- provider-first auth picker must not submit a nil session ID while the
+  -- user is still onboarding an authorized credential profile.
+  if not state.active then
+    if callback then callback(nil, {
+      kind = "not_found",
+      message = "Create a Phenix session with :Phenix new before choosing a model",
+    }) end
+    return
+  end
   connected(function(client, err)
     if err then if callback then callback(nil, err) end; return end
     client:list_models(state.active, function(catalog, problem)

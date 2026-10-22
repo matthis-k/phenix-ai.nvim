@@ -118,5 +118,15 @@ runtime.authenticate({ provider_id = "openai", connection_id = "api",
   "third-test-key", function(v, e) result, problem = v, e end)
 assert(not problem and result.kind == "stored" and not result.verified,
   "unverified key cannot authenticate merely because it was stored")
+-- Credential onboarding is permitted before a session exists, but
+-- the model picker must not attempt an ACP catalog request for nil session.
+local choices, choice_problem
+runtime.list_selections(function(value, err)
+  choices, choice_problem = value, err
+end)
+assert(choices == nil and choice_problem and choice_problem.kind == "not_found",
+  "pre-session model selection must give an actionable error")
+assert(choice_problem.message:find(":Phenix new", 1, true),
+  "tell the user how to create the required session")
 runtime.disconnect()
 print("P1 credential admission controls auth picker before secret submission")
