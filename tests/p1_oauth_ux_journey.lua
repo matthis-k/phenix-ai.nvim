@@ -43,7 +43,9 @@ runtime.authenticate = function(identity, secret, done)
     and identity.method_id == "oauth"
     and identity.kind == "OAuthAuthorizationCode")
   assert(secret == nil, "OAuth access/refresh tokens must never go through Lua")
-  done({ kind = "external", url = authorize, attempt_id = "a1" }, nil)
+  done({ kind = "external", url = authorize, attempt_id = "a1",
+    provider_id = identity.provider_id, connection_id = identity.connection_id,
+    method_id = identity.method_id }, nil)
 end
 runtime.poll_authentication = function(identity, attempt, done)
   polls = polls + 1
