@@ -428,13 +428,13 @@ function M.list_authentication_methods(callback)
     if err then if callback then callback(nil, err) end; return end
     client:credential_capabilities(function(granted, denial)
       if retired_reply(client, callback) then return end
-      if denial then if callback then callback(nil, denial) end; return end
-      local accounts = granted_accounts(granted)
-      if #accounts == 0 then
-        if callback then callback(nil, { kind = "unsupported",
-          message = "No authorized credential profiles" }) end
+      -- API-key grants are separate from OAuth browser challenges. An ACP
+      -- host may install provider OAuth without an API-key credential manager.
+      if denial and denial.kind ~= "unsupported" then
+        if callback then callback(nil, denial) end
         return
       end
+      local accounts = granted_accounts(granted)
       client:list_providers(function(page, problem)
         if retired_reply(client, callback) then return end
         if problem then if callback then callback(nil, problem) end; return end
@@ -465,9 +465,31 @@ function M.list_authentication_methods(callback)
             end
           end
         end
+        -- OAuth methods are admitted by ProviderAuth::begin, never by
+        -- API-key import grants. Registration only offers a method;
+        -- clicking it must still pass the runtime's exact authority check.
+        for _, provider in ipairs(page.providers or {}) do
+          for _, connection in ipairs(provider.connections or {}) do
+            for _, method in ipairs(connection.auth_methods or {}) do
+              local kind = string.lower(tostring(method.kind))
+              if kind == "oauthauthorizationcode" or kind == "oauthdevicecode" then
+                local key = provider.id .. "/" .. connection.id .. "/" .. method.id
+                if not seen[key] then
+                  seen[key] = true
+                  methods[#methods + 1] = {
+                    provider_id = provider.id, provider_name = provider.label,
+                    connection_id = connection.id, connection_name = connection.label,
+                    method_id = method.id, label = method.label, kind = method.kind,
+                    authenticated = false, profiles = {},
+                  }
+                end
+              end
+            end
+          end
+        end
         if #methods == 0 then
           if callback then callback(nil, { kind = "unsupported",
-            message = "The authorized profiles have no installed API-key methods" }) end
+            message = "No installed actionable provider authentication methods" }) end
           return
         end
 
@@ -531,8 +553,47 @@ function M.authenticate(identity, secret, callback)
     return
   end
   local kind = string.lower(tostring(identity.kind or ""))
-  if kind ~= "apikey" and kind ~= "api_key" and kind ~= "api_token" then
+  local oauth = kind == "oauthauthorizationcode" or kind == "oauthdevicecode"
+    or kind == "oauth" or kind == "oauth_authorization_code"
+    or kind == "oauth_device_code"
+  local api_key = kind == "apikey" or kind == "api_key" or kind == "api_token"
+  if not oauth and not api_key then
     unavailable("this authentication method", callback)
+    return
+  end
+  if oauth then
+    if type(identity.provider_id) ~= "string" or identity.provider_id == ""
+      or type(identity.connection_id) ~= "string" or identity.connection_id == ""
+      or type(identity.method_id) ~= "string" or identity.method_id == ""
+    then
+      if callback then callback(nil, { kind = "invalid_input",
+        message = "A provider, connection and OAuth method are required" }) end
+      return
+    end
+    connected(function(client, err)
+      if err then if callback then callback(nil, err) end; return end
+      client:begin_provider_auth(identity.provider_id, identity.connection_id,
+        identity.method_id, function(challenge, problem)
+          if retired_reply(client, callback) then return end
+          if problem then if callback then callback(nil, problem) end; return end
+          local variant = type(challenge) == "table"
+            and (challenge.OpenBrowser or challenge.DeviceAuthorization) or nil
+          if not variant or type(variant.attempt_id) ~= "string" then
+            if callback then callback(nil, { kind = "protocol",
+              message = "OAuth adapter did not return a browser or device challenge" }) end
+            return
+          end
+          local device = challenge.DeviceAuthorization ~= nil
+          if callback then callback({
+            kind = device and "deviceauthorization" or "openbrowser",
+            url = device and variant.verification_url or variant.url,
+            user_code = device and variant.user_code or nil,
+            attempt_id = variant.attempt_id,
+            provider_id = identity.provider_id,
+            connection_id = identity.connection_id,
+          }, nil) end
+        end)
+    end)
     return
   end
   if type(identity.provider_id) ~= "string" or identity.provider_id == ""
@@ -612,6 +673,46 @@ function M.authenticate(identity, secret, callback)
             end)
         end)
     end)
+  end)
+end
+
+-- Poll exactly the challenge returned by the authorized provider.
+-- Never restart begin(), infer completion from a browser opening, or retain
+-- OAuth bearer tokens in the Neovim frontend.
+function M.poll_authentication(identity, attempt_id, callback)
+  if type(identity) ~= "table" or type(attempt_id) ~= "string"
+    or attempt_id == "" then
+    if callback then callback(nil, { kind = "invalid_input",
+      message = "An authorized authentication attempt is required" }) end
+    return
+  end
+  connected(function(client, err)
+    if err then if callback then callback(nil, err) end; return end
+    client:poll_provider_auth(identity.provider_id, identity.connection_id,
+      attempt_id, function(state, problem)
+        if retired_reply(client, callback) then return end
+        if problem then if callback then callback(nil, problem) end; return end
+        local completed = type(state) == "table" and state.Completed or nil
+        if completed and type(completed.profile) == "table" then
+          if callback then callback({
+            kind = "authenticated", verified = true,
+            profile_id = completed.profile.id,
+            provider_id = identity.provider_id,
+            connection_id = identity.connection_id,
+          }, nil) end
+        elseif state == "Pending" then
+          if callback then callback({ kind = "pending" }, nil) end
+        elseif state == "Expired" or state == "Cancelled" then
+          if callback then callback({ kind = string.lower(state) }, nil) end
+        elseif type(state) == "table" and state.Failed then
+          if callback then callback(nil, { kind = "authentication_failed",
+            message = state.Failed.reason and state.Failed.reason.message
+              or "Provider rejected authentication" }) end
+        else
+          if callback then callback(nil, { kind = "protocol",
+            message = "Unknown provider OAuth attempt state" }) end
+        end
+      end)
   end)
 end
 
