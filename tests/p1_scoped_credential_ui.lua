@@ -39,7 +39,8 @@ local reported_status
 local work_status
 local anthropic_status
 function client:get_provider_auth_status(provider, connection, callback)
-  assert((provider == "openai" or provider == "anthropic") and connection == "api")
+  assert((provider == "openai" and (connection == "api" or connection == "chatgpt"))
+    or (provider == "anthropic" and connection == "api"))
   local profiles = {}
   if provider == "openai" then
     if reported_status then profiles[#profiles + 1] = {
@@ -77,13 +78,17 @@ local function read()
   end)
 end
 read()
-assert(methods == nil and failure and failure.kind == "unsupported")
-assert(listed == 0, "no grant must not enumerate actionable auth methods")
+assert(not failure and #methods.methods == 2,
+  "OAuth methods must not require an API-key credential grant")
+assert(listed == 1)
+for _, method in ipairs(methods.methods) do
+  assert(method.kind == "OAuthAuthorizationCode")
+end
 
 grant = { provider_id = "openai", connection_id = "api",
   profile_id = "personal", import = true, revoke = true }
 read()
-assert(not failure and #methods.methods == 1)
+assert(not failure and #methods.methods == 3)
 local entry = methods.methods[1]
 assert(entry.provider_id == "openai" and entry.connection_id == "api")
 assert(entry.profile_id == "personal" and entry.kind == "ApiKey")
@@ -156,7 +161,7 @@ reported_status = "Authenticated"
 work_status = { Unavailable = { reason = "not verified" } }
 anthropic_status = "Authenticated"
 read()
-assert(not failure and #methods.methods == 3)
+assert(not failure and #methods.methods == 5)
 local by_id = {}
 for _, method in ipairs(methods.methods) do
   by_id[method.provider_id .. "/" .. method.profile_id] = method
@@ -175,5 +180,42 @@ runtime.authenticate({ provider_id = "openai", connection_id = "api",
   profile_id = "unauthorized", kind = "ApiKey" },
   "unauthorized-secret", function(v, e) result, problem = v, e end)
 assert(result == nil and problem and problem.kind == "denied")
+local oauth_polls = 0
+function client:begin_provider_auth(provider_id, connection_id, method_id, callback)
+  assert(provider_id == "openai" and connection_id == "chatgpt" and method_id == "oauth")
+  callback({ OpenBrowser = {
+    attempt_id = "authorized-attempt-1", url = "https://auth.example.test/login",
+  } }, nil)
+end
+function client:poll_provider_auth(provider_id, connection_id, attempt_id, callback)
+  assert(provider_id == "openai" and connection_id == "chatgpt")
+  assert(attempt_id == "authorized-attempt-1")
+  oauth_polls = oauth_polls + 1
+  if oauth_polls == 1 then
+    callback("Pending", nil)
+  else
+    callback({ Completed = { profile = {
+      id = "sso-user", label = "SSO user", method_id = "oauth",
+    } } }, nil)
+  end
+end
+local oauth_result, oauth_error
+runtime.authenticate({
+  provider_id = "openai", connection_id = "chatgpt",
+  method_id = "oauth", kind = "OAuthAuthorizationCode",
+}, nil, function(v, e) oauth_result, oauth_error = v, e end)
+assert(not oauth_error and oauth_result.kind == "openbrowser")
+assert(oauth_result.attempt_id == "authorized-attempt-1")
+runtime.poll_authentication(oauth_result, oauth_result.attempt_id,
+  function(v, e) oauth_result, oauth_error = v, e end)
+assert(not oauth_error and oauth_result.kind == "pending")
+runtime.poll_authentication({
+  provider_id = "openai", connection_id = "chatgpt",
+}, "authorized-attempt-1", function(v, e)
+  oauth_result, oauth_error = v, e
+end)
+assert(not oauth_error and oauth_result.kind == "authenticated"
+  and oauth_result.profile_id == "sso-user",
+  "only the completed provider attempt verifies OAuth authentication")
 runtime.disconnect()
-print("P1 scoped credential admission covers three named profiles")
+print("P1 scoped credentials and OAuth provider-owned attempt lifecycle verified")
