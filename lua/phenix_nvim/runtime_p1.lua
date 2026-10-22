@@ -521,18 +521,38 @@ function M.list_authentication_methods(callback)
                 and status.connection_id == group.connection_id
               then
                 for _, method in ipairs(groups[group.key]) do
-                  local matches = 0
+                  local matches, authenticated, duplicate = 0, 0, false
+                  local seen_profiles = {}
                   for _, profile in ipairs(status.profiles or {}) do
-                    if profile.id == method.profile_id
+                    if type(profile.id) == "string" and profile.id ~= ""
                       and profile.method_id == method.method_id
+                      -- API-key grant is one exact profile; OAuth methods
+                      -- have no preexisting profile and may legitimately
+                      -- return several separately verified accounts.
+                      and (method.profile_id == nil
+                        or profile.id == method.profile_id)
                     then
                       matches = matches + 1
-                      method.profiles[#method.profiles + 1] = vim.deepcopy(profile)
-                      method.authenticated = matches == 1
-                        and profile.status == "Authenticated"
+                      if seen_profiles[profile.id] then
+                        duplicate = true
+                      else
+                        seen_profiles[profile.id] = true
+                        method.profiles[#method.profiles + 1] = vim.deepcopy(profile)
+                      end
+                      if profile.status == "Authenticated" then
+                        authenticated = authenticated + 1
+                      end
                     end
                   end
-                  if matches ~= 1 then method.authenticated = false end
+                  if method.profile_id == nil then
+                    -- Summary only: at least one verified OAuth account on
+                    -- this connection, never proof for an arbitrary profile
+                    -- or a grant to submit a model with that account.
+                    method.authenticated = not duplicate and authenticated > 0
+                  else
+                    method.authenticated = not duplicate
+                      and matches == 1 and authenticated == 1
+                  end
                 end
               end
               read_status(index + 1)
