@@ -17,7 +17,7 @@ jobs:
       - uses: cachix/install-nix-action@v31
       - name: Probe exact runtime candidate and native client package
         env:
-          CANDIDATE: 55df52073b4fe97b886394c83c53042613676e5b
+          CANDIDATE: e63ed747e0b7b3c60de66b041d39c017c015fb8a
         run: |
           set -euo pipefail
           nix flake metadata --json --refresh "github:matthis-k/phenix-ai/$CANDIDATE" > "$RUNNER_TEMP/runtime-metadata.json"
