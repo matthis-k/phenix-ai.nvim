@@ -357,6 +357,10 @@ local function open_external_auth(result)
     return false
   end
   local instructions = result.instructions or result.prompt
+  if result.user_code ~= nil then
+    instructions = "Enter authorization code " .. tostring(result.user_code)
+      .. " in your browser."
+  end
   if instructions ~= nil and instructions ~= "" then
     util.notify(instructions, vim.log.levels.INFO)
   end
@@ -483,14 +487,65 @@ local function start_authentication(method, secret, callback)
       })
       return
     end
-    -- AuthChallenge has an attempt ID, but ProviderAuth::status currently
-    -- describes profiles, not challenge completion. Calling begin again is
-    -- NOT a status poll. A future runtime status/notification operation may
-    -- resume this attempt without creating a second OAuth challenge.
-    finish_authentication(callback, nil, {
-      kind = "pending",
-      message = "Authorization opened. Recheck Phenix authentication status after completing it.",
-    })
+    if type(result.attempt_id) ~= "string"
+      or type(runtime.poll_authentication) ~= "function" then
+      finish_authentication(callback, nil, {
+        kind = "protocol",
+        message = "The runtime cannot poll this authorization challenge",
+      })
+      return
+    end
+    -- Poll precisely this provider-owned attempt. Do not call begin() again,
+    -- and never mark a browser-open action as successful authentication.
+    local checks = 0
+    local last_challenge = tostring(result.url) .. "\0"
+      .. tostring(result.user_code or "")
+    local function poll()
+      if generation ~= auth_generation then return end
+      checks = checks + 1
+      if checks > 600 then
+        finish_authentication(callback, nil, {
+          kind = "expired", message = "Authorization did not complete",
+        })
+        return
+      end
+      runtime.poll_authentication(result, result.attempt_id,
+        function(status, problem)
+          if generation ~= auth_generation then return end
+          if problem then
+            finish_authentication(callback, nil, problem)
+            return
+          end
+          local state = authentication_kind(status)
+          if state == "authenticated" then
+            util.notify(identity.provider_id .. " authentication completed",
+              vim.log.levels.INFO)
+            finish_authentication(callback, status, nil)
+          elseif state == "pending" then
+            vim.defer_fn(poll, 1000)
+          elseif state == "awaiting_input" then
+            local challenge = tostring(status.url) .. "\0"
+              .. tostring(status.user_code or "")
+            if challenge ~= last_challenge then
+              if not open_external_auth(status) then
+                finish_authentication(callback, nil, {
+                  kind = "protocol",
+                  message = "Provider returned an unsafe authorization URL",
+                })
+                return
+              end
+              last_challenge = challenge
+            end
+            vim.defer_fn(poll, 1000)
+          else
+            finish_authentication(callback, nil, {
+              kind = state,
+              message = "Provider authorization " .. state,
+            })
+          end
+        end)
+    end
+    vim.defer_fn(poll, 1000)
   end)
 end
 
