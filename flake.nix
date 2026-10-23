@@ -292,7 +292,6 @@
               touch "$out"
             '';
         }
-        // pkgs.lib.optionalAttrs (builtins.hasAttr "phenix-basic-managed-acp" phenix-ai.packages.${system}) {
         // pkgs.lib.optionalAttrs (builtins.hasAttr "phenix-basic-p1-auth-acp" phenix-ai.packages.${system}) {
           p1-combined-auth-client = pkgs.runCommand "phenix-ai-nvim-p1-auth-auth-client"
             { nativeBuildInputs = [ pkgs.neovim ]; }
