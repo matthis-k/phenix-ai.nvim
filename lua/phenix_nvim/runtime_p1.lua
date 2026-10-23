@@ -454,6 +454,7 @@ function M.list_authentication_methods(callback)
                           provider_id = provider.id, provider_name = provider.label,
                           connection_id = connection.id, connection_name = connection.label,
                           method_id = method.id, label = method.label, kind = method.kind,
+                          environment_variable = method.environment_variable,
                           profile_id = account.profile_id,
                           authenticated = false, profiles = {},
                         }
