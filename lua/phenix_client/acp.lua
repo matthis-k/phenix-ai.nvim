@@ -192,6 +192,7 @@ function Backend:_response(frame)
       local provider_codes = {
         InvalidInput = true, Denied = true, NotFound = true,
         Unavailable = true, Conflict = true, AuthenticationRequired = true,
+        RemoteRevocationUnconfirmed = true,
       }
       if type(detail) == "table" and detail.format == "phenix.provider.error.v1"
         and provider_codes[detail.code] == true
