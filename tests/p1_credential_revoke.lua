@@ -57,6 +57,24 @@ command("auth", "revoke", "openai", "api", "work")
 assert(#notices == 1 and notices[1].level == vim.log.levels.ERROR)
 assert(not notices[1].message:find("revoked", 1, true))
 
+-- The provider explicitly confirms local credential removal but could
+-- not confirm remote token revocation. Never display "revoked" as success.
+runtime.revoke_credential = function(_, _, _, callback)
+  callback(nil, {
+    kind = "transport", provider_code = "RemoteRevocationUnconfirmed",
+    message = "Provider error body must not enter editor notifications",
+  })
+end
+notices = {}
+command("auth", "revoke", "openai", "chatgpt", "personal")
+assert(#notices == 1, vim.inspect(notices))
+assert(notices[1].level == vim.log.levels.WARN)
+assert(notices[1].message:find("removed locally", 1, true))
+assert(notices[1].message:find("remote sign%-out"))
+assert(notices[1].message:find("ChatGPT settings", 1, true))
+assert(not notices[1].message:find("Provider error body", 1, true))
+assert(not notices[1].message:find("Credential revoked:", 1, true))
+
 runtime.revoke_credential = old_revoke
 vim.ui.select = old_select
 util.notify = old_notify
