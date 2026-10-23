@@ -300,6 +300,14 @@
               nvim --headless -u NONE \
                 --cmd ${pkgs.lib.escapeShellArg "set rtp^=${self.packages.${system}.phenix-ai-nvim-chatgpt}"} \
                 -l ${source}/tests/p1_oauth_ux_journey.lua
+              export PHENIX_CREDENTIAL_FILE_CONSENT=1
+              export PHENIX_CREDENTIAL_FILE_DIRECTORY="$TMPDIR/oauth-vault"
+              export PHENIX_BASIC_SQLITE_PATH="$TMPDIR/chatgpt.sqlite"
+              export PHENIX_P1_CHATGPT_BIN="$runtime"
+              mkdir -p "$PHENIX_CREDENTIAL_FILE_DIRECTORY"
+              nvim --headless -u NONE \
+                --cmd ${pkgs.lib.escapeShellArg "set rtp^=${self.packages.${system}.phenix-ai-nvim-chatgpt}"} \
+                -l ${source}/tests/p1_chatgpt_native_auth_product.lua
               touch "$out"
             '';
         }
