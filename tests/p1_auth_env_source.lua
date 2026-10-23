@@ -14,20 +14,21 @@ local saved = {
   secret = util.input_secret,
   notify = util.notify,
 }
-local selected, bound, direct, notices, requested_input, mode, source
+local selected, bound, direct, notices, requested_input, requested_default, mode, source
+local methods = {{
+  provider_id = "openai", connection_id = "api",
+  method_id = "api-key", profile_id = "personal",
+  kind = "ApiKey", label = "API key",
+}}
 local function reset()
-  selected, bound, direct, notices, requested_input = {}, {}, {}, {}, nil
+  selected, bound, direct, notices, requested_input, requested_default = {}, {}, {}, {}, nil, nil
   mode = "authenticated"
   source = "Read from environment variable"
 end
 reset()
 runtime.p1_active = function() return false end
 runtime.list_authentication_methods = function(done)
-  done({ methods = {{
-    provider_id = "openai", connection_id = "api",
-    method_id = "api-key", profile_id = "personal",
-    kind = "ApiKey", label = "API key",
-  }} }, nil)
+  done({ methods = methods }, nil)
 end
 runtime.bind_auth_environment = function(identity, name, cb)
   bound[#bound + 1] = { identity = vim.deepcopy(identity), name = name }
@@ -44,6 +45,7 @@ auth_ui.select = function(items, opts, cb)
 end
 vim.ui.input = function(opts, done)
   requested_input = opts.prompt
+  requested_default = opts.default
   done("OPENAI_CUSTOM_KEY")
 end
 util.input_secret = function() error("Environment source must not ask for a key") end
@@ -58,7 +60,28 @@ assert(bound[1].identity.provider_id == "openai"
   and bound[1].identity.connection_id == "api"
   and bound[1].identity.profile_id == "personal")
 assert(requested_input == "Environment variable name: ")
+assert(requested_default == "", "unknown API-key providers must not default to OPENAI_API_KEY")
 assert(#notices == 1 and notices[1].message:find("authentication completed", 1, true))
+reset()
+methods = {{
+  provider_id = "anthropic", connection_id = "api",
+  method_id = "api-key", profile_id = "personal",
+  kind = "ApiKey", label = "API key",
+  environment_variable = "ANTHROPIC_API_KEY",
+}}
+actions.authenticate()
+assert(#bound == 1 and bound[1].identity.provider_id == "anthropic")
+assert(requested_default == "ANTHROPIC_API_KEY",
+  "authentication methods can provide their own environment hints")
+methods[1].environment_variable = "bad/name"
+reset()
+actions.authenticate()
+assert(requested_default == "", "invalid provider hint must not populate input")
+methods = {{
+  provider_id = "openai", connection_id = "api",
+  method_id = "api-key", profile_id = "personal",
+  kind = "ApiKey", label = "API key",
+}}
 reset()
 mode = "stored"
 actions.authenticate()
