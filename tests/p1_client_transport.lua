@@ -232,6 +232,38 @@ assert(nested_error.data == nil, "untrusted multiline provider data leaked to ca
 assert(not vim.inspect(nested_error):find("TOKEN=secret", 1, true),
   "UI inspection must never reveal untrusted error data")
 
+-- A typed OAuth sign-out result says local removal succeeded but the
+-- issuer's remote revocation could not be confirmed. Preserve only the
+-- enumerated provider code; never expose raw provider response text.
+local remote_logout
+sdk:revoke_credential("openai", "chatgpt", "personal", function(_, err)
+  remote_logout = err
+end)
+local request_id = sent[#sent].id
+assert(sent[#sent].method == "_phenix/credentials/revoke")
+receive({ jsonrpc = "2.0", id = request_id, error = {
+  code = -32602, message = "Invalid params",
+  data = {
+    format = "phenix.provider.error.v1",
+    code = "RemoteRevocationUnconfirmed",
+    message = "SECRET=untrusted-provider-body",
+  },
+} })
+assert(remote_logout and remote_logout.provider_code == "RemoteRevocationUnconfirmed")
+assert(remote_logout.message == "Phenix credential operation rejected")
+assert(not vim.inspect(remote_logout):find("SECRET=", 1, true))
+
+local forged_provider_error
+sdk:revoke_credential("openai", "chatgpt", "personal", function(_, err)
+  forged_provider_error = err
+end)
+receive({ jsonrpc = "2.0", id = sent[#sent].id, error = {
+  code = -32602, message = "Invalid params",
+  data = { format = "phenix.provider.error.v1", code = "ForgedRevocationSucceeded" },
+} })
+assert(forged_provider_error and forged_provider_error.provider_code == nil,
+  "undocumented provider error must not become an authoritative state")
+
 sdk:close()
 assert(killed)
 
