@@ -47,6 +47,20 @@ for _, provider in ipairs(page.providers or {}) do
   end
 end
 assert(has_api_key, "same ACP product must also advertise OpenAI API keys")
+-- A single ACP session must route both interactive methods through their
+-- separate provider-owned states; no key material is ever supplied here.
+local api_challenge = await(function(cb)
+  client:begin_provider_auth("openai", "api", "api-key", cb)
+end, "begin API key")
+local api_input = assert(api_challenge.ApiKeyInput, "expected API key input")
+assert(type(api_input.attempt_id) == "string" and api_input.attempt_id ~= "")
+local api_cancel = await(function(cb)
+  client:cancel_provider_auth("openai", "api", api_input.attempt_id, cb)
+end, "cancel API key")
+assert(api_cancel == "Cancelled")
+await(function(cb)
+  client:poll_provider_auth("openai", "api", api_input.attempt_id, cb)
+end, "reuse cancelled API-key challenge", true)
 local before = await(function(cb)
   client:get_provider_auth_status("openai", "chatgpt", cb)
 end, "initial status")
