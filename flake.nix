@@ -272,6 +272,16 @@
               nvim --headless -u NONE \
                 --cmd ${pkgs.lib.escapeShellArg "set rtp^=${self.packages.${system}.phenix-ai-nvim-openai-api}"} \
                 -l ${source}/tests/p1_scoped_credential_ui.lua
+              # Exercise the packaged native provider, not only mocked Lua dialogs.
+              # The deterministic HTTP streaming product remains in phenix-ai CI.
+              export PHENIX_BASIC_SQLITE_PATH="$TMPDIR/native-openai-api.sqlite"
+              export PHENIX_CREDENTIAL_FILE_CONSENT=1
+              export PHENIX_CREDENTIAL_FILE_DIRECTORY="$TMPDIR/provider-credentials"
+              export PHENIX_P1_OPENAI_API_BIN="$runtime"
+              mkdir -p "$PHENIX_CREDENTIAL_FILE_DIRECTORY"
+              nvim --headless -u NONE \
+                --cmd ${pkgs.lib.escapeShellArg "set rtp^=${self.packages.${system}.phenix-ai-nvim-openai-api}"} \
+                -l ${source}/tests/p1_openai_api_package_product.lua
               touch "$out"
             '';
         }
