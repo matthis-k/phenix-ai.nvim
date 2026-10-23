@@ -438,7 +438,9 @@ local function finish_authentication(callback, value, problem)
     util.safe_call(callback, value, problem)
   elseif problem ~= nil then
     util.notify(problem.message or vim.inspect(problem),
-      problem.kind == "pending" and vim.log.levels.INFO or vim.log.levels.ERROR)
+      problem.kind == "pending" and vim.log.levels.INFO
+        or (problem.kind == "remote_revocation_unconfirmed"
+          and vim.log.levels.WARN or vim.log.levels.ERROR))
   end
 end
 
@@ -840,7 +842,18 @@ function M.revoke_credential(provider_id, connection_id, profile_id, callback)
     runtime.revoke_credential(provider_id, connection_id, profile_id,
       function(value, problem)
         if problem then
-          finish_authentication(callback, nil, problem)
+          if connection_id == "chatgpt"
+            and problem.provider_code == "RemoteRevocationUnconfirmed"
+          then
+            finish_authentication(callback, nil, {
+              kind = "remote_revocation_unconfirmed",
+              provider_code = "RemoteRevocationUnconfirmed",
+              message = "ChatGPT credentials were removed locally, but remote sign-out "
+                .. "could not be confirmed. Disconnect the session in ChatGPT settings.",
+            })
+          else
+            finish_authentication(callback, nil, problem)
+          end
           return
         end
         if not value or value.revoked ~= true then
