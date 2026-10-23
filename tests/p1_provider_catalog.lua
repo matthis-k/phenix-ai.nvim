@@ -25,7 +25,8 @@ transport:_response({
   result = { revision = 7, providers = {
     { id = "openai", label = "OpenAI", connections = {
       { id = "api", label = "OpenAI API", auth_methods = {
-        { id = "api-key", label = "API key", kind = "ApiKey" },
+        { id = "api-key", label = "API key", kind = "ApiKey",
+          environment_variable = "OPENAI_API_KEY" },
       } },
       { id = "chatgpt", label = "ChatGPT", auth_methods = {
         { id = "oauth", label = "OAuth", kind = "OAuthAuthorizationCode" },
@@ -35,6 +36,8 @@ transport:_response({
 })
 assert(not catalog_error and catalog.revision == 7)
 assert(catalog.providers[1].connections[1].auth_methods[1].kind == "ApiKey")
+assert(catalog.providers[1].connections[1].auth_methods[1].environment_variable
+  == "OPENAI_API_KEY", "ACP SDK must preserve nonsecret auth strategy hints")
 assert(catalog.providers[1].connections[2].auth_methods[1].kind == "OAuthAuthorizationCode")
 assert(not client:capabilities().management.providers,
   "read-only capability probe must not invent authentication readiness")

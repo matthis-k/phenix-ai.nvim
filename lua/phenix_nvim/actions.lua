@@ -664,9 +664,16 @@ local function authenticate_method(method, callback)
         })
         return
       end
+      -- The authentication strategy can advertise a provider-specific
+      -- variable hint. Never assume OpenAI's variable for other providers.
+      local suggested = method.environment_variable
+      if type(suggested) ~= "string" or #suggested > 128
+        or not suggested:match("^[A-Z_][A-Z0-9_]*$") then
+        suggested = ""
+      end
       vim.ui.input({
         prompt = "Environment variable name: ",
-        default = "OPENAI_API_KEY",
+        default = suggested,
       }, function(name)
         if generation ~= auth_generation then return end
         if name == nil then

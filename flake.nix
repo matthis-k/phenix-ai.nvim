@@ -33,7 +33,7 @@
           # No change to default Basic: expose this only when the pinned
           # runtime actually provides the independently authorized preset.
           hasOpenAiApi = builtins.hasAttr "phenix-basic-openai-api-acp" phenix-ai.packages.${system};
-          hasChatGpt = builtins.hasAttr "phenix-basic-chatgpt-acp" phenix-ai.packages.${system};
+          hasP1Auth = builtins.hasAttr "phenix-basic-p1-auth-acp" phenix-ai.packages.${system};
           realAcp = phenix-ai.packages.${system}.phenix-basic-http-acp;
           # Package each P1 composition with the same Neovim client.
           # No native oldmain Lua module is installed in either product.
@@ -59,9 +59,9 @@
           openAiApiPlugin = mkP1Plugin "phenix-ai.nvim-openai-api"
             phenix-ai.packages.${system}.phenix-basic-openai-api-acp
             "phenix-basic-openai-api-acp";
-          chatGptPlugin = mkP1Plugin "phenix-ai.nvim-chatgpt"
-            phenix-ai.packages.${system}.phenix-basic-chatgpt-acp
-            "phenix-basic-chatgpt-acp";
+          p1AuthPlugin = mkP1Plugin "phenix-ai.nvim-p1-auth"
+            phenix-ai.packages.${system}.phenix-basic-p1-auth-acp
+            "phenix-basic-p1-auth-acp";
           realPrompt = pkgs.writeShellApplication {
             name = "phenix-p1-live-prompt";
             runtimeInputs = [ pkgs.neovim ];
@@ -89,8 +89,8 @@
         // pkgs.lib.optionalAttrs hasOpenAiApi {
           phenix-ai-nvim-openai-api = openAiApiPlugin;
         }
-        // pkgs.lib.optionalAttrs hasChatGpt {
-          phenix-ai-nvim-chatgpt = chatGptPlugin;
+        // pkgs.lib.optionalAttrs hasP1Auth {
+          phenix-ai-nvim-p1-auth = p1AuthPlugin;
         }
         // pkgs.lib.optionalAttrs (builtins.hasAttr "phenix-basic-http-acp" phenix-ai.packages.${system}) {
           phenix-ai-nvim-live = realPlugin;
@@ -279,16 +279,27 @@
               nvim --headless -u NONE \
                 --cmd ${pkgs.lib.escapeShellArg "set rtp^=${self.packages.${system}.phenix-ai-nvim-openai-api}"} \
                 -l ${source}/tests/p1_scoped_credential_ui.lua
+              # Exercise the packaged native provider, not only mocked Lua dialogs.
+              # The deterministic HTTP streaming product remains in phenix-ai CI.
+              export PHENIX_BASIC_SQLITE_PATH="$TMPDIR/native-openai-api.sqlite"
+              export PHENIX_CREDENTIAL_FILE_CONSENT=1
+              export PHENIX_CREDENTIAL_FILE_DIRECTORY="$TMPDIR/provider-credentials"
+              export PHENIX_P1_OPENAI_API_BIN="$runtime"
+              mkdir -p "$PHENIX_CREDENTIAL_FILE_DIRECTORY"
+              nvim --headless -u NONE \
+                --cmd ${pkgs.lib.escapeShellArg "set rtp^=${self.packages.${system}.phenix-ai-nvim-openai-api}"} \
+                -l ${source}/tests/p1_openai_api_package_product.lua
               touch "$out"
             '';
         }
-        // pkgs.lib.optionalAttrs (builtins.hasAttr "phenix-basic-chatgpt-acp" phenix-ai.packages.${system}) {
-          p1-chatgpt-auth-client = pkgs.runCommand "phenix-ai-nvim-chatgpt-auth-client"
+        // pkgs.lib.optionalAttrs (builtins.hasAttr "phenix-basic-managed-acp" phenix-ai.packages.${system}) {
+        // pkgs.lib.optionalAttrs (builtins.hasAttr "phenix-basic-p1-auth-acp" phenix-ai.packages.${system}) {
+          p1-combined-auth-client = pkgs.runCommand "phenix-ai-nvim-p1-auth-auth-client"
             { nativeBuildInputs = [ pkgs.neovim ]; }
             ''
               set -euo pipefail
-              plugin="${self.packages.${system}.phenix-ai-nvim-chatgpt}"
-              runtime="${phenix-ai.packages.${system}.phenix-basic-chatgpt-acp}/bin/phenix-basic-chatgpt-acp"
+              plugin="${self.packages.${system}.phenix-ai-nvim-p1-auth}"
+              runtime="${phenix-ai.packages.${system}.phenix-basic-p1-auth-acp}/bin/phenix-basic-p1-auth-acp"
               test -x "$runtime"
               test ! -e "$plugin/lua/phenix.so"
               grep -F "$runtime" "$plugin/lua/phenix_nvim/config.lua"
@@ -298,7 +309,7 @@
               export XDG_STATE_HOME="$TMPDIR/state"
               mkdir -p "$HOME" "$XDG_STATE_HOME"
               nvim --headless -u NONE \
-                --cmd ${pkgs.lib.escapeShellArg "set rtp^=${self.packages.${system}.phenix-ai-nvim-chatgpt}"} \
+                --cmd ${pkgs.lib.escapeShellArg "set rtp^=${self.packages.${system}.phenix-ai-nvim-p1-auth}"} \
                 -l ${source}/tests/p1_oauth_ux_journey.lua
               export PHENIX_CREDENTIAL_FILE_CONSENT=1
               export PHENIX_CREDENTIAL_FILE_DIRECTORY="$TMPDIR/oauth-vault"
@@ -306,7 +317,7 @@
               export PHENIX_P1_CHATGPT_BIN="$runtime"
               mkdir -p "$PHENIX_CREDENTIAL_FILE_DIRECTORY"
               nvim --headless -u NONE \
-                --cmd ${pkgs.lib.escapeShellArg "set rtp^=${self.packages.${system}.phenix-ai-nvim-chatgpt}"} \
+                --cmd ${pkgs.lib.escapeShellArg "set rtp^=${self.packages.${system}.phenix-ai-nvim-p1-auth}"} \
                 -l ${source}/tests/p1_chatgpt_native_auth_product.lua
               touch "$out"
             '';

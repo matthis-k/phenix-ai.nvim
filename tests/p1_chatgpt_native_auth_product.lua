@@ -34,6 +34,19 @@ for _, provider in ipairs(page.providers or {}) do
   end
 end
 assert(method and method.id == "chatgpt-sign-in", "ChatGPT OAuth is not installed")
+local has_api_key = false
+for _, provider in ipairs(page.providers or {}) do
+  if provider.id == "openai" then
+    for _, connection in ipairs(provider.connections or {}) do
+      if connection.id == "api" then
+        for _, auth in ipairs(connection.auth_methods or {}) do
+          if auth.kind == "ApiKey" then has_api_key = true end
+        end
+      end
+    end
+  end
+end
+assert(has_api_key, "same ACP product must also advertise OpenAI API keys")
 local before = await(function(cb)
   client:get_provider_auth_status("openai", "chatgpt", cb)
 end, "initial status")
