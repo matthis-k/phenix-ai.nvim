@@ -315,6 +315,9 @@
               export PHENIX_BASIC_SQLITE_PATH="$TMPDIR/chatgpt.sqlite"
               export PHENIX_P1_CHATGPT_BIN="$runtime"
               mkdir -p "$PHENIX_CREDENTIAL_FILE_DIRECTORY"
+              # The credential-files backend deliberately rejects directories
+              # with group/other access; mkdir's default 0755 is not safe.
+              chmod 0700 "$PHENIX_CREDENTIAL_FILE_DIRECTORY"
               nvim --headless -u NONE \
                 --cmd ${pkgs.lib.escapeShellArg "set rtp^=${self.packages.${system}.phenix-ai-nvim-p1-auth}"} \
                 -l ${source}/tests/p1_chatgpt_native_auth_product.lua
