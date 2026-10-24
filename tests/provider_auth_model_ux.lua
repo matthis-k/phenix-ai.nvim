@@ -5,6 +5,7 @@ local runtime = require("phenix_nvim.runtime")
 local util = require("phenix_nvim.util")
 local originals = {
   list_authentication_methods = runtime.list_authentication_methods,
+  list_providers = runtime.list_providers,
   authenticate = runtime.authenticate,
   list_selections = runtime.list_selections,
   select = runtime.select,
@@ -24,6 +25,18 @@ local selected_model
 runtime.p1_active = function() return false end
 runtime.list_authentication_methods = function(cb)
   cb({ methods = vim.deepcopy(methods) }, nil)
+end
+runtime.list_providers = function(cb)
+  local providers, by_id = {}, {}
+  for _, method in ipairs(methods) do
+    local id = method.provider_id or method.provider
+    if type(id) == "string" and id ~= "" and not by_id[id] then
+      local item = { id = id, label = method.provider_name or id, connections = {} }
+      by_id[id] = item
+      providers[#providers + 1] = item
+    end
+  end
+  cb({ revision = 1, providers = providers }, nil)
 end
 runtime.authenticate = function(identity, secret, cb)
   calls[#calls + 1] = { identity = vim.deepcopy(identity), secret = secret }
@@ -54,7 +67,7 @@ methods = {
 actions.authenticate()
 assert(#prompts == 2, "provider selection and API-key source only")
 assert(prompts[1] == "Phenix provider")
-assert(#chosen_items[1] == 2 and chosen_items[1][1] == "anthropic")
+assert(#chosen_items[1] == 2 and chosen_items[1][1].id == "anthropic")
 assert(chosen_items[2][1] == "Enter API key",
   "API-key source picker must not be confused with auth method selection")
 assert(#calls == 1 and calls[1].identity.provider_id == "anthropic"
@@ -70,9 +83,10 @@ methods = {
   { provider = "openai", connection_id = "subscription", provider_name = "OpenAI", id = "oauth", kind = "oauth", name = "ChatGPT" },
 }
 actions.authenticate()
-assert(#prompts == 2 and prompts[1] == "Authenticate OpenAI",
-  "single-provider multiple methods must skip redundant provider picker")
-assert(#chosen_items[1] == 2)
+assert(#prompts == 3 and prompts[1] == "Phenix provider (declared, not authenticated)"
+  and prompts[2] == "Authenticate OpenAI",
+  "even one declared provider must be shown before selecting its methods")
+assert(#chosen_items[2] == 2)
 assert(vim.tbl_contains(vim.tbl_map(function(item)
   return item.connection_id
 end, chosen_items[1]), "subscription"), "OAuth connection must remain distinct")
@@ -89,11 +103,11 @@ methods = {
     kind = "api_token", name = "Work key" },
 }
 actions.authenticate()
-assert(#chosen_items == 2 and #chosen_items[1] == 2,
+assert(#chosen_items == 3 and #chosen_items[2] == 2,
   "same-method different-connection entries must both remain selectable")
-assert(chosen_items[1][1].connection_id ~= chosen_items[1][2].connection_id)
-assert(rendered_labels[1][1]:find("personal", 1, true)
-  and rendered_labels[1][2]:find("work", 1, true),
+assert(chosen_items[2][1].connection_id ~= chosen_items[2][2].connection_id)
+assert(rendered_labels[2][1]:find("personal", 1, true)
+  and rendered_labels[2][2]:find("work", 1, true),
   "credential choices must show their different connection identities")
 assert(#calls == 1 and calls[1].identity.connection_id == "personal"
   and calls[1].identity.method_id == "api-key")
@@ -154,9 +168,10 @@ reset()
 methods = { { provider_id = "openrouter", connection_id = "api",
   method_id = "api-key", kind = "ApiKey", label = "API key" } }
 actions.authenticate()
-assert(#prompts == 1 and #chosen_items == 1
-  and prompts[1]:find("API key source", 1, true),
-  "one method skips provider/method pickers but still chooses API-key source")
+assert(#prompts == 2 and #chosen_items == 2
+  and prompts[1] == "Phenix provider (declared, not authenticated)"
+  and prompts[2]:find("API key source", 1, true),
+  "one method still displays its declared provider before choosing API source")
 assert(#calls == 1 and calls[1].identity.provider_id == "openrouter"
   and calls[1].identity.method_id == "api-key")
 assert(calls[1].secret == "fake-key-from-ui")
@@ -267,6 +282,8 @@ actions.choose_selection()
 assert(fallback == 1 and #prompts == 0,
   "P1 fallback must only use the ACP model picker when auth is unsupported")
 runtime.choose_model = original_choose_model
+methods = { { provider_id = "openai", connection_id = "api",
+  method_id = "key", kind = "ApiKey" } }
 
 -- The installed Basic preset advertises auth as unsupported. The command
 -- should report a missing capability, not a failed login or credential prompt.
@@ -279,8 +296,8 @@ actions.authenticate()
 assert(#notices == 1 and notices[1].level == vim.log.levels.WARN
   and notices[1].message:find("auth", 1, true),
   "unsupported runtime authentication must be a clear warning")
-assert(#calls == 0 and #prompts == 0,
-  "unsupported runtime authentication must not request a credential")
+assert(#calls == 0 and #prompts == 1,
+  "unsupported credential methods must not request a secret")
 
 -- With the P1 credential extension, account selection is explicit and
 -- a stored key is never presented as provider-verified login.
