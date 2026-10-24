@@ -258,30 +258,50 @@ assert(selected_model == "ready",
 runtime.list_selections = saved_list_selections
 methods = {}
 
--- The installed P1 frontend must adopt provider-first selection once
--- runtime management is available. Before that, retain the standard ACP
--- picker when authentication methods are explicitly unsupported.
+-- ACP P1 advertises exact session model IDs and display names but never
+-- provides provider/account/readiness metadata on those options. Even when
+-- the combined auth runtime advertises methods, :Phenix model must use the
+-- validated ACP session picker, not the synthetic application picker.
 runtime.p1_active = function() return true end
+local original_choose_model = runtime.choose_model
+local original_list_methods = runtime.list_authentication_methods
+local original_list_selections = runtime.list_selections
+local chosen_from_acp, preflights = 0, 0
+runtime.choose_model = function(cb)
+  chosen_from_acp = chosen_from_acp + 1
+  cb({ selected = "phenix.native-model@1:opaque-account-bound-choice" }, nil)
+end
+runtime.list_authentication_methods = function()
+  preflights = preflights + 1
+  error("P1 model picker must not preflight auth methods instead of ACP models")
+end
+runtime.list_selections = function()
+  error("P1 must not synthesize provider readiness from ACP model labels")
+end
 reset()
-selected_model = nil
 actions.choose_selection()
-assert(selected_model == "account-one" and #prompts == 3,
-  "P1 management-capable runtime bypassed provider-first model choice")
+assert(chosen_from_acp == 1 and preflights == 0 and #prompts == 0,
+  "combined authenticated P1 model selection did not use ACP session picker")
 
-local fallback = 0
+-- A runtime without an active session must refuse the picker cleanly.
+local missing_session_notices = {}
+local previous_notify = util.notify
+util.notify = function(message, level)
+  missing_session_notices[#missing_session_notices + 1] = { message = message, level = level }
+end
+runtime.choose_model = function(cb)
+  cb(nil, { kind = "not_found", message = "Create a Phenix session with :Phenix new before choosing a model" })
+end
+actions.choose_selection()
+assert(#missing_session_notices == 1
+  and missing_session_notices[1].message:find(":Phenix new", 1, true),
+  "P1 session prerequisite must be actionable, not a hidden model picker")
+util.notify = previous_notify
+runtime.choose_model = original_choose_model
 runtime.list_authentication_methods = function(cb)
   cb(nil, { kind = "unsupported", message = "auth not installed" })
 end
-local original_choose_model = runtime.choose_model
-runtime.choose_model = function(cb)
-  fallback = fallback + 1
-  cb({ selected = "phenix.model.scripted" }, nil)
-end
-reset()
-actions.choose_selection()
-assert(fallback == 1 and #prompts == 0,
-  "P1 fallback must only use the ACP model picker when auth is unsupported")
-runtime.choose_model = original_choose_model
+runtime.list_selections = original_list_selections
 methods = { { provider_id = "openai", connection_id = "api",
   method_id = "key", kind = "ApiKey" } }
 
