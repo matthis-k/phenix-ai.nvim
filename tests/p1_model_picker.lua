@@ -39,6 +39,18 @@ picker.choose_model(client, "selected-session", function(value, err)
   selected = value
 end)
 assert(#selected_options == 2, "picker must render runtime catalog")
+
+-- The embedding frontend can supply a native modal without taking over SDK
+-- model selection or its authorization checks.
+local embedded_called = false
+picker.choose_model(client, "selected-session", function(value, err)
+  assert(not err and value.selected == "provider/one")
+end, function(items, opts, cb)
+  embedded_called = true
+  assert(opts.prompt == "Phenix model" and #items == 2)
+  cb(items[1])
+end)
+assert(embedded_called, "frontend picker injection must work")
 assert(selected.selected == "provider/two" and requested == "provider/two")
 
 -- A rejection must propagate to the UI without claiming an optimistic change.
