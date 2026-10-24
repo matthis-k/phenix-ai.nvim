@@ -901,6 +901,7 @@ function M.authenticate()
       util.notify("No declared Phenix providers are installed", vim.log.levels.WARN)
       return
     end
+    table.sort(providers, function(a, b) return a.id < b.id end)
     -- Always show the catalog, even for a single provider or with no
     -- authenticated accounts. This is a provider *selection*, not login.
     auth_ui.select(providers, {
