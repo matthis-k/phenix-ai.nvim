@@ -66,7 +66,7 @@ methods = {
 }
 actions.authenticate()
 assert(#prompts == 2, "provider selection and API-key source only")
-assert(prompts[1] == "Phenix provider")
+assert(prompts[1] == "Phenix provider (declared, not authenticated)")
 assert(#chosen_items[1] == 2 and chosen_items[1][1].id == "anthropic")
 assert(chosen_items[2][1] == "Enter API key",
   "API-key source picker must not be confused with auth method selection")
