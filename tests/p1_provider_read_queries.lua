@@ -99,6 +99,8 @@ transport:_response({ jsonrpc = "2.0", id = outgoing.id,
   } },
 })
 assert(models == nil and models_error.provider_code == "AuthenticationRequired")
+assert(models_error.message:find("not authenticated", 1, true),
+  "typed provider domain denial must not appear as generic Invalid params")
 assert(not tostring(models_error.message):find("MALICIOUS_PROVIDER_BODY", 1, true))
 
 client:get_provider_models("openai", "api", { profile_id = "personal", limit = 2 },
