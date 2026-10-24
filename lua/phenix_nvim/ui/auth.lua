@@ -7,6 +7,22 @@ local function native_available()
   return vim.api and vim.api.nvim_list_uis and #vim.api.nvim_list_uis() > 0
 end
 
+-- Keep Phenix's interactive surface above existing editor floats (including
+-- plugin overlays with a higher-than-default zindex). Neovim's default float
+-- layer is 50; a plain new floating window need not appear on top.
+local function next_modal_zindex()
+  local highest = 299
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    local ok, config = pcall(vim.api.nvim_win_get_config, win)
+    if ok and config.relative and config.relative ~= "" then
+      if type(config.zindex) == "number" then
+        highest = math.max(highest, config.zindex)
+      end
+    end
+  end
+  return highest + 1
+end
+
 local function create_surface(title, lines, width)
   local origin = vim.api.nvim_get_current_win()
   local buffer = vim.api.nvim_create_buf(false, true)
@@ -30,6 +46,7 @@ local function create_surface(title, lines, width)
     row = math.max(0, math.floor((vim.o.lines - height - 2) / 2)),
     col = math.max(0, math.floor((vim.o.columns - width) / 2)),
     noautocmd = false,
+    zindex = next_modal_zindex(),
   })
   vim.wo[win].wrap = false
   vim.wo[win].number = false
