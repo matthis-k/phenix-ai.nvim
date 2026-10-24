@@ -224,6 +224,25 @@ function Backend:_response(frame)
       then
         message = detail
       end
+      -- The native controller encodes typed provider-domain denials as
+      -- JSON-RPC -32602. The SDK's generic "Invalid params" is not a
+      -- useful authentication diagnosis and can conceal a missing grant,
+      -- absent account or unavailable issuer. Use only an allowlisted
+      -- domain code, never provider-supplied prose or error.data.message.
+      local safe_provider_messages = {
+        InvalidInput = "Provider rejected the authentication request; reopen :Phenix auth and retry",
+        Denied = "Provider operation denied; check that the P1 authentication preset is installed and authorized",
+        NotFound = "Selected provider, account or authentication attempt was not found",
+        Unavailable = "Provider authentication is unavailable; check the credential backend and provider connection",
+        Conflict = "Provider authentication state changed; restart :Phenix auth",
+        AuthenticationRequired = "The selected account is not authenticated; use :Phenix auth",
+        RemoteRevocationUnconfirmed = "Credentials removed locally; remote sign-out could not be confirmed",
+      }
+      if frame.error.code == -32602 and provider_code ~= nil then
+        message = safe_provider_messages[provider_code]
+      elseif frame.error.code == -32602 and message == "Invalid params" then
+        message = "Phenix rejected the request parameters; verify the selected runtime preset and retry"
+      end
       finish(callback, nil, {
         kind = "remote", message = message,
         code = frame.error.code, basic_code = basic_code,
