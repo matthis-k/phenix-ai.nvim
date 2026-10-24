@@ -89,7 +89,7 @@ assert(#prompts == 3 and prompts[1] == "Phenix provider (declared, not authentic
 assert(#chosen_items[2] == 2)
 assert(vim.tbl_contains(vim.tbl_map(function(item)
   return item.connection_id
-end, chosen_items[1]), "subscription"), "OAuth connection must remain distinct")
+end, chosen_items[2]), "subscription"), "OAuth connection must remain distinct")
 assert(calls[1].identity.method_id == "api"
   and calls[1].identity.connection_id == "api")
 
