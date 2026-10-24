@@ -94,6 +94,12 @@ read()
 assert(not failure and #methods.methods == 2,
   "invalid-params credential query cannot hide declared OAuth methods")
 capability_failure = false
+grant = { provider_id = "anthropic", connection_id = "api", profile_id = "team",
+  import = false, revoke = true }
+read()
+assert(not failure and #methods.methods == 2,
+  "revoke-only grants must not expose API-key import as an auth option")
+grant = nil
 for _, method in ipairs(methods.methods) do
   assert(method.kind == "OAuthAuthorizationCode")
 end
