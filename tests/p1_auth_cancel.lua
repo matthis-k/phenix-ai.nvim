@@ -6,6 +6,8 @@ local util = require("phenix_nvim.util")
 local actions = require("phenix_nvim.actions")
 local original = {
   methods = runtime.list_authentication_methods,
+  providers = runtime.list_providers,
+  select = ui.select,
   authenticate = runtime.authenticate,
   poll = runtime.poll_authentication,
   cancel = runtime.cancel_authentication,
@@ -29,6 +31,19 @@ reset()
 
 runtime.list_authentication_methods = function(callback)
   callback({ methods = { vim.deepcopy(method) } }, nil)
+end
+runtime.list_providers = function(callback)
+  callback({ revision = 1, providers = {{
+    id = "openai", label = "OpenAI",
+    connections = {{ id = "chatgpt", auth_methods = {
+      { id = "oauth", kind = "OAuthAuthorizationCode" },
+    } }},
+  }} }, nil)
+end
+ui.select = function(items, options, callback)
+  assert(options.prompt == "Phenix provider (declared, not authenticated)")
+  assert(#items == 1 and items[1].id == "openai")
+  callback(items[1])
 end
 runtime.authenticate = function(identity, secret, callback)
   assert(secret == nil, "OAuth must not ask Lua for a secret")
@@ -97,6 +112,8 @@ assert(#tasks == 0)
 
 for name, value in pairs(original) do
   if name == "methods" then runtime.list_authentication_methods = value
+  elseif name == "providers" then runtime.list_providers = value
+  elseif name == "select" then ui.select = value
   elseif name == "authenticate" then runtime.authenticate = value
   elseif name == "poll" then runtime.poll_authentication = value
   elseif name == "cancel" then runtime.cancel_authentication = value

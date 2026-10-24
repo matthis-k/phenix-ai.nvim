@@ -149,6 +149,32 @@ transport:_response({ jsonrpc = "2.0", id = outgoing.id, result = {
   import = true, revoke = true,
 } })
 assert(not problem and granted.profile_id == "personal")
+-- The combined runtime advertises multiple launcher-granted accounts.
+-- ChatGPT logout is revoke-only, never an API-key import authority.
+client:credential_capabilities(function(value, err) granted, problem = value, err end)
+transport:_response({ jsonrpc = "2.0", id = outgoing.id, result = {
+  profiles = {
+    { provider_id = "openai", connection_id = "api", profile_id = "personal",
+      import = true, revoke = true },
+    { provider_id = "openai", connection_id = "chatgpt", profile_id = "personal",
+      import = false, revoke = true },
+  },
+} })
+assert(not problem and #granted.profiles == 2)
+assert(granted.profiles[2].import == false and granted.profiles[2].revoke == true)
+
+client:credential_capabilities(function(value, err) granted, problem = value, err end)
+transport:_response({ jsonrpc = "2.0", id = outgoing.id, result = {
+  profiles = {
+    { provider_id = "openai", connection_id = "api", profile_id = "personal",
+      import = true, revoke = true },
+    { provider_id = "openai", connection_id = "api", profile_id = "personal",
+      import = false, revoke = true },
+  },
+} })
+assert(granted == nil and problem.kind == "protocol",
+  "duplicate exact credential grants cannot be treated as separate identities")
+
 client:credential_capabilities(function(value, err) granted, problem = value, err end)
 transport:_response({ jsonrpc = "2.0", id = outgoing.id, result = {
   provider_id = "openai", connection_id = "api",

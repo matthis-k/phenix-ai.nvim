@@ -1,6 +1,7 @@
 -- P1 offers API-key UI only for a launcher-admitted account, not
 -- because a provider is registered or a key is already stored.
 local grant
+local capability_failure = false
 local listed = 0
 local imported = {}
 local client = {}
@@ -10,7 +11,9 @@ function client:start(callback)
 end
 function client:close() end
 function client:credential_capabilities(callback)
-  if not grant then
+  if capability_failure then
+    callback(nil, { kind = "remote", code = -32602, message = "Invalid params" })
+  elseif not grant then
     callback(nil, { kind = "unsupported", message = "no authorized credential manager" })
   else
     callback(vim.deepcopy(grant), nil)
@@ -86,6 +89,17 @@ read()
 assert(not failure and #methods.methods == 2,
   "OAuth methods must not require an API-key credential grant")
 assert(listed == 1)
+capability_failure = true
+read()
+assert(not failure and #methods.methods == 2,
+  "invalid-params credential query cannot hide declared OAuth methods")
+capability_failure = false
+grant = { provider_id = "anthropic", connection_id = "api", profile_id = "team",
+  import = false, revoke = true }
+read()
+assert(not failure and #methods.methods == 2,
+  "revoke-only grants must not expose API-key import as an auth option")
+grant = nil
 for _, method in ipairs(methods.methods) do
   assert(method.kind == "OAuthAuthorizationCode")
 end

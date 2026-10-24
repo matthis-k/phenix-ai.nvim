@@ -869,77 +869,72 @@ function M.revoke_credential(provider_id, connection_id, profile_id, callback)
 end
 
 function M.authenticate()
-  if type(runtime.list_authentication_methods) ~= "function" or type(runtime.authenticate) ~= "function" then
-    util.notify("The installed Phenix runtime does not expose application authentication yet", vim.log.levels.WARN)
+  if type(runtime.list_providers) ~= "function"
+    or type(runtime.list_authentication_methods) ~= "function"
+    or type(runtime.authenticate) ~= "function"
+  then
+    util.notify("The installed Phenix runtime does not expose application authentication yet",
+      vim.log.levels.WARN)
     return
   end
   auth_generation = auth_generation + 1
   cancel_active_oauth()
   local generation = auth_generation
-  runtime.list_authentication_methods(function(result, problem)
-    if generation ~= auth_generation then
-      return
-    end
-    if problem ~= nil then
-      -- Unsupported is a declared runtime capability, not a broken login.
-      local level = problem.kind == "unsupported" and vim.log.levels.WARN or vim.log.levels.ERROR
-      util.notify(problem.message or vim.inspect(problem), level)
-      return
-    end
-    local methods = vim.deepcopy(result and result.methods or {})
-    if #methods == 0 then
-      util.notify("No Phenix authentication methods are available", vim.log.levels.WARN)
-      return
-    end
-    -- One offered method needs no provider or method dialog. The actual
-    -- credential input/browser challenge still comes from its declared kind.
-    if #methods == 1 then
-      authenticate_method(methods[1])
+  -- Discovery must precede credential capabilities and account status.
+  -- An unconfigured account must never prevent the declared provider picker.
+  runtime.list_providers(function(result, problem)
+    if generation ~= auth_generation then return end
+    if problem then
+      util.notify(problem.message or vim.inspect(problem),
+        problem.kind == "unsupported" and vim.log.levels.WARN or vim.log.levels.ERROR)
       return
     end
     local providers = {}
-    local seen = {}
-    for _, method in ipairs(methods) do
-      local id = authentication_provider_id(method)
-      if type(id) == "string" and id ~= "" and not seen[id] then
-        seen[id] = true
-        providers[#providers + 1] = id
+    for _, provider in ipairs(result and result.providers or {}) do
+      if type(provider) == "table" and type(provider.id) == "string"
+        and provider.id ~= "" and type(provider.connections) == "table"
+      then
+        providers[#providers + 1] = provider
       end
     end
-    table.sort(providers)
     if #providers == 0 then
-      util.notify("Phenix did not advertise a valid authentication provider", vim.log.levels.ERROR)
+      util.notify("No declared Phenix providers are installed", vim.log.levels.WARN)
       return
     end
-    local function choose_provider(provider)
-      if generation ~= auth_generation or provider == nil then
-        return
-      end
-      local offered = {}
-      local provider_name = provider
-      for _, method in ipairs(methods) do
-        if authentication_provider_id(method) == provider then
-          offered[#offered + 1] = method
-          provider_name = method.provider_name or provider_name
-        end
-      end
-      choose_authentication_method(offered, "Authenticate " .. provider_name)
-    end
-    if #providers == 1 then
-      choose_provider(providers[1])
-      return
-    end
+    table.sort(providers, function(a, b) return a.id < b.id end)
+    -- Always show the catalog, even for a single provider or with no
+    -- authenticated accounts. This is a provider *selection*, not login.
     auth_ui.select(providers, {
-      prompt = "Phenix provider",
-      format_item = function(provider)
-        for _, method in ipairs(methods) do
-          if authentication_provider_id(method) == provider then
-            return method.provider_name or provider
+      prompt = "Phenix provider (declared, not authenticated)",
+      format_item = function(item) return item.label or item.id end,
+    }, function(provider)
+      if generation ~= auth_generation or not provider then return end
+      -- Only after the user selects a provider do we discover admitted
+      -- auth methods. Credential capability errors cannot hide the catalog.
+      runtime.list_authentication_methods(function(methods_page, method_problem)
+        if generation ~= auth_generation then return end
+        if method_problem then
+          util.notify(method_problem.message or vim.inspect(method_problem),
+            method_problem.kind == "unsupported" and vim.log.levels.WARN
+              or vim.log.levels.ERROR)
+          return
+        end
+        local offered = {}
+        for _, method in ipairs(methods_page and methods_page.methods or {}) do
+          if authentication_provider_id(method) == provider.id then
+            offered[#offered + 1] = method
           end
         end
-        return provider
-      end,
-    }, choose_provider)
+        if #offered == 0 then
+          util.notify((provider.label or provider.id)
+            .. " is declared, but has no authorized authentication method",
+            vim.log.levels.WARN)
+          return
+        end
+        choose_authentication_method(offered,
+          "Authenticate " .. (provider.label or provider.id))
+      end)
+    end)
   end)
 end
 

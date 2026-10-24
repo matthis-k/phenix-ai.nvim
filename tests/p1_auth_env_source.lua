@@ -6,6 +6,7 @@ local util = require("phenix_nvim.util")
 local auth_ui = require("phenix_nvim.ui.auth")
 local saved = {
   list = runtime.list_authentication_methods,
+  providers = runtime.list_providers,
   active = runtime.p1_active,
   bind = runtime.bind_auth_environment,
   authenticate = runtime.authenticate,
@@ -30,6 +31,13 @@ runtime.p1_active = function() return false end
 runtime.list_authentication_methods = function(done)
   done({ methods = methods }, nil)
 end
+runtime.list_providers = function(done)
+  local method = methods[1]
+  done({ revision = 1, providers = {{
+    id = method.provider_id, label = method.provider_id,
+    connections = { { id = method.connection_id } },
+  }} }, nil)
+end
 runtime.bind_auth_environment = function(identity, name, cb)
   bound[#bound + 1] = { identity = vim.deepcopy(identity), name = name }
   cb({ kind = mode, verified = mode == "authenticated" }, nil)
@@ -39,6 +47,11 @@ runtime.authenticate = function(identity, secret, cb)
   cb({ kind = "authenticated", verified = true }, nil)
 end
 auth_ui.select = function(items, opts, cb)
+  if opts.prompt == "Phenix provider (declared, not authenticated)" then
+    assert(#items == 1 and items[1].id == methods[1].provider_id)
+    cb(items[1])
+    return
+  end
   selected[#selected + 1] = { items = items, prompt = opts.prompt }
   assert(opts.prompt:find("API key source", 1, true))
   cb(source)
@@ -104,6 +117,7 @@ assert(#direct == 1 and direct[1].secret == "fixture-direct-key" and #bound == 0
 
 for key, value in pairs(saved) do
   if key == "list" then runtime.list_authentication_methods = value
+  elseif key == "providers" then runtime.list_providers = value
   elseif key == "active" then runtime.p1_active = value
   elseif key == "bind" then runtime.bind_auth_environment = value
   elseif key == "authenticate" then runtime.authenticate = value
