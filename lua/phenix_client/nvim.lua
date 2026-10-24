@@ -2,7 +2,9 @@
 -- The runtime supplies the complete catalog and authorizes every mutation.
 local M = {}
 
-function M.choose_model(client, session_or_callback, callback)
+-- The standalone SDK defaults to vim.ui.select. An embedding editor may
+-- supply its own compatible selector without changing model authority.
+function M.choose_model(client, session_or_callback, callback, select_ui)
   assert(client and type(client.list_models) == "function")
   local session_id
   if type(session_or_callback) == "function" then
@@ -18,7 +20,7 @@ function M.choose_model(client, session_or_callback, callback)
       callback(nil, { kind = "unavailable", message = "Phenix has no selectable models" })
       return
     end
-    vim.ui.select(options, {
+    (select_ui or vim.ui.select)(options, {
       prompt = "Phenix model",
       format_item = function(item)
         local marker = item.id == catalog.selected and "✓ " or "  "
