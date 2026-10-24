@@ -660,20 +660,44 @@ function Backend:call(op, args, callback)
         end
         return
       end
-      if type(value) ~= "table" or value.import ~= true
-        or value.revoke ~= true
-      then
+      if type(value) ~= "table" then
         finish(callback, nil, error_value("Invalid credential capability", "protocol"))
         return
       end
-      for _, field in ipairs({ "provider_id", "connection_id", "profile_id" }) do
-        local id = value[field]
-        if type(id) ~= "string" or id == ""
-          or #id > 64 or id:find("[^%w_-]")
+      -- The host may grant multiple exact accounts, including revocation-
+      -- only OAuth sign-out. Neither import nor revoke can be inferred from
+      -- membership in a provider's declared catalog.
+      local accounts = value.profiles ~= nil and value.profiles or { value }
+      if type(accounts) ~= "table" or #accounts == 0 or #accounts > 64 then
+        finish(callback, nil, error_value("Invalid credential capability", "protocol"))
+        return
+      end
+      local seen = {}
+      for _, account in ipairs(accounts) do
+        if type(account) ~= "table"
+          or type(account.import) ~= "boolean"
+          or type(account.revoke) ~= "boolean"
+          or (not account.import and not account.revoke)
         then
-          finish(callback, nil, error_value("Invalid granted credential identity", "protocol"))
+          finish(callback, nil, error_value("Invalid credential capability", "protocol"))
           return
         end
+        for _, field in ipairs({ "provider_id", "connection_id", "profile_id" }) do
+          local id = account[field]
+          if type(id) ~= "string" or id == ""
+            or #id > 64 or id:find("[^%w_-]")
+          then
+            finish(callback, nil, error_value("Invalid granted credential identity", "protocol"))
+            return
+          end
+        end
+        local key = account.provider_id .. "/" .. account.connection_id
+          .. "/" .. account.profile_id
+        if seen[key] then
+          finish(callback, nil, error_value("Duplicate granted credential identity", "protocol"))
+          return
+        end
+        seen[key] = true
       end
       finish(callback, vim.deepcopy(value), nil)
     end)
