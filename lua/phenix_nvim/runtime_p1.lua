@@ -440,7 +440,7 @@ function M.list_authentication_methods(callback)
         local methods, seen = {}, {}
         for _, account in ipairs(accounts) do
           for _, provider in ipairs(page.providers or {}) do
-            if provider.id == account.provider_id then
+            if account.import == true and provider.id == account.provider_id then
               for _, connection in ipairs(provider.connections or {}) do
                 if connection.id == account.connection_id then
                   for _, method in ipairs(connection.auth_methods or {}) do
