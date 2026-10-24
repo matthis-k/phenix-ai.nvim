@@ -3,6 +3,7 @@
 local Client = require("phenix_client")
 local ACP = require("phenix_client.acp")
 local Transcript = require("phenix_client.transcript")
+local auth_ui = require("phenix_nvim.ui.auth")
 
 local M = {}
 local state = {
@@ -343,7 +344,7 @@ function M.choose_model(callback)
     require("phenix_client.nvim").choose_model(client, state.active, function(value, problem)
       if retired_reply(client, callback) then return end
       if callback then callback(value, problem) end
-    end)
+    end, auth_ui.select)
   end)
 end
 
