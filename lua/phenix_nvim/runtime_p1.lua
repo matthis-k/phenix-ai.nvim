@@ -426,18 +426,17 @@ end
 function M.list_authentication_methods(callback)
   connected(function(client, err)
     if err then if callback then callback(nil, err) end; return end
-    client:credential_capabilities(function(granted, denial)
+    -- Declared methods are a read-only catalog. A provider must remain
+    -- discoverable when credential capabilities are unavailable, malformed
+    -- or denied; such responses never grant an API-key import identity.
+    client:list_providers(function(page, problem)
       if retired_reply(client, callback) then return end
-      -- API-key grants are separate from OAuth browser challenges. An ACP
-      -- host may install provider OAuth without an API-key credential manager.
-      if denial and denial.kind ~= "unsupported" then
-        if callback then callback(nil, denial) end
-        return
-      end
-      local accounts = granted_accounts(granted)
-      client:list_providers(function(page, problem)
+      if problem then if callback then callback(nil, problem) end; return end
+      client:credential_capabilities(function(granted, denial)
         if retired_reply(client, callback) then return end
-        if problem then if callback then callback(nil, problem) end; return end
+        -- A failed capability query is *no* API-key authority, not a failed
+        -- provider catalog. OAuth still requires the separate begin grant.
+        local accounts = denial and {} or granted_accounts(granted)
         local methods, seen = {}, {}
         for _, account in ipairs(accounts) do
           for _, provider in ipairs(page.providers or {}) do
