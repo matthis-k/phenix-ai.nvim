@@ -1158,30 +1158,29 @@ function M.choose_selection()
   selection_generation = selection_generation + 1
   local generation = selection_generation
 
-  -- The installed P1 ACP preset currently exposes only a standard model
-  -- config option. Prefer provider-first selection once the authoritative
-  -- runtime offers auth/catalog operations. Fall back to the ACP picker
-  -- only when those management operations are explicitly unsupported.
+  -- The P1 ACP catalog exposes opaque, session-scoped model IDs and
+  -- display names, not application-scoped provider/account/readiness fields.
+  -- Never fabricate those fields from labels or infer authorization from an
+  -- authentication method. Use ACP's validated session/set_config_option
+  -- picker for every P1 configuration (including the combined auth preset).
+  if runtime.p1_active() then
+    runtime.choose_model(function(selection, problem)
+      if generation ~= selection_generation then return end
+      if problem then
+        if problem.kind ~= "cancelled" then
+          util.notify(problem.message or vim.inspect(problem), vim.log.levels.WARN)
+        end
+      elseif selection then
+        util.notify("Phenix model: " .. tostring(selection.selected), vim.log.levels.INFO)
+      end
+    end)
+    return
+  end
   runtime.list_authentication_methods(function(auth_result, auth_error)
     if generation ~= selection_generation then
       return
     end
     if auth_error ~= nil then
-      if runtime.p1_active() and auth_error.kind == "unsupported" then
-        runtime.choose_model(function(selection, problem)
-          if generation ~= selection_generation then
-            return
-          end
-          if problem then
-            if problem.kind ~= "cancelled" then
-              util.notify(problem.message or vim.inspect(problem), vim.log.levels.WARN)
-            end
-          elseif selection then
-            util.notify("Phenix model: " .. tostring(selection.selected), vim.log.levels.INFO)
-          end
-        end)
-        return
-      end
       util.notify(vim.inspect(auth_error), vim.log.levels.ERROR)
       return
     end

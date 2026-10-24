@@ -324,10 +324,20 @@ function M.cancel_active()
 end
 
 function M.choose_model(callback)
+  if not state.active then
+    if callback then callback(nil, {
+      kind = "not_found",
+      message = "Create a Phenix session with :Phenix new before choosing a model",
+    }) end
+    return
+  end
   connected(function(client, err)
     if err then if callback then callback(nil, err) end; return end
     if not state.active then
-      unavailable("model catalog without a session", callback)
+      if callback then callback(nil, {
+        kind = "not_found",
+        message = "Create a Phenix session with :Phenix new before choosing a model",
+      }) end
       return
     end
     require("phenix_client.nvim").choose_model(client, state.active, function(value, problem)
