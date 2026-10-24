@@ -300,6 +300,19 @@ client:begin_provider_auth("openai", "api", "api-key", function(value, err)
   challenge, auth_error = value, err
 end)
 transport:_response({ jsonrpc = "2.0", id = outgoing.id,
+  error = { code = -32602, message = "Invalid params", data = {
+    format = "phenix.provider.error.v1", code = "Denied",
+    message = "UNTRUSTED_ISSUER_PRIVATE_DATA",
+  } },
+})
+assert(challenge == nil and auth_error.provider_code == "Denied")
+assert(auth_error.message:find("preset is installed and authorized", 1, true),
+  "missing native provider grant must be actionable")
+assert(not auth_error.message:find("UNTRUSTED_ISSUER", 1, true))
+client:begin_provider_auth("openai", "api", "api-key", function(value, err)
+  challenge, auth_error = value, err
+end)
+transport:_response({ jsonrpc = "2.0", id = outgoing.id,
   error = { code = -32601, message = "Method not found" },
 })
 assert(challenge == nil and auth_error.kind == "unsupported")
