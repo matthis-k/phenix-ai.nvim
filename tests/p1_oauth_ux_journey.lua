@@ -162,6 +162,45 @@ drive()
 assert(not completed_notice() and #tasks == 0)
 assert(#opened == 1 and begins == 1)
 
+-- Reproduce an unconfigured P1 host: the declared provider picker is
+-- available *before* credential capabilities, status or OAuth attempts.
+local saved_providers = runtime.list_providers
+local saved_methods = runtime.list_authentication_methods
+local saved_select = vim.ui.select
+local pending_selection, method_queries
+method_queries = 0
+runtime.list_providers = function(done)
+  done({ revision = 7, providers = {
+    { id = "openai", label = "OpenAI", connections = {} },
+    { id = "anthropic", label = "Anthropic", connections = {} },
+  } }, nil)
+end
+runtime.list_authentication_methods = function(done)
+  method_queries = method_queries + 1
+  done(nil, { kind = "remote", code = -32602, message = "Invalid params" })
+end
+vim.ui.select = function(items, options, done)
+  assert(options.prompt == "Phenix provider (declared, not authenticated)")
+  assert(#items == 2 and items[1].id == "anthropic"
+    and items[2].id == "openai")
+  pending_selection = done
+end
+reset()
+actions.authenticate()
+assert(type(pending_selection) == "function" and method_queries == 0,
+  "declared provider picker must not query credentials before selection")
+pending_selection(nil)
+assert(method_queries == 0 and begins == 0,
+  "canceling the declared provider picker must not start authentication")
+actions.authenticate()
+pending_selection({ id = "openai", label = "OpenAI" })
+assert(method_queries == 1 and begins == 0 and #opened == 0,
+  "Invalid params after choosing a provider cannot start a false login")
+assert(#notices == 1 and notices[1].message:find("Invalid params", 1, true))
+runtime.list_providers = saved_providers
+runtime.list_authentication_methods = saved_methods
+vim.ui.select = saved_select
+
 for name, value in pairs(original) do
   if name == "methods" then runtime.list_authentication_methods = value
   elseif name == "providers" then runtime.list_providers = value
