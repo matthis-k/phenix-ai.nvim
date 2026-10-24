@@ -321,6 +321,11 @@
               nvim --headless -u NONE \
                 --cmd ${pkgs.lib.escapeShellArg "set rtp^=${self.packages.${system}.phenix-ai-nvim-p1-auth}"} \
                 -l ${source}/tests/p1_chatgpt_native_auth_product.lua
+              # Exercise the exact user command through the installed native
+              # ACP process, not merely the lower-level provider requests.
+              nvim --headless -u NONE \
+                --cmd ${pkgs.lib.escapeShellArg "set rtp^=${self.packages.${system}.phenix-ai-nvim-p1-auth}"} \
+                -l ${source}/tests/p1_installed_auth_command_product.lua
               touch "$out"
             '';
         }
