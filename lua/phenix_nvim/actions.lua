@@ -647,12 +647,15 @@ local function authenticate_method(method, callback)
     end)
   end
   local function request_source(named)
-    -- Only display operations actually admitted for the selected profile.
-    -- Missing flags are supported for legacy/fixture runtimes; a modern
-    -- explicit false must never be interpreted as permission.
+    -- Only display operations admitted for the selected profile. Older
+    -- runtimes supply neither flag; do not infer a missing individual grant
+    -- when the other flag is present.
+    local legacy = method.can_import == nil and method.can_bind_environment == nil
     local options = {}
-    if method.can_import ~= false then options[#options + 1] = "Enter API key" end
-    if method.can_bind_environment ~= false then
+    if legacy or method.can_import == true then
+      options[#options + 1] = "Enter API key"
+    end
+    if legacy or method.can_bind_environment == true then
       options[#options + 1] = "Read from environment variable"
     end
     if #options == 0 then
