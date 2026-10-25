@@ -124,6 +124,8 @@ methods = {{
   can_import = false, can_bind_environment = true,
 }}
 source = "Read from environment variable"
+-- Restore valid env input after the preceding malformed-name regression.
+vim.ui.input = function(_, done) done("OPENAI_CUSTOM_KEY") end
 actions.authenticate()
 assert(#selected == 1 and #selected[1].items == 1
   and selected[1].items[1] == "Read from environment variable")
