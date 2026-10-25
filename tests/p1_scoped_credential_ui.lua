@@ -145,6 +145,7 @@ assert(source_result == nil and source_error and source_error.kind == "denied")
 assert(#bound == 1, "direct-only profile must not bind environment source")
 
 grant = nil
+read() -- refresh the catalog after revoking the temporary direct-only grant
 for _, method in ipairs(methods.methods) do
   assert(method.kind == "OAuthAuthorizationCode")
 end
