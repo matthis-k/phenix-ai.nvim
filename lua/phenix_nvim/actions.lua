@@ -647,7 +647,23 @@ local function authenticate_method(method, callback)
     end)
   end
   local function request_source(named)
-    local options = { "Enter API key", "Read from environment variable" }
+    -- Only display operations admitted for the selected profile. Older
+    -- runtimes supply neither flag; do not infer a missing individual grant
+    -- when the other flag is present.
+    local legacy = method.can_import == nil and method.can_bind_environment == nil
+    local options = {}
+    if legacy or method.can_import == true then
+      options[#options + 1] = "Enter API key"
+    end
+    if legacy or method.can_bind_environment == true then
+      options[#options + 1] = "Read from environment variable"
+    end
+    if #options == 0 then
+      finish_authentication(callback, nil, {
+        kind = "denied", message = "No credential source is authorized for this profile",
+      })
+      return
+    end
     auth_ui.select(options, { prompt = provider .. " API key source" }, function(choice)
       if generation ~= auth_generation then return end
       if choice == nil then
@@ -656,8 +672,14 @@ local function authenticate_method(method, callback)
         })
         return
       end
-      if choice == options[1] then
+      if choice == "Enter API key" then
         request_secret(named)
+        return
+      end
+      if choice ~= "Read from environment variable" then
+        finish_authentication(callback, nil, {
+          kind = "invalid_input", message = "Unsupported API-key source choice",
+        })
         return
       end
       if type(runtime.bind_auth_environment) ~= "function" then

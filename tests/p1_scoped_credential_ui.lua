@@ -3,7 +3,7 @@
 local grant
 local capability_failure = false
 local listed = 0
-local imported = {}
+local imported, bound = {}, {}
 local client = {}
 function client:on() return function() end end
 function client:start(callback)
@@ -72,6 +72,10 @@ function client:import_credential(provider, connection, profile, secret, callbac
   assert(type(secret) == "string" and #secret > 0)
   callback({ stored = true, authenticated = false }, nil)
 end
+function client:bind_credential_environment(provider, connection, profile, variable, callback)
+  bound[#bound + 1] = { provider, connection, profile, variable }
+  callback({ stored = true }, nil)
+end
 
 package.loaded["phenix_client"] = { new = function() return client end }
 package.loaded["phenix_client.acp"] = { new = function() return {} end }
@@ -99,7 +103,49 @@ grant = { provider_id = "anthropic", connection_id = "api", profile_id = "team",
 read()
 assert(not failure and #methods.methods == 2,
   "revoke-only grants must not expose API-key import as an auth option")
+
+-- Exact environment binding is independent of direct-secret import.
+grant = { provider_id = "anthropic", connection_id = "api",
+  profile_id = "team", import = false, bind_environment = true, revoke = false }
+read()
+assert(not failure and #methods.methods == 3)
+local env_method
+for _, method in ipairs(methods.methods) do
+  if method.provider_id == "anthropic" then env_method = method end
+end
+assert(env_method and env_method.can_import == false
+  and env_method.can_bind_environment == true)
+local source_result, source_error
+runtime.authenticate({ provider_id = "anthropic", connection_id = "api",
+  profile_id = "team", kind = "ApiKey" }, "forbidden-import",
+  function(value, issue) source_result, source_error = value, issue end)
+assert(source_result == nil and source_error and source_error.kind == "denied")
+assert(#imported == 0, "env-only profile must not forward a direct secret")
+runtime.bind_auth_environment({ provider_id = "anthropic", connection_id = "api",
+  profile_id = "team", kind = "ApiKey" }, "ANTHROPIC_API_KEY",
+  function(value, issue) source_result, source_error = value, issue end)
+assert(not source_error and source_result.kind == "stored")
+assert(vim.deep_equal(bound[1],
+  { "anthropic", "api", "team", "ANTHROPIC_API_KEY" }))
+
+-- Direct-only grants cannot be used to bind a variable name. Both source
+-- choices must follow separate runtime-published operations.
+grant.import, grant.bind_environment = true, false
+read()
+assert(not failure and #methods.methods == 3)
+for _, method in ipairs(methods.methods) do
+  if method.provider_id == "anthropic" then
+    assert(method.can_import and not method.can_bind_environment)
+  end
+end
+runtime.bind_auth_environment({ provider_id = "anthropic", connection_id = "api",
+  profile_id = "team", kind = "ApiKey" }, "ANTHROPIC_API_KEY",
+  function(value, issue) source_result, source_error = value, issue end)
+assert(source_result == nil and source_error and source_error.kind == "denied")
+assert(#bound == 1, "direct-only profile must not bind environment source")
+
 grant = nil
+read() -- refresh the catalog after revoking the temporary direct-only grant
 for _, method in ipairs(methods.methods) do
   assert(method.kind == "OAuthAuthorizationCode")
 end
@@ -149,6 +195,8 @@ assert(not failure and #methods.methods == 3)
 local entry = methods.methods[1]
 assert(entry.provider_id == "openai" and entry.connection_id == "api")
 assert(entry.profile_id == "personal" and entry.kind == "ApiKey")
+assert(entry.can_import and entry.can_bind_environment,
+  "legacy single-account capability remains supported")
 assert(entry.authenticated == false)
 reported_status = { Unavailable = { reason = "not yet verified" } }
 read()

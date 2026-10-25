@@ -115,6 +115,50 @@ util.input_secret = function(_, done) done("fixture-direct-key", nil) end
 actions.authenticate()
 assert(#direct == 1 and direct[1].secret == "fixture-direct-key" and #bound == 0)
 
+-- With explicit runtime permissions, an env-only account must not offer
+-- key entry. The selected UI option can no longer be compared by array index.
+reset()
+methods = {{
+  provider_id = "openai", connection_id = "api", method_id = "api-key",
+  profile_id = "personal", kind = "ApiKey", label = "API key",
+  can_import = false, can_bind_environment = true,
+}}
+source = "Read from environment variable"
+-- Restore valid env input after the preceding malformed-name regression.
+vim.ui.input = function(_, done) done("OPENAI_CUSTOM_KEY") end
+actions.authenticate()
+assert(#selected == 1 and #selected[1].items == 1
+  and selected[1].items[1] == "Read from environment variable")
+assert(#bound == 1 and #direct == 0, "env-only profile must not collect secret")
+
+-- A partially populated modern capability projection must not infer an
+-- unadvertised direct-import permission. Only two missing flags are legacy.
+reset()
+methods[1].can_import = nil
+actions.authenticate()
+assert(#selected == 1 and #selected[1].items == 1
+  and selected[1].items[1] == "Read from environment variable")
+assert(#bound == 1 and #direct == 0)
+
+-- A direct-key-only profile must not offer a source it cannot bind.
+reset()
+methods[1].can_import = true
+methods[1].can_bind_environment = false
+source = "Enter API key"
+util.input_secret = function(_, done) done("fixture-direct-only-key", nil) end
+actions.authenticate()
+assert(#selected == 1 and #selected[1].items == 1
+  and selected[1].items[1] == "Enter API key")
+assert(#direct == 1 and #bound == 0)
+
+-- Explicit absence of both operations must be denied before any input.
+reset()
+methods[1].can_import = false
+methods[1].can_bind_environment = false
+actions.authenticate()
+assert(#selected == 0 and #direct == 0 and #bound == 0)
+assert(#notices == 1 and notices[1].level == vim.log.levels.ERROR)
+
 for key, value in pairs(saved) do
   if key == "list" then runtime.list_authentication_methods = value
   elseif key == "providers" then runtime.list_providers = value
