@@ -129,6 +129,15 @@ assert(#selected == 1 and #selected[1].items == 1
   and selected[1].items[1] == "Read from environment variable")
 assert(#bound == 1 and #direct == 0, "env-only profile must not collect secret")
 
+-- A partially populated modern capability projection must not infer an
+-- unadvertised direct-import permission. Only two missing flags are legacy.
+reset()
+methods[1].can_import = nil
+actions.authenticate()
+assert(#selected == 1 and #selected[1].items == 1
+  and selected[1].items[1] == "Read from environment variable")
+assert(#bound == 1 and #direct == 0)
+
 -- A direct-key-only profile must not offer a source it cannot bind.
 reset()
 methods[1].can_import = true
