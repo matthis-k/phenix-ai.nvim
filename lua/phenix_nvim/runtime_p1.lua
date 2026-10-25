@@ -451,7 +451,8 @@ function M.list_authentication_methods(callback)
         local methods, seen = {}, {}
         for _, account in ipairs(accounts) do
           for _, provider in ipairs(page.providers or {}) do
-            if account.import == true and provider.id == account.provider_id then
+            if (account.import == true or account.bind_environment == true)
+              and provider.id == account.provider_id then
               for _, connection in ipairs(provider.connections or {}) do
                 if connection.id == account.connection_id then
                   for _, method in ipairs(connection.auth_methods or {}) do
@@ -466,6 +467,12 @@ function M.list_authentication_methods(callback)
                           method_id = method.id, label = method.label, kind = method.kind,
                           environment_variable = method.environment_variable,
                           profile_id = account.profile_id,
+                          can_import = account.import == true,
+                          -- Old ACP runtimes advertised only "import"; keep
+                          -- their environment chooser until the new exact
+                          -- operation flag is available.
+                          can_bind_environment = account.bind_environment == true
+                            or (account.bind_environment == nil and account.import == true),
                           authenticated = false, profiles = {},
                         }
                       end
@@ -649,7 +656,8 @@ function M.authenticate(identity, secret, callback)
       if problem then if callback then callback(nil, problem) end; return end
       local admitted = false
       for _, account in ipairs(granted_accounts(granted)) do
-        if account.provider_id == identity.provider_id
+        if account.import == true
+          and account.provider_id == identity.provider_id
           and account.connection_id == identity.connection_id
           and account.profile_id == identity.profile_id
         then
@@ -730,7 +738,9 @@ function M.bind_auth_environment(identity, name, callback)
       if problem then if callback then callback(nil, problem) end; return end
       local admitted = false
       for _, account in ipairs(granted_accounts(granted)) do
-        if account.provider_id == identity.provider_id
+        if (account.bind_environment == true
+            or (account.bind_environment == nil and account.import == true))
+          and account.provider_id == identity.provider_id
           and account.connection_id == identity.connection_id
           and account.profile_id == identity.profile_id then
           admitted = true
