@@ -292,7 +292,7 @@ receive({ jsonrpc = "2.0", id = sent[#sent].id, result = {
 assert(default_catalog and #default_catalog.models == 1)
 assert(default_catalog.selected == nil)
 local selected_default
-sdk:set_model(offered, function(value, err)
+sdk:set_model(nil, offered, function(value, err)
   assert(not err)
   selected_default = value
 end)
