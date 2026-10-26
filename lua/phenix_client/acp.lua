@@ -229,6 +229,7 @@ function Backend:_response(frame)
       -- arbitrary JSON-RPC data or tokens from the remote failure.
       local prompt_phase
       local prompt_status
+      local prompt_provider_code
       if type(detail) == "table"
         and detail.format == "phenix.prompt.failure.v1"
         and type(detail.phase) == "string"
@@ -251,6 +252,31 @@ function Backend:_response(frame)
         if phase_name then
           prompt_phase = detail.phase
           message = "Phenix failed while " .. phase_name
+          local provider_reasons = {
+            subscription_sharing_user_not_eligible =
+              "ChatGPT plan usage is not enabled for this account or workspace",
+            subscription_sharing_usage_limit_exceeded =
+              "ChatGPT plan usage limit reached; check ChatGPT Settings > Usage",
+            subscription_sharing_usage_unavailable =
+              "ChatGPT plan usage is temporarily unavailable",
+            subscription_sharing_unsupported_capability =
+              "The selected ChatGPT model does not support a requested capability",
+            subscription_sharing_route_not_supported =
+              "ChatGPT plan routing rejected the requested endpoint",
+            subscription_sharing_invalid_user =
+              "ChatGPT plan identity could not be validated; check :Phenix auth",
+            chatpass_v2_scope_not_authorized =
+              "ChatGPT sign-in did not authorize direct plan usage; review :Phenix auth",
+            chatpass_v2_invalid_authorization_context =
+              "ChatGPT plan authorization context is invalid; review :Phenix auth",
+            subscription_sharing_user_unavailable =
+              "ChatGPT account/workspace is temporarily unavailable",
+          }
+          if type(detail.provider_code) == "string"
+            and provider_reasons[detail.provider_code] then
+            prompt_provider_code = detail.provider_code
+            message = provider_reasons[detail.provider_code]
+          end
           if type(status) == "number" and status % 1 == 0
             and status >= 100 and status < 600
           then
@@ -308,6 +334,7 @@ function Backend:_response(frame)
         code = frame.error.code, basic_code = basic_code,
         provider_code = provider_code,
         prompt_phase = prompt_phase, http_status = prompt_status,
+        prompt_provider_code = prompt_provider_code,
       })
     else
       finish(callback, frame.result, nil)
