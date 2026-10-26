@@ -317,6 +317,36 @@ function M.prompt(session_id, segments, callback)
   end)
 end
 
+-- UI-neutral default operation from the shared Lua frontend SDK.
+-- The caller only supplies input and a presentation binding callback; the
+-- SDK creates a session automatically for a new chat surface.
+function M.prompt_default(segments, bind_session, callback)
+  local content, err = blocks(segments)
+  if err then if callback then callback(nil, err) end; return end
+  if #content == 0 then
+    if callback then
+      callback(nil, { kind = "invalid_input", message = "Empty prompt" })
+    end
+    return
+  end
+  state.active_revision = state.active_revision + 1
+  local revision = state.active_revision
+  connected(function(client, problem)
+    if problem then if callback then callback(nil, problem) end; return end
+    client:send_default(content, function(session)
+      if not current_client(client) then return false end
+      if bind_session and bind_session(session) == false then return false end
+      state.known[session] = true
+      if revision == state.active_revision then state.active = session end
+      emit("status", M.status())
+      return true
+    end, function(result, send_error)
+      if retired_reply(client, callback) then return end
+      if callback then callback(result, send_error) end
+    end, false)
+  end)
+end
+
 function M.cancel_active()
   if not state.active or not state.client then return end
   state.client:cancel(state.active, function(_, err)
