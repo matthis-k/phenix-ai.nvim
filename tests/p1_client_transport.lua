@@ -261,6 +261,61 @@ receive({ jsonrpc = "2.0", id = sent[#sent].id, error = {
 assert(forged_provider_error and forged_provider_error.provider_code == nil,
   "undocumented provider error must not become an authoritative state")
 
+-- Connection-level model state is available even when no session is active.
+-- The model ID remains a runtime-issued exact-account selector, not client
+-- metadata or an authorization token.
+local default_selection = {
+  provider_id = "openai", connection_id = "chatgpt",
+  profile_id = "personal", model_id = "gpt-test",
+  protocol_id = "openai-responses", endpoint_id = "responses",
+  catalog_revision = 3,
+}
+local function native_selector(revision)
+  local fields = vim.deepcopy(default_selection)
+  fields.session_revision = revision
+  return "phenix.native-model@1:" .. vim.json.encode(fields)
+end
+local offered = native_selector(0)
+local default_catalog
+sdk:list_models(function(value, err)
+  assert(not err)
+  default_catalog = value
+end)
+assert(sent[#sent].method == "_phenix/control/state")
+receive({ jsonrpc = "2.0", id = sent[#sent].id, result = {
+  format = "phenix.control.state.v1", phase = "models_available",
+  actions = { { action = "models_select", allowed = true } },
+  models = { { id = offered, name = "OpenAI / ChatGPT / personal / GPT Test",
+    authorized = true } },
+  selected = vim.NIL, revision = 0,
+} })
+assert(default_catalog and #default_catalog.models == 1)
+assert(default_catalog.selected == nil)
+local selected_default
+sdk:set_model(offered, function(value, err)
+  assert(not err)
+  selected_default = value
+end)
+assert(sent[#sent].method == "_phenix/models/select")
+assert(sent[#sent].params.value == offered)
+receive({ jsonrpc = "2.0", id = sent[#sent].id, result = {
+  format = "phenix.control.state.v1", phase = "model_selected",
+  selected = native_selector(1), revision = 1,
+} })
+assert(selected_default and selected_default.selected == native_selector(1))
+
+local denied_default
+sdk:set_model(native_selector(1), function(_, err)
+  denied_default = err
+end)
+receive({ jsonrpc = "2.0", id = sent[#sent].id, error = {
+  code = -32602, message = "Invalid params",
+  data = { format = "phenix.control.denial.v1", code = "no_selectable_models",
+    message = "sensitive-untrusted" },
+} })
+assert(denied_default and denied_default.message:find("No authorized models", 1, true))
+assert(not vim.inspect(denied_default):find("sensitive-untrusted", 1, true))
+
 sdk:close()
 assert(killed)
 
