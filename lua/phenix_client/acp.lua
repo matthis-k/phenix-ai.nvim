@@ -238,6 +238,22 @@ function Backend:_response(frame)
         AuthenticationRequired = "The selected account is not authenticated; use :Phenix auth",
         RemoteRevocationUnconfirmed = "Credentials removed locally; remote sign-out could not be confirmed",
       }
+      if type(detail) == "table"
+        and detail.format == "phenix.control.denial.v1"
+        and type(detail.code) == "string"
+      then
+        local reason = {
+          not_initialized = "Initialize Phenix before choosing a model",
+          connection_closed = "Reconnect to Phenix before choosing a model",
+          provider_management_not_installed = "The installed runtime has no provider-management grants",
+          model_control_not_installed = "This runtime does not grant model selection",
+          no_selectable_models = "No authorized models were discovered; check :Phenix auth",
+          session_required = "Create or load a session for this action",
+        }
+        if reason[detail.code] then
+          message = reason[detail.code]
+        end
+      end
       if frame.error.code == -32602 and provider_code ~= nil then
         message = safe_provider_messages[provider_code]
       elseif frame.error.code == -32602 and message == "Invalid params" then
@@ -320,8 +336,9 @@ function Backend:start(callback)
         send = true,
         cancel = true,
       },
-      -- Runtime control operations are not yet published by the P1 ACP host.
-      management = { models = false, model_selection = false },
+      -- The control-state extension is probed per request: older runtimes
+      -- reject it with Method not found instead of granting fake authority.
+      management = { models = true, model_selection = true },
     }
     self.state = "ready"
     local waiting = self.waiting
@@ -781,6 +798,61 @@ function Backend:call(op, args, callback)
       end
       finish(callback, { stored = op ~= "credentials.revoke",
         revoked = op == "credentials.revoke", authenticated = false }, nil)
+    end)
+  elseif op == "models.list" and args.session_id == nil then
+    -- A model is a connection-level user preference before any session exists.
+    -- Never invent an ACP session or derive selectable models from labels.
+    self:_request("_phenix/control/state", {}, function(value, err)
+      if err then finish(callback, nil, err); return end
+      if type(value) ~= "table"
+        or value.format ~= "phenix.control.state.v1"
+        or type(value.models) ~= "table"
+        or type(value.actions) ~= "table"
+      then
+        finish(callback, nil, error_value("Invalid Phenix control state", "protocol"))
+        return
+      end
+      local models, seen = {}, {}
+      for _, model in ipairs(value.models) do
+        if type(model) ~= "table" or type(model.id) ~= "string"
+          or model.id == "" or seen[model.id]
+          or type(model.name) ~= "string" or model.name == ""
+        then
+          finish(callback, nil, error_value("Invalid default model offer", "protocol"))
+          return
+        end
+        seen[model.id] = true
+        models[#models + 1] = {
+          id = model.id, name = model.name, authorized = model.authorized == true,
+        }
+      end
+      local selected = value.selected
+      if nullish(selected) then selected = nil end
+      if selected ~= nil and type(selected) ~= "string" then
+        finish(callback, nil, error_value("Invalid default model selection", "protocol"))
+        return
+      end
+      finish(callback, {
+        models = models, selected = selected,
+        state = value.phase, actions = value.actions,
+        discovery_error = value.model_discovery_error,
+      }, nil)
+    end)
+  elseif op == "models.select" and args.session_id == nil then
+    if type(args.model_id) ~= "string" or args.model_id == "" then
+      finish(callback, nil, error_value("Missing default model selection", "invalid_input"))
+      return
+    end
+    self:_request("_phenix/models/select", { value = args.model_id }, function(value, err)
+      if err then finish(callback, nil, err); return end
+      if type(value) ~= "table" or value.format ~= "phenix.control.state.v1"
+        or type(value.selected) ~= "string"
+        or not acknowledged_native_model_choice(args.model_id, value.selected)
+      then
+        finish(callback, nil, error_value("Phenix did not confirm the default model transition", "protocol"))
+        return
+      end
+      finish(callback, { selected = value.selected, state = value.phase }, nil)
     end)
   elseif op == "models.list" then
     local id = args.session_id
