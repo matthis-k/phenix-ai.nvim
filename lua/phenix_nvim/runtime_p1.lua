@@ -325,22 +325,10 @@ function M.cancel_active()
 end
 
 function M.choose_model(callback)
-  if not state.active then
-    if callback then callback(nil, {
-      kind = "not_found",
-      message = "Create a Phenix session with :Phenix new before choosing a model",
-    }) end
-    return
-  end
   connected(function(client, err)
     if err then if callback then callback(nil, err) end; return end
-    if not state.active then
-      if callback then callback(nil, {
-        kind = "not_found",
-        message = "Create a Phenix session with :Phenix new before choosing a model",
-      }) end
-      return
-    end
+    -- Before session/new, selection changes the connection's default model.
+    -- An existing session continues using session-scoped model overrides.
     require("phenix_client.nvim").choose_model(client, state.active, function(value, problem)
       if retired_reply(client, callback) then return end
       if callback then callback(value, problem) end
