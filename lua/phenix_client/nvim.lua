@@ -23,6 +23,15 @@ function M.choose_model(client, session_or_callback, callback, select_ui)
         catalog_unavailable = "provider model discovery is unavailable or denied",
         catalog_empty = "the provider returned no selectable models",
         model_admission_denied = "models did not pass execution and credential admission",
+        catalog_network = "catalog network or TLS failed; check DNS, VPN or proxy",
+        catalog_timeout = "catalog request timed out; retry",
+        catalog_unauthorized = "OAuth token rejected by the catalog; sign in with ChatGPT again",
+        catalog_rate_limited = "catalog rate limited the account; retry later",
+        catalog_server_error = "catalog returned a server error; retry later",
+        catalog_invalid_response = "catalog response schema is invalid or empty",
+        catalog_issuer_unavailable = "could not verify OAuth issuer signing keys",
+        catalog_rejected = "catalog request rejected or redirected unexpectedly",
+        catalog_too_large = "catalog response exceeded safety limits",
       }
       local details = {}
       for _, reason in ipairs(catalog.denials or {}) do
