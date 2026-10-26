@@ -17,7 +17,24 @@ function M.choose_model(client, session_or_callback, callback, select_ui)
     if error then callback(nil, error); return end
     local options = catalog and catalog.models or {}
     if #options == 0 then
-      callback(nil, { kind = "unavailable", message = "Phenix has no selectable models" })
+      local reason_labels = {
+        no_authorized_account_resolver = "no authorized credential resolver was installed",
+        account_not_authenticated = "the selected account is not authenticated",
+        catalog_unavailable = "provider model discovery is unavailable or denied",
+        catalog_empty = "the provider returned no selectable models",
+        model_admission_denied = "models did not pass execution and credential admission",
+      }
+      local details = {}
+      for _, reason in ipairs(catalog.denials or {}) do
+        local label = reason_labels[reason.code]
+        if label then
+          details[#details + 1] = (reason.provider_id or "Provider")
+            .. "/" .. (reason.connection_id or "?") .. ": " .. label
+        end
+      end
+      local diagnostic = #details > 0 and table.concat(details, "; ")
+        or "No authorized provider models are currently selectable"
+      callback(nil, { kind = "unavailable", message = diagnostic })
       return
     end
     (select_ui or vim.ui.select)(options, {
