@@ -35,11 +35,8 @@ assert(sent[1].params.protocolVersion == 1)
 receive({ jsonrpc = "2.0", id = sent[1].id,
   result = { protocolVersion = 1, agentCapabilities = { loadSession = true } } })
 assert(ready and ready.session_operations.new and ready.session_operations.load)
-assert(ready.management.models == false)
-local missing
-sdk:list_models(function(_, err) missing = err end)
-assert(missing and missing.kind == "unsupported")
-assert(#sent == 1, "unsupported operations must never be sent to P1")
+assert(ready.management.models == true)
+assert(#sent == 1, "ACP extensions remain runtime-authorized per request")
 
 local id
 sdk:new_session(function(value, err)
@@ -57,7 +54,7 @@ receive({ jsonrpc = "2.0", id = sent[2].id, result = {
 } })
 assert(id == "s1")
 local catalog
-sdk:list_models(function(value, err)
+sdk:list_models("s1", function(value, err)
   assert(not err)
   catalog = value
 end)
@@ -66,7 +63,7 @@ assert(catalog.selected == "phenix.model.scripted")
 assert(#catalog.models == 1 and catalog.models[1].name == "Scripted model")
 assert(#sent == 2, "model query reads runtime-advertised ACP config, not a custom request")
 local denied
-sdk:set_model("unknown", function(value, err)
+sdk:set_model("s1", "unknown", function(value, err)
   denied = err
 end)
 assert(denied and denied.kind == "denied", "unadvertised model IDs must be rejected before ACP dispatch")
