@@ -267,6 +267,29 @@ assert(phase_only.http_status == nil)
 assert(phase_only.message:find("admitting the agent graph", 1, true))
 assert(not vim.inspect(phase_only):find("TOKEN=private", 1, true))
 
+local plan_error
+sdk:send("s1", "hi plan", function(_, err) plan_error = err end)
+receive({ jsonrpc = "2.0", id = sent[#sent].id, error = {
+  code = -32603, message = "Internal error",
+  data = { format = "phenix.prompt.failure.v1", phase = "graph_result",
+    provider_code = "subscription_sharing_usage_limit_exceeded",
+    raw = "TOKEN=private" },
+} })
+assert(plan_error and plan_error.prompt_provider_code
+  == "subscription_sharing_usage_limit_exceeded")
+assert(plan_error.message:find("ChatGPT plan usage limit", 1, true))
+assert(not vim.inspect(plan_error):find("TOKEN=private", 1, true))
+
+local unknown_plan_error
+sdk:send("s1", "hi forged", function(_, err) unknown_plan_error = err end)
+receive({ jsonrpc = "2.0", id = sent[#sent].id, error = {
+  code = -32603, message = "Internal error",
+  data = { format = "phenix.prompt.failure.v1", phase = "graph_result",
+    provider_code = "fake_TOKEN=private" },
+} })
+assert(unknown_plan_error and unknown_plan_error.prompt_provider_code == nil)
+assert(not vim.inspect(unknown_plan_error):find("TOKEN=private", 1, true))
+
 -- A typed OAuth sign-out result says local removal succeeded but the
 -- issuer's remote revocation could not be confirmed. Preserve only the
 -- enumerated provider code; never expose raw provider response text.
