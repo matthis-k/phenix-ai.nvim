@@ -85,4 +85,78 @@ restricted:set_model("provider/a", function(value, err)
   assert(value == nil and err.kind == "unsupported")
 end)
 assert(restricted_calls == 2, "model requests delegate admission to the runtime")
+-- Every frontend embedding the shared SDK can submit input immediately.
+-- Session creation is singleflight and follows ordinary ACP session/new.
+local deferred, new_count, sent_ids = nil, 0, {}
+local frontend = sdk.new({
+  start = function(_, cb)
+    cb({ session_operations = { new = true, send = true } })
+  end,
+  call = function(_, op, args, cb)
+    if op == "sessions.new" then
+      new_count = new_count + 1
+      deferred = cb
+    elseif op == "sessions.send" then
+      sent_ids[#sent_ids + 1] = args.session_id
+      cb({ stop_reason = "end_turn" })
+    else
+      cb(nil, { kind = "unsupported", message = op })
+    end
+  end,
+  subscribe = function() return function() end end,
+  close = function() end,
+})
+frontend:start()
+local completions, bound = 0, {}
+for _ = 1, 2 do
+  frontend:send_default({ { type = "text", text = "hello" } },
+    function(session)
+      bound[#bound + 1] = session
+      return true
+    end,
+    function(response, failure)
+      assert(not failure and response.stop_reason == "end_turn")
+      completions = completions + 1
+    end)
+end
+assert(new_count == 1 and completions == 0, "sessionless inputs did not coalesce")
+deferred({ session_id = "auto-1" })
+assert(completions == 2 and #bound == 2)
+assert(sent_ids[1] == "auto-1" and sent_ids[2] == "auto-1")
+frontend:send_default({ { type = "text", text = "again" } }, function(result, problem)
+  assert(not problem and result.stop_reason == "end_turn")
+end)
+assert(new_count == 1 and #sent_ids == 3, "follow-up opened another session")
+frontend:send_default({ { type = "text", text = "separate" } },
+  function(session)
+    assert(session == "auto-2")
+    return true
+  end,
+  function(result, problem)
+    assert(not problem and result.stop_reason == "end_turn")
+  end, false)
+assert(new_count == 2 and #sent_ids == 3)
+deferred({ session_id = "auto-2" })
+assert(sent_ids[4] == "auto-2", "new surface reused the wrong session")
+frontend:close()
+
+local stalled, failure
+local interrupted = sdk.new({
+  start = function(_, cb)
+    cb({ session_operations = { new = true, send = true } })
+  end,
+  call = function(_, op, _, cb)
+    if op == "sessions.new" then stalled = cb end
+  end,
+  subscribe = function() return function() end end,
+  close = function() end,
+})
+interrupted:start()
+interrupted:send_default({ { type = "text", text = "draft" } },
+  function(_, err) failure = err end)
+assert(stalled ~= nil and failure == nil)
+interrupted:close()
+assert(failure and failure.kind == "disconnected",
+  "disconnect stranded a sessionless input callback")
+
 print("Lua client SDK capability and authority delegation passed")
