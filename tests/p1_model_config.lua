@@ -1,4 +1,4 @@
--- Standard ACP session/set_config_option is the only model mutation wire.
+-- Session-local overrides use ACP; pre-session defaults use Phenix control state.
 local backend = require("phenix_client.acp").new({ command = "unused" })
 backend.state = "ready"
 backend.features = { management = { models = false, model_selection = false } }
@@ -19,7 +19,7 @@ backend._request = function(_, method, params, callback)
   sent = { method = method, params = params }
   callback({ configOptions = { model_option("provider/two") } }, nil)
 end
-backend:call("models.select", { model_id = "provider/two" }, function(v, err)
+backend:call("models.select", { session_id = "s1", model_id = "provider/two" }, function(v, err)
   selected, failure = v, err
 end)
 assert(failure == nil, vim.inspect(failure))
@@ -31,7 +31,7 @@ assert(backend.catalogs.s1.selected == "provider/two")
 
 -- Never send a forged model to the runtime or report a local optimistic switch.
 sent = nil
-backend:call("models.select", { model_id = "forged" }, function(v, err)
+backend:call("models.select", { session_id = "s1", model_id = "forged" }, function(v, err)
   assert(v == nil and err.kind == "denied")
 end)
 assert(sent == nil and backend.catalogs.s1.selected == "provider/two")
@@ -39,7 +39,7 @@ assert(sent == nil and backend.catalogs.s1.selected == "provider/two")
 backend._request = function(_, _, _, callback)
   callback(nil, { kind = "denied", message = "runtime denied" })
 end
-backend:call("models.select", { model_id = "provider/one" }, function(v, err)
+backend:call("models.select", { session_id = "s1", model_id = "provider/one" }, function(v, err)
   assert(v == nil and err.kind == "denied")
 end)
 assert(backend.catalogs.s1.selected == "provider/two")
@@ -47,7 +47,7 @@ assert(backend.catalogs.s1.selected == "provider/two")
 backend._request = function(_, _, _, callback)
   callback({ configOptions = { model_option("provider/one") } }, nil)
 end
-backend:call("models.select", { model_id = "provider/two" }, function(v, err)
+backend:call("models.select", { session_id = "s1", model_id = "provider/two" }, function(v, err)
   assert(v == nil and err.kind == "protocol")
 end)
 assert(backend.catalogs.s1.selected == "provider/one",
@@ -55,10 +55,50 @@ assert(backend.catalogs.s1.selected == "provider/one",
 -- Selection cannot inherit the last-active session if several catalogs are
 -- available. The SDK must supply a stable session ID for each mutation.
 backend:_catalog("s2", { model_option("provider/two") })
+backend._request = function(_, method, params, callback)
+  assert(method == "_phenix/control/state")
+  callback({ format = "phenix.control.state.v1", phase = "ready",
+    models = {}, actions = {}, selected = vim.NIL }, nil)
+end
 backend:call("models.list", {}, function(value, problem)
-  assert(value == nil and problem.kind == "invalid_input",
-    "implicit model query must not select the last active session")
+  assert(not problem and #value.models == 0,
+    "no-session model discovery must not borrow a session catalog")
 end)
+
+-- A failed ChatGPT OAuth model catalog must keep its typed failure code,
+-- without displaying any provider-controlled response or requiring a session.
+backend._request = function(_, method, _, callback)
+  assert(method == "_phenix/control/state")
+  callback({
+    format = "phenix.control.state.v1", phase = "ready",
+    models = {}, actions = {}, selected = vim.NIL,
+    model_denials = {
+      { provider_id = "openai", connection_id = "chatgpt",
+        code = "catalog_unauthorized", message = "sensitive provider prose" },
+    },
+  }, nil)
+end
+backend:call("models.list", {}, function(value, problem)
+  assert(not problem and #value.models == 0)
+  assert(#value.denials == 1 and value.denials[1].code == "catalog_unauthorized")
+  assert(value.denials[1].message == nil, "untrusted provider message escaped ACP")
+end)
+local picker_result, picker_error
+require("phenix_client.nvim").choose_model({
+  list_models = function(_, session, cb)
+    assert(session == nil, "no session was expected for catalog diagnosis")
+    backend:call("models.list", {}, cb)
+  end,
+}, nil, function(value, problem)
+  picker_result, picker_error = value, problem
+end, function()
+  error("unauthorized catalog must not show a model picker")
+end)
+assert(picker_result == nil and picker_error
+  and picker_error.message:find("sign in with ChatGPT again", 1, true)
+  and not picker_error.message:find("sensitive provider prose", 1, true),
+  "ChatGPT catalog denial did not surface a safe actionable reason")
+
 backend:call("models.list", { session_id = "s1" }, function(value, problem)
   assert(not problem and value.selected == "provider/one")
 end)
@@ -69,11 +109,23 @@ backend._request = function(_, method, params, callback)
   assert(params.sessionId == "s1")
   callback({ configOptions = { model_option("provider/two") } }, nil)
 end
+-- Pre-session selection never uses an arbitrary previously active session.
+-- This synthetic response rejects an invalid default ID without consulting
+-- the session/config mutation path.
+backend._request = function(_, method, params, callback)
+  assert(method == "_phenix/models/select" and params.value == "provider/two")
+  callback(nil, { kind = "denied", message = "Model was not offered" })
+end
 backend:call("models.select", { model_id = "provider/two" }, function(value, problem)
-  assert(value == nil and problem.kind == "invalid_input",
-    "implicit model selection with two sessions must be denied")
+  assert(value == nil and problem.kind == "denied")
 end)
-assert(attempts == 0, "ambiguous request escaped into ACP")
+assert(attempts == 0, "default request must not mutate any session")
+backend._request = function(_, method, params, callback)
+  attempts = attempts + 1
+  assert(method == "session/set_config_option")
+  assert(params.sessionId == "s1")
+  callback({ configOptions = { model_option("provider/two") } }, nil)
+end
 backend:call("models.select", {
   session_id = "s1", model_id = "provider/two",
 }, function(value, problem)

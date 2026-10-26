@@ -17,8 +17,8 @@ local operations = {
   import_credential = { name = "credentials.import" },
   bind_credential_environment = { name = "credentials.bind_environment" },
   revoke_credential = { name = "credentials.revoke" },
-  list_models = { permission = { "management", "models" }, name = "models.list" },
-  set_model = { permission = { "management", "model_selection" }, name = "models.select" },
+  list_models = { name = "models.list" },
+  set_model = { name = "models.select" },
   new_session = { permission = { "session_operations", "new" }, name = "sessions.new" },
   load_session = { permission = { "session_operations", "load" }, name = "sessions.load" },
   send = { permission = { "session_operations", "send" }, name = "sessions.send" },
@@ -46,6 +46,8 @@ function M.new(backend)
     stop_subscription = nil,
     pending = {},
     closed = false,
+    default_session = nil,
+    default_session_waiters = nil,
   }, Client)
 end
 
@@ -301,20 +303,87 @@ function Client:set_model(session_or_model, model_or_callback, callback)
   if model_or_callback == nil or type(model_or_callback) == "function" then
     model_id, callback = session_or_model, model_or_callback
   else
+    -- Explicit (nil, model, callback) is a pre-session default selection.
+    -- An existing session ID instead selects a session-local override.
     session_id, model_id = session_or_model, model_or_callback
-    assert(type(session_id) == "string" and session_id ~= "")
+    assert(session_id == nil or (type(session_id) == "string" and session_id ~= ""))
   end
   assert(type(model_id) == "string" and model_id ~= "")
   self:_call("set_model", { session_id = session_id, model_id = model_id }, callback)
 end
 
 function Client:new_session(callback)
-  self:_call("new_session", {}, callback)
+  self:_call("new_session", {}, function(value, err)
+    if not err and value and type(value.session_id) == "string"
+      and value.session_id ~= "" then
+      self.default_session = value.session_id
+    end
+    finish(callback, value, err)
+  end)
 end
 
 function Client:load_session(id, callback)
   assert(type(id) == "string" and id ~= "")
-  self:_call("load_session", { session_id = id }, callback)
+  self:_call("load_session", { session_id = id }, function(value, err)
+    if not err then self.default_session = id end
+    finish(callback, value, err)
+  end)
+end
+
+-- Shared frontend default operation: resolve/reuse a session, or create
+-- one on first input. This is client orchestration, NOT an ACP bypass;
+-- the runtime still validates every session and prompt.
+function Client:ensure_session(callback, reuse_existing)
+  assert(type(callback) == "function")
+  if not self.connected or self.closed then
+    finish(callback, nil, { kind = "disconnected", message = "Phenix is not connected" })
+    return
+  end
+  -- An explicit new chat surface must not silently reuse an unrelated
+  -- conversation; that is a distinct intent, but it is still automatic.
+  if reuse_existing == false then
+    self:new_session(function(value, err)
+      finish(callback, value and value.session_id or nil, err)
+    end)
+    return
+  end
+  if self.default_session then
+    finish(callback, self.default_session, nil)
+    return
+  end
+  if self.default_session_waiters then
+    table.insert(self.default_session_waiters, callback)
+    return
+  end
+  self.default_session_waiters = { callback }
+  self:new_session(function(value, err)
+    local waiters = self.default_session_waiters or {}
+    self.default_session_waiters = nil
+    local session = value and value.session_id
+    if not err and (type(session) ~= "string" or session == "") then
+      err = { kind = "invalid_reply", message = "Phenix created an invalid session" }
+    end
+    for _, waiter in ipairs(waiters) do
+      finish(waiter, err and nil or session, err)
+    end
+  end)
+end
+
+-- Every Lua frontend can submit immediately without session/new. The
+-- optional on_session hook binds UI ownership before graph submission and
+-- can reject a stale editor surface by returning false.
+function Client:send_default(content, on_session, callback, reuse_existing)
+  if callback == nil then
+    callback, on_session = on_session, nil
+  end
+  self:ensure_session(function(session, err)
+    if err then finish(callback, nil, err); return end
+    if on_session and on_session(session) == false then
+      finish(callback, nil, { kind = "superseded", message = "Prompt surface was replaced" })
+      return
+    end
+    self:send_content(session, content, callback)
+  end, reuse_existing)
 end
 
 function Client:send(session_id, text, callback)
@@ -368,9 +437,13 @@ end
 function Client:close()
   if self.closed then return end
   self.closed = true
+  self.default_session = nil
   self.connected = false
   self.available = nil
+  -- Abort the in-flight session/new while its waiting input callbacks are
+  -- still reachable; otherwise closing a client strands a pending draft.
   self:_abort({ kind = "disconnected", message = "Phenix client closed" })
+  self.default_session_waiters = nil
   if self.stop_subscription then self.stop_subscription() end
   self.stop_subscription = nil
   self.listeners = {}

@@ -17,7 +17,16 @@ local runtime = {
   prompt = function(session_id, content, callback)
     sent[#sent + 1] = { session_id = session_id, content = content, finish = callback }
   end,
-  new_session = function(callback) created_callback = callback end,
+  prompt_default = function(content, bind_session, done)
+    created_callback = function(value, error)
+      if error then done(nil, error); return end
+      if bind_session(value.session_id) ~= false then
+        sent[#sent + 1] = {
+          session_id = value.session_id, content = content, finish = done,
+        }
+      end
+    end
+  end,
 }
 package.loaded["phenix_nvim.runtime"] = runtime
 vim.notify = function() end

@@ -36,10 +36,7 @@ receive({ jsonrpc = "2.0", id = sent[1].id,
   result = { protocolVersion = 1, agentCapabilities = { loadSession = true } } })
 assert(ready and ready.session_operations.new and ready.session_operations.load)
 assert(ready.management.models == false)
-local missing
-sdk:list_models(function(_, err) missing = err end)
-assert(missing and missing.kind == "unsupported")
-assert(#sent == 1, "unsupported operations must never be sent to P1")
+assert(#sent == 1, "ACP extensions remain runtime-authorized per request")
 
 local id
 sdk:new_session(function(value, err)
@@ -57,7 +54,7 @@ receive({ jsonrpc = "2.0", id = sent[2].id, result = {
 } })
 assert(id == "s1")
 local catalog
-sdk:list_models(function(value, err)
+sdk:list_models("s1", function(value, err)
   assert(not err)
   catalog = value
 end)
@@ -66,7 +63,7 @@ assert(catalog.selected == "phenix.model.scripted")
 assert(#catalog.models == 1 and catalog.models[1].name == "Scripted model")
 assert(#sent == 2, "model query reads runtime-advertised ACP config, not a custom request")
 local denied
-sdk:set_model("unknown", function(value, err)
+sdk:set_model("s1", "unknown", function(value, err)
   denied = err
 end)
 assert(denied and denied.kind == "denied", "unadvertised model IDs must be rejected before ACP dispatch")
@@ -232,6 +229,100 @@ assert(nested_error.data == nil, "untrusted multiline provider data leaked to ca
 assert(not vim.inspect(nested_error):find("TOKEN=secret", 1, true),
   "UI inspection must never reveal untrusted error data")
 
+-- Prompt errors include a safe controller stage and an optional exact
+-- HTTP status, never the provider's raw response or credential material.
+local prompt_phase_error
+sdk:send("s1", "hi", function(_, err) prompt_phase_error = err end)
+local prompt_id = sent[#sent].id
+receive({ jsonrpc = "2.0", id = prompt_id, error = {
+  code = -32603, message = "Internal error",
+  data = { format = "phenix.prompt.failure.v1", phase = "graph_result",
+    http_status = 401, raw = "TOKEN=private" },
+} })
+assert(prompt_phase_error and prompt_phase_error.prompt_phase == "graph_result")
+assert(prompt_phase_error.http_status == 401)
+assert(prompt_phase_error.message:find("HTTP 401", 1, true))
+assert(not vim.inspect(prompt_phase_error):find("TOKEN=private", 1, true))
+
+local prompt_unclassified
+sdk:send("s1", "hi again", function(_, err) prompt_unclassified = err end)
+receive({ jsonrpc = "2.0", id = sent[#sent].id, error = {
+  code = -32603, message = "Internal error",
+  data = { format = "phenix.prompt.failure.v1", phase = "untrusted-stage",
+    http_status = 401, raw = "TOKEN=private" },
+} })
+assert(prompt_unclassified and prompt_unclassified.prompt_phase == nil)
+assert(prompt_unclassified.message == "Internal error")
+assert(not vim.inspect(prompt_unclassified):find("TOKEN=private", 1, true))
+
+local phase_only
+sdk:send("s1", "hi a third time", function(_, err) phase_only = err end)
+receive({ jsonrpc = "2.0", id = sent[#sent].id, error = {
+  code = -32603, message = "Internal error",
+  data = { format = "phenix.prompt.failure.v1",
+    phase = "graph_begin", http_status = "HTTP 403 TOKEN=private" },
+} })
+assert(phase_only and phase_only.prompt_phase == "graph_begin")
+assert(phase_only.http_status == nil)
+assert(phase_only.message:find("admitting the agent graph", 1, true))
+assert(not vim.inspect(phase_only):find("TOKEN=private", 1, true))
+
+local plan_error
+sdk:send("s1", "hi plan", function(_, err) plan_error = err end)
+receive({ jsonrpc = "2.0", id = sent[#sent].id, error = {
+  code = -32603, message = "Internal error",
+  data = { format = "phenix.prompt.failure.v1", phase = "graph_result",
+    provider_code = "subscription_sharing_usage_limit_exceeded",
+    raw = "TOKEN=private" },
+} })
+assert(plan_error and plan_error.prompt_provider_code
+  == "subscription_sharing_usage_limit_exceeded")
+assert(plan_error.message:find("ChatGPT plan usage limit", 1, true))
+assert(not vim.inspect(plan_error):find("TOKEN=private", 1, true))
+
+local unknown_plan_error
+sdk:send("s1", "hi forged", function(_, err) unknown_plan_error = err end)
+receive({ jsonrpc = "2.0", id = sent[#sent].id, error = {
+  code = -32603, message = "Internal error",
+  data = { format = "phenix.prompt.failure.v1", phase = "graph_result",
+    provider_code = "fake_TOKEN=private" },
+} })
+assert(unknown_plan_error and unknown_plan_error.prompt_provider_code == nil)
+assert(not vim.inspect(unknown_plan_error):find("TOKEN=private", 1, true))
+
+-- A domain failure inside graph completion must retain its canonical Basic
+-- error and trusted launcher graph node, never provider-controlled prose.
+local graph_domain
+sdk:send("s1", "graph domain", function(_, err) graph_domain = err end)
+receive({ jsonrpc = "2.0", id = sent[#sent].id, error = {
+  code = -32603, message = "Internal error",
+  data = { format = "phenix.prompt.failure.v1",
+    phase = "graph_result", basic_code = "InvalidReply",
+    reason_code = "missing_model_usage",
+    node = "model.complete",
+    raw = "TOKEN=private" },
+} })
+assert(graph_domain and graph_domain.prompt_phase == "graph_result")
+assert(graph_domain.basic_code == "InvalidReply")
+assert(graph_domain.prompt_reason_code == "missing_model_usage")
+assert(graph_domain.prompt_node == "model.complete")
+assert(graph_domain.message:find("usage data", 1, true))
+assert(not vim.inspect(graph_domain):find("TOKEN=private", 1, true))
+
+local kernel_failure
+sdk:send("s1", "kernel domain", function(_, err) kernel_failure = err end)
+receive({ jsonrpc = "2.0", id = sent[#sent].id, error = {
+  code = -32603, message = "Internal error",
+  data = { format = "phenix.prompt.failure.v1",
+    phase = "graph_result", kernel_code = "ScopeRejected",
+    node = "bad SECRET=private",
+    raw = "TOKEN=private" },
+} })
+assert(kernel_failure and kernel_failure.prompt_kernel_code == "ScopeRejected")
+assert(kernel_failure.prompt_node == nil)
+assert(kernel_failure.message:find("ScopeRejected", 1, true))
+assert(not vim.inspect(kernel_failure):find("private", 1, true))
+
 -- A typed OAuth sign-out result says local removal succeeded but the
 -- issuer's remote revocation could not be confirmed. Preserve only the
 -- enumerated provider code; never expose raw provider response text.
@@ -263,6 +354,61 @@ receive({ jsonrpc = "2.0", id = sent[#sent].id, error = {
 } })
 assert(forged_provider_error and forged_provider_error.provider_code == nil,
   "undocumented provider error must not become an authoritative state")
+
+-- Connection-level model state is available even when no session is active.
+-- The model ID remains a runtime-issued exact-account selector, not client
+-- metadata or an authorization token.
+local default_selection = {
+  provider_id = "openai", connection_id = "chatgpt",
+  profile_id = "personal", model_id = "gpt-test",
+  protocol_id = "openai-responses", endpoint_id = "responses",
+  catalog_revision = 3,
+}
+local function native_selector(revision)
+  local fields = vim.deepcopy(default_selection)
+  fields.session_revision = revision
+  return "phenix.native-model@1:" .. vim.json.encode(fields)
+end
+local offered = native_selector(0)
+local default_catalog
+sdk:list_models(function(value, err)
+  assert(not err)
+  default_catalog = value
+end)
+assert(sent[#sent].method == "_phenix/control/state")
+receive({ jsonrpc = "2.0", id = sent[#sent].id, result = {
+  format = "phenix.control.state.v1", phase = "models_available",
+  actions = { { action = "models_select", allowed = true } },
+  models = { { id = offered, name = "OpenAI / ChatGPT / personal / GPT Test",
+    authorized = true } },
+  selected = vim.NIL, revision = 0,
+} })
+assert(default_catalog and #default_catalog.models == 1)
+assert(default_catalog.selected == nil)
+local selected_default
+sdk:set_model(nil, offered, function(value, err)
+  assert(not err)
+  selected_default = value
+end)
+assert(sent[#sent].method == "_phenix/models/select")
+assert(sent[#sent].params.value == offered)
+receive({ jsonrpc = "2.0", id = sent[#sent].id, result = {
+  format = "phenix.control.state.v1", phase = "model_selected",
+  selected = native_selector(1), revision = 1,
+} })
+assert(selected_default and selected_default.selected == native_selector(1))
+
+local denied_default
+sdk:set_model(native_selector(1), function(_, err)
+  denied_default = err
+end)
+receive({ jsonrpc = "2.0", id = sent[#sent].id, error = {
+  code = -32602, message = "Invalid params",
+  data = { format = "phenix.control.denial.v1", code = "no_selectable_models",
+    message = "sensitive-untrusted" },
+} })
+assert(denied_default and denied_default.message:find("No authorized models", 1, true))
+assert(not vim.inspect(denied_default):find("sensitive-untrusted", 1, true))
 
 sdk:close()
 assert(killed)

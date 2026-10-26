@@ -224,6 +224,134 @@ function Backend:_response(frame)
       then
         message = detail
       end
+      -- Native prompt diagnostics contain only trusted stage names and
+      -- validated HTTP status numbers. Never propagate provider error prose,
+      -- arbitrary JSON-RPC data or tokens from the remote failure.
+      local prompt_phase
+      local prompt_status
+      local prompt_provider_code
+      local prompt_reason_code
+      local prompt_kernel_code
+      local prompt_node
+      if type(detail) == "table"
+        and detail.format == "phenix.prompt.failure.v1"
+        and type(detail.phase) == "string"
+      then
+        local phases = {
+          model_state = "reading the selected model state",
+          model_install = "installing the selected model transport",
+          frontend_render = "rendering the session transcript",
+          frontend_decode = "decoding the prompt",
+          session_lock = "opening the session lock",
+          session_recovery = "recovering the session",
+          graph_begin = "admitting the agent graph",
+          graph_cancel = "cancelling the active graph",
+          graph_pump = "executing the agent graph",
+          graph_admission = "recording the graph execution",
+          graph_result = "completing the model turn",
+          graph_cancel_record = "recording cancellation",
+          owner_checkpoint = "persisting the session checkpoint",
+        }
+        local phase_name = phases[detail.phase]
+        local status = detail.http_status
+        if phase_name then
+          prompt_phase = detail.phase
+          message = "Phenix failed while " .. phase_name
+          local provider_reasons = {
+            subscription_sharing_user_not_eligible =
+              "ChatGPT plan usage is not enabled for this account or workspace",
+            subscription_sharing_usage_limit_exceeded =
+              "ChatGPT plan usage limit reached; check ChatGPT Settings > Usage",
+            subscription_sharing_usage_unavailable =
+              "ChatGPT plan usage is temporarily unavailable",
+            subscription_sharing_unsupported_capability =
+              "The selected ChatGPT model does not support a requested capability",
+            subscription_sharing_route_not_supported =
+              "ChatGPT plan routing rejected the requested endpoint",
+            subscription_sharing_invalid_user =
+              "ChatGPT plan identity could not be validated; check :Phenix auth",
+            chatpass_v2_scope_not_authorized =
+              "ChatGPT sign-in did not authorize direct plan usage; review :Phenix auth",
+            chatpass_v2_invalid_authorization_context =
+              "ChatGPT plan authorization context is invalid; review :Phenix auth",
+            subscription_sharing_user_unavailable =
+              "ChatGPT account/workspace is temporarily unavailable",
+          }
+          if type(detail.provider_code) == "string"
+            and provider_reasons[detail.provider_code] then
+            prompt_provider_code = detail.provider_code
+            message = provider_reasons[detail.provider_code]
+          end
+          local reasons = {
+            provider_stream_error = "Model provider returned a streaming error",
+            http_transport_failed = "Model HTTP transport failed",
+            model_cancelled = "Model execution was cancelled",
+            unexpected_http_content_type = "Model server did not return an SSE stream",
+            incomplete_model_stream = "Model stream ended without a valid completion",
+            missing_model_usage = "Model stream did not include required usage data",
+            invalid_responses_creation = "Malformed Responses stream initialization",
+            responses_completion_mismatch = "Final Responses output differed from streamed data",
+            http_worker_failed = "Model worker failed",
+            missing_http_worker_result = "Model worker completed without a result",
+            http_progress_failed = "Model streaming journal update failed",
+            reply_exceeds_inline_abi = "Model reply exceeded the current inline ABI capacity",
+            sse_frame_exceeds_inline_abi = "Model SSE frame exceeded inline ABI capacity",
+            request_exceeds_inline_abi = "Model request exceeded inline ABI capacity",
+            model_not_installed = "Selected HTTP model was not installed for this session",
+          }
+          if type(detail.reason_code) == "string"
+            and reasons[detail.reason_code] then
+            prompt_reason_code = detail.reason_code
+            message = reasons[detail.reason_code]
+          end
+          local basic = {
+            Conflict = true, Denied = true, Indeterminate = true,
+            InvalidCursor = true, InvalidInput = true, InvalidReply = true,
+            ModelFailed = true, NotFound = true, StorageFailed = true,
+            ToolFailed = true, TurnLimit = true,
+          }
+          if type(detail.basic_code) == "string" and basic[detail.basic_code] then
+            basic_code = detail.basic_code
+            if not prompt_reason_code and not prompt_provider_code then
+              message = message .. " (" .. basic_code .. ")"
+            end
+          end
+          local kernel = {
+            DescriptorInvalid = true, ArtifactInvalid = true,
+            AbiIncompatible = true, MissingBinding = true,
+            AmbiguousBinding = true, SchemaRejected = true,
+            Denied = true, PluginFailed = true, InfrastructureFailure = true,
+            ReentrancyRejected = true, ScopeRejected = true, Cancelled = true,
+          }
+          if type(detail.kernel_code) == "string"
+            and kernel[detail.kernel_code] then
+            prompt_kernel_code = detail.kernel_code
+            message = message .. " (kernel " .. prompt_kernel_code .. ")"
+          end
+          local node = detail.node
+          if type(node) == "string" and #node > 0 and #node <= 96
+            and node:match("^[%w_.%-]+$")
+          then
+            prompt_node = node
+            message = message .. " [node " .. node .. "]"
+          end
+          if type(status) == "number" and status % 1 == 0
+            and status >= 100 and status < 600
+          then
+            prompt_status = status
+            if status == 401 or status == 403 then
+              message = message .. ": HTTP " .. status
+                .. " (selected model authorization rejected; retry :Phenix auth)"
+            elseif status == 429 then
+              message = message .. ": HTTP 429 (provider rate limit)"
+            elseif status >= 500 then
+              message = message .. ": HTTP " .. status .. " (provider server error)"
+            else
+              message = message .. ": HTTP " .. status
+            end
+          end
+        end
+      end
       -- The native controller encodes typed provider-domain denials as
       -- JSON-RPC -32602. The SDK's generic "Invalid params" is not a
       -- useful authentication diagnosis and can conceal a missing grant,
@@ -238,6 +366,22 @@ function Backend:_response(frame)
         AuthenticationRequired = "The selected account is not authenticated; use :Phenix auth",
         RemoteRevocationUnconfirmed = "Credentials removed locally; remote sign-out could not be confirmed",
       }
+      if type(detail) == "table"
+        and detail.format == "phenix.control.denial.v1"
+        and type(detail.code) == "string"
+      then
+        local reason = {
+          not_initialized = "Initialize Phenix before choosing a model",
+          connection_closed = "Reconnect to Phenix before choosing a model",
+          provider_management_not_installed = "The installed runtime has no provider-management grants",
+          model_control_not_installed = "This runtime does not grant model selection",
+          no_selectable_models = "No authorized models were discovered; check :Phenix auth",
+          session_required = "Create or load a session for this action",
+        }
+        if reason[detail.code] then
+          message = reason[detail.code]
+        end
+      end
       if frame.error.code == -32602 and provider_code ~= nil then
         message = safe_provider_messages[provider_code]
       elseif frame.error.code == -32602 and message == "Invalid params" then
@@ -247,6 +391,11 @@ function Backend:_response(frame)
         kind = "remote", message = message,
         code = frame.error.code, basic_code = basic_code,
         provider_code = provider_code,
+        prompt_phase = prompt_phase, http_status = prompt_status,
+        prompt_provider_code = prompt_provider_code,
+        prompt_reason_code = prompt_reason_code,
+        prompt_kernel_code = prompt_kernel_code,
+        prompt_node = prompt_node,
       })
     else
       finish(callback, frame.result, nil)
@@ -320,7 +469,8 @@ function Backend:start(callback)
         send = true,
         cancel = true,
       },
-      -- Runtime control operations are not yet published by the P1 ACP host.
+      -- Do not advertise unprobed control features. No-session model calls
+      -- query the host extension directly; old hosts return Method not found.
       management = { models = false, model_selection = false },
     }
     self.state = "ready"
@@ -781,6 +931,91 @@ function Backend:call(op, args, callback)
       end
       finish(callback, { stored = op ~= "credentials.revoke",
         revoked = op == "credentials.revoke", authenticated = false }, nil)
+    end)
+  elseif op == "models.list" and args.session_id == nil then
+    -- A model is a connection-level user preference before any session exists.
+    -- Never invent an ACP session or derive selectable models from labels.
+    self:_request("_phenix/control/state", {}, function(value, err)
+      if err then finish(callback, nil, err); return end
+      if type(value) ~= "table"
+        or value.format ~= "phenix.control.state.v1"
+        or type(value.models) ~= "table"
+        or type(value.actions) ~= "table"
+      then
+        finish(callback, nil, error_value("Invalid Phenix control state", "protocol"))
+        return
+      end
+      local models, seen = {}, {}
+      for _, model in ipairs(value.models) do
+        if type(model) ~= "table" or type(model.id) ~= "string"
+          or model.id == "" or seen[model.id]
+          or type(model.name) ~= "string" or model.name == ""
+        then
+          finish(callback, nil, error_value("Invalid default model offer", "protocol"))
+          return
+        end
+        seen[model.id] = true
+        models[#models + 1] = {
+          id = model.id, name = model.name, authorized = model.authorized == true,
+        }
+      end
+      local selected = value.selected
+      if nullish(selected) then selected = nil end
+      if selected ~= nil and type(selected) ~= "string" then
+        finish(callback, nil, error_value("Invalid default model selection", "protocol"))
+        return
+      end
+      local denials, allowed_codes = {}, {
+        no_authorized_account_resolver = true,
+        account_not_authenticated = true,
+        catalog_unavailable = true,
+        catalog_empty = true,
+        model_admission_denied = true,
+        catalog_network = true,
+        catalog_timeout = true,
+        catalog_unauthorized = true,
+        catalog_rate_limited = true,
+        catalog_server_error = true,
+        catalog_invalid_response = true,
+        catalog_issuer_unavailable = true,
+        catalog_rejected = true,
+        catalog_too_large = true,
+      }
+      for _, reason in ipairs(value.model_denials or {}) do
+        if type(reason) ~= "table" or not allowed_codes[reason.code]
+          or type(reason.provider_id) ~= "string"
+          or type(reason.connection_id) ~= "string"
+        then
+          finish(callback, nil, error_value("Invalid provider denial in control state", "protocol"))
+          return
+        end
+        denials[#denials + 1] = {
+          provider_id = reason.provider_id,
+          connection_id = reason.connection_id,
+          code = reason.code,
+        }
+      end
+      finish(callback, {
+        models = models, selected = selected,
+        state = value.phase, actions = value.actions,
+        denials = denials, discovery_error = value.model_discovery_error,
+      }, nil)
+    end)
+  elseif op == "models.select" and args.session_id == nil then
+    if type(args.model_id) ~= "string" or args.model_id == "" then
+      finish(callback, nil, error_value("Missing default model selection", "invalid_input"))
+      return
+    end
+    self:_request("_phenix/models/select", { value = args.model_id }, function(value, err)
+      if err then finish(callback, nil, err); return end
+      if type(value) ~= "table" or value.format ~= "phenix.control.state.v1"
+        or type(value.selected) ~= "string"
+        or not acknowledged_native_model_choice(args.model_id, value.selected)
+      then
+        finish(callback, nil, error_value("Phenix did not confirm the default model transition", "protocol"))
+        return
+      end
+      finish(callback, { selected = value.selected, state = value.phase }, nil)
     end)
   elseif op == "models.list" then
     local id = args.session_id
