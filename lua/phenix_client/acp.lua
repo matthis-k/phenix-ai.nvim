@@ -336,9 +336,9 @@ function Backend:start(callback)
         send = true,
         cancel = true,
       },
-      -- The control-state extension is probed per request: older runtimes
-      -- reject it with Method not found instead of granting fake authority.
-      management = { models = true, model_selection = true },
+      -- Do not advertise unprobed control features. No-session model calls
+      -- query the host extension directly; old hosts return Method not found.
+      management = { models = false, model_selection = false },
     }
     self.state = "ready"
     local waiting = self.waiting
