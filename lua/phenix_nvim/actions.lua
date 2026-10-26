@@ -138,27 +138,42 @@ local function compose_snapshot(document)
   return tostring(document.revision) .. ":" .. tostring(vim.api.nvim_buf_get_changedtick(buffer))
 end
 
-local function submit(pending)
-  if not submission_current(pending) then
+local function finish_submission(pending, _, error)
+  local current = submission_current(pending)
+  if submissions[pending.document] == pending then
+    submissions[pending.document] = nil
+  end
+  if not current then
+    -- Do not allow retired sessions or UI surfaces to clear fresh drafts.
     return
   end
-  runtime.prompt(pending.session_id, pending.content, function(_, error)
-    local current = submission_current(pending)
-    if submissions[pending.document] == pending then
-      submissions[pending.document] = nil
-    end
-    if not current then
-      -- The runtime owns whether the old request was admitted or cancelled.
-      -- A late callback must not mutate a replacement editor projection.
-      return
-    end
-    if error ~= nil then
-      util.notify(vim.inspect(error), vim.log.levels.ERROR)
-      return
-    end
-    if compose_snapshot(pending.document) == pending.revision then
-      compose.clear(pending.document)
-    end
+  if error ~= nil then
+    util.notify(vim.inspect(error), vim.log.levels.ERROR)
+    return
+  end
+  if compose_snapshot(pending.document) == pending.revision then
+    compose.clear(pending.document)
+  end
+end
+
+local function submit(pending)
+  if not submission_current(pending) then return end
+  if pending.session_id ~= nil then
+    runtime.prompt(pending.session_id, pending.content, function(value, error)
+      finish_submission(pending, value, error)
+    end)
+    return
+  end
+  -- Frontend defaults own lazy session creation; this adapter only binds a
+  -- created session to its UI surface before submitting the pending input.
+  runtime.prompt_default(pending.content, function(session_id)
+    if not submission_current(pending) then return false end
+    pending.session_id = session_id
+    sidebar.bind_session(session_id, pending.surface)
+    pending.binding_generation = pending.surface.session_binding_generation or 0
+    return submission_current(pending)
+  end, function(value, error)
+    finish_submission(pending, value, error)
   end)
 end
 
@@ -207,30 +222,7 @@ function M.send(options)
   }
   submissions[document] = pending
 
-  if pending.session_id ~= nil then
-    submit(pending)
-    return
-  end
-  runtime.new_session(function(created, create_error)
-    if not submission_current(pending) then
-      return
-    end
-    if create_error ~= nil then
-      submissions[document] = nil
-      util.notify(vim.inspect(create_error), vim.log.levels.ERROR)
-      return
-    end
-    local session_id = created and (created.session_id or created.id)
-    if type(session_id) ~= "string" or session_id == "" then
-      submissions[document] = nil
-      util.notify("Phenix created a session without an id", vim.log.levels.ERROR)
-      return
-    end
-    pending.session_id = session_id
-    sidebar.bind_session(session_id, surface)
-    pending.binding_generation = surface.session_binding_generation or 0
-    submit(pending)
-  end)
+  submit(pending)
 end
 
 function M.toggle()
