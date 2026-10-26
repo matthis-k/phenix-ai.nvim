@@ -35,13 +35,8 @@ function M.choose_model(client, session_or_callback, callback, select_ui)
         callback(catalog, nil)
         return
       end
-      -- Never update a frontend-owned selection on an optimistic guess.
-      -- The caller must refresh from Phenix's returned result or event.
-      if session_id == nil then
-        callback(nil, { kind = "invalid_input",
-          message = "Model selection requires an explicit session" })
-        return
-      end
+      -- No session ID means a connection-level default selection;
+      -- existing sessions use the same runtime-authoritative picker.
       client:set_model(session_id, item.id, callback)
     end)
   end)
