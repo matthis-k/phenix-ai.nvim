@@ -35,7 +35,7 @@ assert(sent[1].params.protocolVersion == 1)
 receive({ jsonrpc = "2.0", id = sent[1].id,
   result = { protocolVersion = 1, agentCapabilities = { loadSession = true } } })
 assert(ready and ready.session_operations.new and ready.session_operations.load)
-assert(ready.management.models == true)
+assert(ready.management.models == false)
 assert(#sent == 1, "ACP extensions remain runtime-authorized per request")
 
 local id
