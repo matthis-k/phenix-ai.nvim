@@ -230,6 +230,9 @@ function Backend:_response(frame)
       local prompt_phase
       local prompt_status
       local prompt_provider_code
+      local prompt_reason_code
+      local prompt_kernel_code
+      local prompt_node
       if type(detail) == "table"
         and detail.format == "phenix.prompt.failure.v1"
         and type(detail.phase) == "string"
@@ -278,6 +281,59 @@ function Backend:_response(frame)
             and provider_reasons[detail.provider_code] then
             prompt_provider_code = detail.provider_code
             message = provider_reasons[detail.provider_code]
+          end
+          local reasons = {
+            provider_stream_error = "Model provider returned a streaming error",
+            http_transport_failed = "Model HTTP transport failed",
+            model_cancelled = "Model execution was cancelled",
+            unexpected_http_content_type = "Model server did not return an SSE stream",
+            incomplete_model_stream = "Model stream ended without a valid completion",
+            missing_model_usage = "Model stream did not include required usage data",
+            invalid_responses_creation = "Malformed Responses stream initialization",
+            responses_completion_mismatch = "Final Responses output differed from streamed data",
+            http_worker_failed = "Model worker failed",
+            missing_http_worker_result = "Model worker completed without a result",
+            http_progress_failed = "Model streaming journal update failed",
+            reply_exceeds_inline_abi = "Model reply exceeded the current inline ABI capacity",
+            sse_frame_exceeds_inline_abi = "Model SSE frame exceeded inline ABI capacity",
+            request_exceeds_inline_abi = "Model request exceeded inline ABI capacity",
+            model_not_installed = "Selected HTTP model was not installed for this session",
+          }
+          if type(detail.reason_code) == "string"
+            and reasons[detail.reason_code] then
+            prompt_reason_code = detail.reason_code
+            message = reasons[detail.reason_code]
+          end
+          local basic = {
+            Conflict = true, Denied = true, Indeterminate = true,
+            InvalidCursor = true, InvalidInput = true, InvalidReply = true,
+            ModelFailed = true, NotFound = true, StorageFailed = true,
+            ToolFailed = true, TurnLimit = true,
+          }
+          if type(detail.basic_code) == "string" and basic[detail.basic_code] then
+            basic_code = detail.basic_code
+            if not prompt_reason_code and not prompt_provider_code then
+              message = message .. " (" .. basic_code .. ")"
+            end
+          end
+          local kernel = {
+            DescriptorInvalid = true, ArtifactInvalid = true,
+            AbiIncompatible = true, MissingBinding = true,
+            AmbiguousBinding = true, SchemaRejected = true,
+            Denied = true, PluginFailed = true, InfrastructureFailure = true,
+            ReentrancyRejected = true, ScopeRejected = true, Cancelled = true,
+          }
+          if type(detail.kernel_code) == "string"
+            and kernel[detail.kernel_code] then
+            prompt_kernel_code = detail.kernel_code
+            message = message .. " (kernel " .. prompt_kernel_code .. ")"
+          end
+          local node = detail.node
+          if type(node) == "string" and #node > 0 and #node <= 96
+            and node:match("^[%w_.%-]+$")
+          then
+            prompt_node = node
+            message = message .. " [node " .. node .. "]"
           end
           if type(status) == "number" and status % 1 == 0
             and status >= 100 and status < 600
@@ -337,6 +393,9 @@ function Backend:_response(frame)
         provider_code = provider_code,
         prompt_phase = prompt_phase, http_status = prompt_status,
         prompt_provider_code = prompt_provider_code,
+        prompt_reason_code = prompt_reason_code,
+        prompt_kernel_code = prompt_kernel_code,
+        prompt_node = prompt_node,
       })
     else
       finish(callback, frame.result, nil)
