@@ -832,10 +832,31 @@ function Backend:call(op, args, callback)
         finish(callback, nil, error_value("Invalid default model selection", "protocol"))
         return
       end
+      local denials, allowed_codes = {}, {
+        no_authorized_account_resolver = true,
+        account_not_authenticated = true,
+        catalog_unavailable = true,
+        catalog_empty = true,
+        model_admission_denied = true,
+      }
+      for _, reason in ipairs(value.model_denials or {}) do
+        if type(reason) ~= "table" or not allowed_codes[reason.code]
+          or type(reason.provider_id) ~= "string"
+          or type(reason.connection_id) ~= "string"
+        then
+          finish(callback, nil, error_value("Invalid provider denial in control state", "protocol"))
+          return
+        end
+        denials[#denials + 1] = {
+          provider_id = reason.provider_id,
+          connection_id = reason.connection_id,
+          code = reason.code,
+        }
+      end
       finish(callback, {
         models = models, selected = selected,
         state = value.phase, actions = value.actions,
-        discovery_error = value.model_discovery_error,
+        denials = denials, discovery_error = value.model_discovery_error,
       }, nil)
     end)
   elseif op == "models.select" and args.session_id == nil then
