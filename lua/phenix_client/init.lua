@@ -333,8 +333,16 @@ end
 -- Shared frontend default operation: resolve/reuse a session, or create
 -- one on first input. This is client orchestration, NOT an ACP bypass;
 -- the runtime still validates every session and prompt.
-function Client:ensure_session(callback)
+function Client:ensure_session(callback, reuse_existing)
   assert(type(callback) == "function")
+  -- An explicit new chat surface must not silently reuse an unrelated
+  -- conversation; that is a distinct intent, but it is still automatic.
+  if reuse_existing == false then
+    self:new_session(function(value, err)
+      finish(callback, value and value.session_id or nil, err)
+    end)
+    return
+  end
   if self.default_session then
     finish(callback, self.default_session, nil)
     return
@@ -360,7 +368,7 @@ end
 -- Every Lua frontend can submit immediately without session/new. The
 -- optional on_session hook binds UI ownership before graph submission and
 -- can reject a stale editor surface by returning false.
-function Client:send_default(content, on_session, callback)
+function Client:send_default(content, on_session, callback, reuse_existing)
   if callback == nil then
     callback, on_session = on_session, nil
   end
@@ -371,7 +379,7 @@ function Client:send_default(content, on_session, callback)
       return
     end
     self:send_content(session, content, callback)
-  end)
+  end, reuse_existing)
 end
 
 function Client:send(session_id, text, callback)
