@@ -46,6 +46,8 @@ function M.new(backend)
     stop_subscription = nil,
     pending = {},
     closed = false,
+    default_session = nil,
+    default_session_waiters = nil,
   }, Client)
 end
 
@@ -311,12 +313,65 @@ function Client:set_model(session_or_model, model_or_callback, callback)
 end
 
 function Client:new_session(callback)
-  self:_call("new_session", {}, callback)
+  self:_call("new_session", {}, function(value, err)
+    if not err and value and type(value.session_id) == "string"
+      and value.session_id ~= "" then
+      self.default_session = value.session_id
+    end
+    finish(callback, value, err)
+  end)
 end
 
 function Client:load_session(id, callback)
   assert(type(id) == "string" and id ~= "")
-  self:_call("load_session", { session_id = id }, callback)
+  self:_call("load_session", { session_id = id }, function(value, err)
+    if not err then self.default_session = id end
+    finish(callback, value, err)
+  end)
+end
+
+-- Shared frontend default operation: resolve/reuse a session, or create
+-- one on first input. This is client orchestration, NOT an ACP bypass;
+-- the runtime still validates every session and prompt.
+function Client:ensure_session(callback)
+  assert(type(callback) == "function")
+  if self.default_session then
+    finish(callback, self.default_session, nil)
+    return
+  end
+  if self.default_session_waiters then
+    table.insert(self.default_session_waiters, callback)
+    return
+  end
+  self.default_session_waiters = { callback }
+  self:new_session(function(value, err)
+    local waiters = self.default_session_waiters or {}
+    self.default_session_waiters = nil
+    local session = value and value.session_id
+    if not err and (type(session) ~= "string" or session == "") then
+      err = { kind = "invalid_reply", message = "Phenix created an invalid session" }
+    end
+    for _, waiter in ipairs(waiters) do
+      finish(waiter, err and nil or session, err)
+    end
+  end)
+end
+
+-- Every Lua frontend can submit immediately without session/new. The
+-- optional on_session hook binds UI ownership before graph submission and
+-- can reject a stale editor surface by returning false.
+function Client:send_default(content, on_session, callback)
+  if callback == nil then
+    callback, on_session = on_session, nil
+  end
+  self:ensure_session(function(session, err)
+    if err then finish(callback, nil, err); return end
+    if on_session and on_session(session) == false then
+      finish(callback, nil, { kind = "superseded", message = "Prompt surface was replaced" })
+      return
+    end
+    self:send_content(session, content, callback)
+  end)
 end
 
 function Client:send(session_id, text, callback)
@@ -370,6 +425,8 @@ end
 function Client:close()
   if self.closed then return end
   self.closed = true
+  self.default_session = nil
+  self.default_session_waiters = nil
   self.connected = false
   self.available = nil
   self:_abort({ kind = "disconnected", message = "Phenix client closed" })
