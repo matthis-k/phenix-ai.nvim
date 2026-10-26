@@ -301,8 +301,10 @@ function Client:set_model(session_or_model, model_or_callback, callback)
   if model_or_callback == nil or type(model_or_callback) == "function" then
     model_id, callback = session_or_model, model_or_callback
   else
+    -- Explicit (nil, model, callback) is a pre-session default selection.
+    -- An existing session ID instead selects a session-local override.
     session_id, model_id = session_or_model, model_or_callback
-    assert(type(session_id) == "string" and session_id ~= "")
+    assert(session_id == nil or (type(session_id) == "string" and session_id ~= ""))
   end
   assert(type(model_id) == "string" and model_id ~= "")
   self:_call("set_model", { session_id = session_id, model_id = model_id }, callback)
