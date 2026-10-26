@@ -236,6 +236,8 @@ function Backend:_response(frame)
       then
         local phases = {
           model_state = "reading the selected model state",
+          model_install = "installing the selected model transport",
+          frontend_render = "rendering the session transcript",
           frontend_decode = "decoding the prompt",
           session_lock = "opening the session lock",
           session_recovery = "recovering the session",
