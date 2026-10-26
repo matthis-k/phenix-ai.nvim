@@ -335,6 +335,10 @@ end
 -- the runtime still validates every session and prompt.
 function Client:ensure_session(callback, reuse_existing)
   assert(type(callback) == "function")
+  if not self.connected or self.closed then
+    finish(callback, nil, { kind = "disconnected", message = "Phenix is not connected" })
+    return
+  end
   -- An explicit new chat surface must not silently reuse an unrelated
   -- conversation; that is a distinct intent, but it is still automatic.
   if reuse_existing == false then
@@ -434,10 +438,12 @@ function Client:close()
   if self.closed then return end
   self.closed = true
   self.default_session = nil
-  self.default_session_waiters = nil
   self.connected = false
   self.available = nil
+  -- Abort the in-flight session/new while its waiting input callbacks are
+  -- still reachable; otherwise closing a client strands a pending draft.
   self:_abort({ kind = "disconnected", message = "Phenix client closed" })
+  self.default_session_waiters = nil
   if self.stop_subscription then self.stop_subscription() end
   self.stop_subscription = nil
   self.listeners = {}
