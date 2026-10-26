@@ -32,15 +32,15 @@ assert(id and not err)
 -- The catalogue is discovered from the actual composition via ACP's
 -- session/new configOptions. This is not a Lua-maintained model list.
 local catalog, catalog_error
-first:list_models(function(value, e) catalog, catalog_error = value, e end)
+first:list_models(id, function(value, e) catalog, catalog_error = value, e end)
 until_true(function() return catalog ~= nil or catalog_error ~= nil end, "model catalog")
 assert(not catalog_error and catalog.selected == "phenix.model.scripted", vim.inspect(catalog))
 assert(#catalog.models == 1 and catalog.models[1].id == "phenix.model.scripted")
 local denied
-first:set_model("uninstalled.provider", function(_, e) denied = e end)
+first:set_model(id, "uninstalled.provider", function(_, e) denied = e end)
 assert(denied and denied.kind == "denied", "P1 must deny a model absent from the runtime catalog")
 local unchanged
-first:list_models(function(value, e)
+first:list_models(id, function(value, e)
   assert(not e)
   unchanged = value
 end)
@@ -96,7 +96,7 @@ restored:load_session(id, function(value, e) loaded, load_error = value, e end)
 until_true(function() return loaded ~= nil or load_error ~= nil end, "session/load")
 assert(loaded and not load_error)
 local reloaded
-restored:list_models(function(value, e)
+restored:list_models(id, function(value, e)
   assert(not e)
   reloaded = value
 end)
