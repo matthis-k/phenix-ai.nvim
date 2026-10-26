@@ -224,6 +224,50 @@ function Backend:_response(frame)
       then
         message = detail
       end
+      -- Native prompt diagnostics contain only trusted stage names and
+      -- validated HTTP status numbers. Never propagate provider error prose,
+      -- arbitrary JSON-RPC data or tokens from the remote failure.
+      local prompt_phase
+      local prompt_status
+      if type(detail) == "table"
+        and detail.format == "phenix.prompt.failure.v1"
+        and type(detail.phase) == "string"
+      then
+        local phases = {
+          model_state = "reading the selected model state",
+          frontend_decode = "decoding the prompt",
+          session_lock = "opening the session lock",
+          session_recovery = "recovering the session",
+          graph_begin = "admitting the agent graph",
+          graph_cancel = "cancelling the active graph",
+          graph_pump = "executing the agent graph",
+          graph_admission = "recording the graph execution",
+          graph_result = "completing the model turn",
+          graph_cancel_record = "recording cancellation",
+          owner_checkpoint = "persisting the session checkpoint",
+        }
+        local phase_name = phases[detail.phase]
+        local status = detail.http_status
+        if phase_name then
+          prompt_phase = detail.phase
+          message = "Phenix failed while " .. phase_name
+          if type(status) == "number" and status % 1 == 0
+            and status >= 100 and status < 600
+          then
+            prompt_status = status
+            if status == 401 or status == 403 then
+              message = message .. ": HTTP " .. status
+                .. " (selected model authorization rejected; retry :Phenix auth)"
+            elseif status == 429 then
+              message = message .. ": HTTP 429 (provider rate limit)"
+            elseif status >= 500 then
+              message = message .. ": HTTP " .. status .. " (provider server error)"
+            else
+              message = message .. ": HTTP " .. status
+            end
+          end
+        end
+      end
       -- The native controller encodes typed provider-domain denials as
       -- JSON-RPC -32602. The SDK's generic "Invalid params" is not a
       -- useful authentication diagnosis and can conceal a missing grant,
@@ -263,6 +307,7 @@ function Backend:_response(frame)
         kind = "remote", message = message,
         code = frame.error.code, basic_code = basic_code,
         provider_code = provider_code,
+        prompt_phase = prompt_phase, http_status = prompt_status,
       })
     else
       finish(callback, frame.result, nil)
