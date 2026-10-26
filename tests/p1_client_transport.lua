@@ -290,6 +290,39 @@ receive({ jsonrpc = "2.0", id = sent[#sent].id, error = {
 assert(unknown_plan_error and unknown_plan_error.prompt_provider_code == nil)
 assert(not vim.inspect(unknown_plan_error):find("TOKEN=private", 1, true))
 
+-- A domain failure inside graph completion must retain its canonical Basic
+-- error and trusted launcher graph node, never provider-controlled prose.
+local graph_domain
+sdk:send("s1", "graph domain", function(_, err) graph_domain = err end)
+receive({ jsonrpc = "2.0", id = sent[#sent].id, error = {
+  code = -32603, message = "Internal error",
+  data = { format = "phenix.prompt.failure.v1",
+    phase = "graph_result", basic_code = "InvalidReply",
+    reason_code = "missing_model_usage",
+    node = "model.complete",
+    raw = "TOKEN=private" },
+} })
+assert(graph_domain and graph_domain.prompt_phase == "graph_result")
+assert(graph_domain.basic_code == "InvalidReply")
+assert(graph_domain.prompt_reason_code == "missing_model_usage")
+assert(graph_domain.prompt_node == "model.complete")
+assert(graph_domain.message:find("usage data", 1, true))
+assert(not vim.inspect(graph_domain):find("TOKEN=private", 1, true))
+
+local kernel_failure
+sdk:send("s1", "kernel domain", function(_, err) kernel_failure = err end)
+receive({ jsonrpc = "2.0", id = sent[#sent].id, error = {
+  code = -32603, message = "Internal error",
+  data = { format = "phenix.prompt.failure.v1",
+    phase = "graph_result", kernel_code = "ScopeRejected",
+    node = "bad SECRET=private",
+    raw = "TOKEN=private" },
+} })
+assert(kernel_failure and kernel_failure.prompt_kernel_code == "ScopeRejected")
+assert(kernel_failure.prompt_node == nil)
+assert(kernel_failure.message:find("ScopeRejected", 1, true))
+assert(not vim.inspect(kernel_failure):find("private", 1, true))
+
 -- A typed OAuth sign-out result says local removal succeeded but the
 -- issuer's remote revocation could not be confirmed. Preserve only the
 -- enumerated provider code; never expose raw provider response text.
