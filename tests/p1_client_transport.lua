@@ -229,6 +229,44 @@ assert(nested_error.data == nil, "untrusted multiline provider data leaked to ca
 assert(not vim.inspect(nested_error):find("TOKEN=secret", 1, true),
   "UI inspection must never reveal untrusted error data")
 
+-- Prompt errors include a safe controller stage and an optional exact
+-- HTTP status, never the provider's raw response or credential material.
+local prompt_phase_error
+sdk:send("s1", "hi", function(_, err) prompt_phase_error = err end)
+local prompt_id = sent[#sent].id
+receive({ jsonrpc = "2.0", id = prompt_id, error = {
+  code = -32603, message = "Internal error",
+  data = { format = "phenix.prompt.failure.v1", phase = "graph_result",
+    http_status = 401, raw = "TOKEN=private" },
+} })
+assert(prompt_phase_error and prompt_phase_error.prompt_phase == "graph_result")
+assert(prompt_phase_error.http_status == 401)
+assert(prompt_phase_error.message:find("HTTP 401", 1, true))
+assert(not vim.inspect(prompt_phase_error):find("TOKEN=private", 1, true))
+
+local prompt_unclassified
+sdk:send("s1", "hi again", function(_, err) prompt_unclassified = err end)
+receive({ jsonrpc = "2.0", id = sent[#sent].id, error = {
+  code = -32603, message = "Internal error",
+  data = { format = "phenix.prompt.failure.v1", phase = "untrusted-stage",
+    http_status = 401, raw = "TOKEN=private" },
+} })
+assert(prompt_unclassified and prompt_unclassified.prompt_phase == nil)
+assert(prompt_unclassified.message == "Internal error")
+assert(not vim.inspect(prompt_unclassified):find("TOKEN=private", 1, true))
+
+local phase_only
+sdk:send("s1", "hi a third time", function(_, err) phase_only = err end)
+receive({ jsonrpc = "2.0", id = sent[#sent].id, error = {
+  code = -32603, message = "Internal error",
+  data = { format = "phenix.prompt.failure.v1",
+    phase = "graph_begin", http_status = "HTTP 403 TOKEN=private" },
+} })
+assert(phase_only and phase_only.prompt_phase == "graph_begin")
+assert(phase_only.http_status == nil)
+assert(phase_only.message:find("admitting the agent graph", 1, true))
+assert(not vim.inspect(phase_only):find("TOKEN=private", 1, true))
+
 -- A typed OAuth sign-out result says local removal succeeded but the
 -- issuer's remote revocation could not be confirmed. Preserve only the
 -- enumerated provider code; never expose raw provider response text.
