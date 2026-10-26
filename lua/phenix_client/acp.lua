@@ -838,6 +838,15 @@ function Backend:call(op, args, callback)
         catalog_unavailable = true,
         catalog_empty = true,
         model_admission_denied = true,
+        catalog_network = true,
+        catalog_timeout = true,
+        catalog_unauthorized = true,
+        catalog_rate_limited = true,
+        catalog_server_error = true,
+        catalog_invalid_response = true,
+        catalog_issuer_unavailable = true,
+        catalog_rejected = true,
+        catalog_too_large = true,
       }
       for _, reason in ipairs(value.model_denials or {}) do
         if type(reason) ~= "table" or not allowed_codes[reason.code]
