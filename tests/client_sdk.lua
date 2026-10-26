@@ -70,8 +70,9 @@ local restricted = sdk.new({
     cb({ session_operations = { new = true, send = true },
       management = { models = false, model_selection = false } })
   end,
-  call = function()
+  call = function(_, _, _, callback)
     restricted_calls = restricted_calls + 1
+    callback(nil, { kind = "unsupported", message = "Runtime did not grant model control" })
   end,
   subscribe = function() return function() end end,
   close = function() end,
@@ -83,5 +84,5 @@ end)
 restricted:set_model("provider/a", function(value, err)
   assert(value == nil and err.kind == "unsupported")
 end)
-assert(restricted_calls == 0)
+assert(restricted_calls == 2, "model requests delegate admission to the runtime")
 print("Lua client SDK capability and authority delegation passed")
